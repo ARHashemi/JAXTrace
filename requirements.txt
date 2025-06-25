@@ -1,0 +1,6 @@
+jax[cuda] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+vtk
+numpy
+matplotlib
+plotly
+scipy
