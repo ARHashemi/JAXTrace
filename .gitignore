@@ -1,0 +1,43 @@
+# outputs
+*.jpg
+*.mkv
+*.avi
+*.mp4
+*.png
+*.gif
+*.pdf
+*.svg
+*.eps
+*.tmp
+capture*/
+selected*/
+process*/
+videos*/
+contour_prediction*/
+*.tar.gz
+*.zip
+*.zip.*
+*.7z
+*.rar
+*.npy
+
+# old files
+*.bak
+*.old
+*old.py
+
+# databases
+*.hdf5
+*.h5
+*.pkl
+*.csv
+
+# python
+__pycache__/
+.venv/
+
+# test files
+test*
+
+# files created by other applicaitons
+.~lock*

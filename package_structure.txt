@@ -1,0 +1,12 @@
+JAXTrace/
+├── jaxtrace/
+│   ├── __init__.py
+│   ├── reader.py          # VTK reader class
+│   ├── tracker.py         # Particle tracking class  
+│   ├── visualizer.py      # Visualization class
+│   └── utils.py           # Utility functions
+├── examples/
+│   └── tutorial.ipynb     # Tutorial notebook
+├── setup.py
+├── requirements.txt
+└── README.md
