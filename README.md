@@ -2,8 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
 [![JAX](https://img.shields.io/badge/JAX-enabled-green.svg)](https://jax.readthedocs.io/)
-[![License](https://img.shields.io/badge/license-EUPL?logo=%3Csvg%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3EEuropean%20Union%3C%2Ftitle%3E%3Cpath%20d%3D%22M11.373%201.94%2010.36%201.2h1.253L12%200l.387%201.2h1.253l-1.013.74.386%201.207L12%202.4l-1.013.747Zm1.254%2020.86.386%201.2L12%2023.26l-1.013.74.386-1.2-1.013-.74h1.253L12%2020.853l.387%201.207h1.253ZM1.64%2012.8l-1.013.747.386-1.2L0%2011.627h1.253l.387-1.2.387%201.2h1.26l-1.02.746.386%201.2-1.013-.746Zm5.807-9.467.386%201.2L6.82%203.8l-1.013.74.386-1.2L5.18%202.6h1.253l.387-1.2.387%201.2H8.46Zm-4.78%203.08.386-1.2.394%201.2h1.22l-1.014.747.387%201.2-1.02-.747L2%208.36l.387-1.2-1.014-.747ZM1.387%2016.84h1.28l.386-1.2.394%201.2h1.22l-1.014.747.387%201.2-1.02-.74-1.02.74.387-1.2-1.014-.747Zm4.806%204.56-1.013-.733h1.253l.387-1.2.387%201.2H8.46l-1.013.733.386%201.2-1.013-.74-1.013.74Zm16.794-9.027.386%201.2-1.013-.746-1.027.746.387-1.2-1.02-.746H22l.387-1.2.386%201.2H24Zm-6.434-9.04L15.54%202.6h1.253l.387-1.2.387%201.2h1.253l-1.013.733.386%201.2L17.18%203.8l-1.013.74.386-1.2Zm4%203.074.394-1.2.386%201.2h1.254l-.987.753.387%201.2-1.014-.747-1.02.747.387-1.2-1.007-.747Zm.78%2010.433h1.254l-.987.747.387%201.2-1.014-.74-1.02.74.387-1.2-1.007-.747h1.254l.393-1.2.387%201.2zm-2.513%203.827-1.013.733.386%201.2-1.013-.74-1.013.74.386-1.2-1.013-.733h1.253l.387-1.2.387%201.2z%22%2F%3E%3C%2Fsvg%3E&logoColor=blue
-)](LICENSE)
+[![License](https://img.shields.io/badge/license-EUPL-blue?logo=europeanunion)](LICENSE)
 
 JAXTrace is a high-performance, memory-optimized particle tracking library for computational fluid dynamics (CFD) applications. Built with JAX for GPU acceleration and designed for handling large VTK datasets efficiently.
 
