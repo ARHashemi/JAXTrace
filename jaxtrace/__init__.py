@@ -1,145 +1,84 @@
 """
-JAXTrace: Memory-Optimized Particle Tracking with JAX
+JAXTrace: Memory-optimized particle tracking
 
-A high-performance particle tracking library for computational fluid dynamics
-using JAX for GPU acceleration and memory optimization.
+Lightweight package initializer.
+- No environment mutations
+- Minimal, import-safe re-exports of common APIs
 """
 
-__version__ = "0.1.0"
-__author__ = "JAXTrace Development Team"
-__email__ = "contact@jaxtrace.org"
-
-# Core imports
-from .reader import VTKReader
-from .tracker import ParticleTracker
-from .visualizer import ParticleVisualizer
-from .exporter import VTKExporter
-from .density import DensityCalculator
-
-# Utility imports
-from .utils import (
-    get_memory_config,
-    monitor_memory_usage,
-    get_gpu_memory_usage,
-    get_system_info,
-    create_custom_particle_distribution,
-    estimate_computational_requirements,
-    validate_simulation_parameters,
-    optimize_parameters_for_system,
-    create_progress_callback,
-    save_simulation_config,
-    load_simulation_config,
-    benchmark_interpolation_methods
-)
-
-# Configuration presets
-MEMORY_CONFIGS = {
-    'low_memory': {
-        'max_time_steps': 20,
-        'particle_resolution': (20, 20, 20),
-        'integration_method': 'euler',
-        'spatial_subsample': 2,
-        'temporal_subsample': 2,
-        'max_gpu_memory_gb': 4.0,
-        'k_neighbors': 4,
-        'shape_function': 'linear',
-        'interpolation_method': 'nearest_neighbor',
-        'cache_size_limit': 3
-    },
-    'medium_memory': {
-        'max_time_steps': 40,
-        'particle_resolution': (30, 30, 30),
-        'integration_method': 'rk2',
-        'spatial_subsample': 1,
-        'temporal_subsample': 1,
-        'max_gpu_memory_gb': 8.0,
-        'k_neighbors': 6,
-        'shape_function': 'linear',
-        'interpolation_method': 'finite_element',
-        'cache_size_limit': 5
-    },
-    'high_memory': {
-        'max_time_steps': 100,
-        'particle_resolution': (50, 50, 50),
-        'integration_method': 'rk4',
-        'spatial_subsample': 1,
-        'temporal_subsample': 1,
-        'max_gpu_memory_gb': 16.0,
-        'k_neighbors': 8,
-        'shape_function': 'quadratic',
-        'interpolation_method': 'finite_element',
-        'cache_size_limit': 10
-    },
-    'high_accuracy': {
-        'max_time_steps': 60,
-        'particle_resolution': (40, 40, 40),
-        'integration_method': 'rk4',
-        'spatial_subsample': 1,
-        'temporal_subsample': 1,
-        'max_gpu_memory_gb': 12.0,
-        'k_neighbors': 12,
-        'shape_function': 'cubic',
-        'interpolation_method': 'finite_element',
-        'cache_size_limit': 7
-    }
-}
-
-# Check JAX availability
-try:
-    import jax
-    import jax.numpy as jnp
-    JAX_AVAILABLE = True
-    
-    # Optional JAX configuration - users can override
-    import os
-    if 'JAX_PREALLOCATE' not in os.environ:
-        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-    if 'JAX_MEM_FRACTION' not in os.environ:
-        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.7"
-    
-    # Auto-detect platform if not set
-    if 'JAX_PLATFORM_NAME' not in os.environ:
-        try:
-            # Check if GPU is available
-            gpu_devices = jax.devices('gpu')
-            if gpu_devices:
-                os.environ["JAX_PLATFORM_NAME"] = "gpu"
-            else:
-                os.environ["JAX_PLATFORM_NAME"] = "cpu"
-        except:
-            os.environ["JAX_PLATFORM_NAME"] = "cpu"
-    
-    print(f"JAXTrace initialized with JAX {jax.__version__} on {jax.default_backend()}")
-    
-except ImportError:
-    JAX_AVAILABLE = False
-    import warnings
-    warnings.warn("JAX not available. Some features will be disabled. "
-                 "Install JAX for GPU acceleration: pip install jaxtrace[gpu]")
+from __future__ import annotations
 
 __all__ = [
-    # Core classes
-    'VTKReader',
-    'ParticleTracker', 
-    'ParticleVisualizer',
-    'VTKExporter',
-    'DensityCalculator',
-    
-    # Utility functions
-    'get_memory_config',
-    'monitor_memory_usage',
-    'get_gpu_memory_usage',
-    'get_system_info',
-    'create_custom_particle_distribution',
-    'estimate_computational_requirements',
-    'validate_simulation_parameters',
-    'optimize_parameters_for_system',
-    'create_progress_callback',
-    'save_simulation_config',
-    'load_simulation_config',
-    'benchmark_interpolation_methods',
-    
-    # Configuration and constants
-    'MEMORY_CONFIGS',
-    'JAX_AVAILABLE'
+    # io
+    "open_dataset",
+    # tracking
+    "ParticleState",
+    "track",
+    # visualization
+    "plot_particles_2d",
+    "plot_trajectories_2d",
+    "animate_trajectories_2d",
+    # utils (selected)
+    "JAX_AVAILABLE",
 ]
+
+# Optional, import-safe re-exports. Each block is independent to prevent
+# import errors if a submodule is missing during incremental migration.
+
+# io registry
+try:
+    from .io.registry import open_dataset  # noqa: F401
+except Exception:
+    pass
+
+# tracking
+try:
+    from .tracking.particles import ParticleState  # noqa: F401
+except Exception:
+    pass
+try:
+    from .tracking.tracker import track  # noqa: F401
+except Exception:
+    pass
+
+# visualization (static essentials)
+try:
+    from .visualization.static import (
+        plot_particles_2d,
+        plot_trajectories_2d,
+    )  # noqa: F401
+except Exception:
+    pass
+try:
+    from .visualization.export_viz import (
+        animate_trajectories_2d,
+    )  # noqa: F401
+except Exception:
+    pass
+
+# utils: single source of truth for JAX availability flag
+try:
+    from .utils.jax_utils import JAX_AVAILABLE  # noqa: F401
+except Exception:
+    # If utils not yet split into a package, attempt legacy fallback
+    try:
+        from .utils import JAX_AVAILABLE  # type: ignore  # noqa: F401
+    except Exception:
+        JAX_AVAILABLE = False  # type: ignore
+
+# Backward-compatibility aliases (optional). Uncomment if you must keep the old names working temporarily.
+# try:
+#     from .reader import VTKReader as _VTKReader  # legacy
+#     VTKReader = _VTKReader  # noqa: F401
+# except Exception:
+#     pass
+# try:
+#     from .visualizer import ParticleVisualizer as _ParticleVisualizer  # legacy
+#     ParticleVisualizer = _ParticleVisualizer  # noqa: F401
+# except Exception:
+#     pass
+# try:
+#     from .tracker import ParticleTracker as _ParticleTracker  # legacy
+#     ParticleTracker = _ParticleTracker  # noqa: F401
+# except Exception:
+#     pass

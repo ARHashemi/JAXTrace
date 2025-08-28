@@ -25,6 +25,7 @@ contour_prediction*/
 *.bak
 *.old
 *old.py
+old*/
 
 # databases
 *.hdf5
