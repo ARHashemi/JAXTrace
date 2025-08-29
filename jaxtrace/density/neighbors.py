@@ -13,7 +13,7 @@ except Exception:
 
 
 @dataclass
-class JaxHashGridNeighbors:
+class HashGridNeighbors:
     """
     Device-side uniform hash-grid for fast range queries under jit/vmap.
 
@@ -27,7 +27,7 @@ class JaxHashGridNeighbors:
 
     def __post_init__(self):
         if not JAX_AVAILABLE:
-            raise RuntimeError("JAX is required for JaxHashGridNeighbors")
+            raise RuntimeError("JAX is required for HashGridNeighbors")
         P = jnp.asarray(self.positions)
         self.D = int(P.shape[1])
         self.inv = 1.0 / jnp.maximum(self.cell_size, 1e-12)

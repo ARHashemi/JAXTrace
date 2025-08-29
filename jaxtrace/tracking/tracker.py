@@ -96,7 +96,7 @@ class ParticleTracker:
         batch_size = self._auto_batch_size(n_particles, method_name)
 
         if n_particles > 100_000 and method_name in ("rk2", "rk4"):
-            print(f"Warning: Large particle count ({n_particles}) with {method_name} may cause memory issues"[^7])
+            print(f"Warning: Large particle count ({n_particles}) with {method_name} may cause memory issues")
 
         print(f"Tracking {n_particles} particles for {steps} steps; method={method_name}, batch_size={batch_size}")
 
@@ -146,9 +146,9 @@ class ParticleTracker:
             except Exception as e:
                 msg = str(e)
                 if "RESOURCE_EXHAUSTED" in msg or "Out of memory" in msg:
-                    # Adaptive downsizing and re-try, consistent with prior approach[^13]
+                    # Adaptive downsizing and re-try, consistent with prior approach
                     smaller = max(batch_size // 2, 10)
-                    print(f"Memory error at step {k}; reducing batch size from {batch_size} to {smaller}"[^13])
+                    print(f"Memory error at step {k}; reducing batch size from {batch_size} to {smaller}")
                     batch_size = smaller
                     new_positions_batches = []
                     nbatches = (n_particles + batch_size - 1) // batch_size
