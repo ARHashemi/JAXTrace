@@ -14,6 +14,9 @@ selected*/
 process*/
 videos*/
 contour_prediction*/
+*output/
+*output*/
+output*/
 *.tar.gz
 *.zip
 *.zip.*

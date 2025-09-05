@@ -800,7 +800,7 @@ def main():
         'data_directory': '/home/arhashemi/Workspace/welding/Cases/002_caseCoarse.gid/post/0eule/',
         'case_name': 'caseCoarse',
         'n_particles': 300,  # Reduced for stability
-        'output_directory': 'jaxtrace_output'
+        'output_directory': 'output_jaxtrace'
     }
     
     print("🚀 Starting JAXTrace Complete Workflow")
