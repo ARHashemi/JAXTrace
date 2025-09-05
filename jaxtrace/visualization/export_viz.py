@@ -1,383 +1,347 @@
+# jaxtrace/visualization/export_viz.py
 from __future__ import annotations
-from typing import Optional, Sequence, Callable, Tuple
+from typing import Optional, Tuple, Union, Any, Sequence
 import os
+import math
 import numpy as np
 
-# Matplotlib (guarded)
 try:
+    import matplotlib
+    matplotlib.use("Agg")  # headless-friendly backend
     import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
-    from matplotlib.colors import Normalize
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     MPL_AVAILABLE = True
 except Exception:
     MPL_AVAILABLE = False
 
+try:
+    import imageio
+    IMAGEIO_AVAILABLE = True
+except Exception:
+    IMAGEIO_AVAILABLE = False
 
-def _require_mpl():
+try:
+    import imageio_ffmpeg
+    FFMPEG_AVAILABLE = True
+except Exception:
+    FFMPEG_AVAILABLE = False
+
+
+Plane = str
+ArrayLike = Union[np.ndarray, "jax.Array"]  # type: ignore
+
+
+def _ensure_mpl():
     if not MPL_AVAILABLE:
-        raise ImportError("Matplotlib is required for this exporter")
+        raise RuntimeError("Matplotlib is required to render frames (pip install matplotlib)")
 
 
-# -------------------------
-# Animation: trajectories 2D
-# -------------------------
-
-def animate_trajectories_2d(
-    trajectories: np.ndarray,
-    *,
-    filename: str,
-    fps: int = 24,
-    colors: Optional[Sequence[str]] = None,
-    linewidth: float = 1.5,
-    figsize: Tuple[int, int] = (8, 6),
-    dpi: int = 120,
-    facecolor: str = "white",
-) -> str:
-    """
-    Animate 2D trajectories by drawing path prefixes over time and save to a video file.
-
-    Parameters
-    ----------
-    trajectories : array-like, shape (Np, T, 2/3) or (T, Np, 2/3)
-        Particle trajectories. If 3D, only XY is drawn.
-    filename : str
-        Output file path, e.g., 'out.mp4' or 'out.gif'.
-    fps : int
-        Frames per second.
-    colors : sequence of str, optional
-        Cycle of line colors for trajectories.
-    linewidth : float
-        Line width for trajectories.
-    figsize : (w, h)
-        Figure size in inches.
-    dpi : int
-        Output DPI.
-    facecolor : str
-        Figure background color.
-
-    Returns
-    -------
-    str
-        The saved filename.
-    """
-    _require_mpl()
-    traj = np.asarray(trajectories)
-    if traj.ndim != 3:
-        raise ValueError("trajectories must have shape (Np,T,2/3) or (T,Np,2/3)")
-
-    # Canonicalize to (Np, T, 2)
-    if traj.shape[0] < traj.shape[1]:  # (Np, T, 2/3)
-        Np, T = traj.shape[0], traj.shape[1]
-        xy = traj[..., :2]
-    else:  # (T, Np, 2/3)
-        T, Np = traj.shape[0], traj.shape[1]
-        xy = np.transpose(traj, (1, 0, 2))[..., :2]
-
-    C = colors or ["#1f77b4"]
-
-    fig, ax = plt.subplots(figsize=figsize, facecolor=facecolor)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    lines = [ax.plot([], [], color=C[i % len(C)], lw=linewidth)[0] for i in range(Np)]
-
-    # Set view box with a small margin
-    allx = xy[..., 0].ravel(); ally = xy[..., 1].ravel()
-    pad = 0.05
-    xmin, xmax = np.min(allx), np.max(allx)
-    ymin, ymax = np.min(ally), np.max(ally)
-    dx, dy = max(xmax - xmin, 1e-9), max(ymax - ymin, 1e-9)
-    ax.set_xlim(xmin - pad * dx, xmax + pad * dx)
-    ax.set_ylim(ymin - pad * dy, ymax + pad * dy)
-
-    def init():
-        for ln in lines:
-            ln.set_data([], [])
-        return lines
-
-    def update(frame):
-        for i, ln in enumerate(lines):
-            ln.set_data(xy[i, :frame + 1, 0], xy[i, :frame + 1, 1])
-        return lines
-
-    anim = FuncAnimation(fig, update, frames=T, init_func=init, blit=True, interval=1000 // max(fps, 1))
-    try:
-        writer = FFMpegWriter(fps=fps, metadata=dict(artist="jaxtrace"))
-    except Exception:
-        writer = PillowWriter(fps=fps)
-    anim.save(filename, writer=writer, dpi=dpi)
-    plt.close(fig)
-    return filename
+def _ensure_imageio():
+    if not IMAGEIO_AVAILABLE:
+        raise RuntimeError("imageio is required for saving videos or GIFs (pip install imageio)")
 
 
-# -------------------------
-# Animation: trajectories 3D
-# -------------------------
-
-def animate_trajectories_3d(
-    trajectories: np.ndarray,
-    *,
-    filename: str,
-    fps: int = 24,
-    colors: Optional[Sequence[str]] = None,
-    linewidth: float = 1.5,
-    figsize: Tuple[int, int] = (8, 6),
-    dpi: int = 120,
-    facecolor: str = "white",
-    elev: float = 20.0,
-    azim: float = -60.0,
-) -> str:
-    """
-    Animate 3D trajectories and save to a video file.
-
-    Parameters
-    ----------
-    trajectories : array-like, shape (Np, T, 3) or (T, Np, 3)
-        Particle trajectories.
-    filename : str
-        Output file path, e.g., 'out.mp4' or 'out.gif'.
-    fps : int
-        Frames per second.
-    colors : sequence of str, optional
-        Cycle of line colors for trajectories.
-    linewidth : float
-        Line width for trajectories.
-    figsize : (w, h)
-        Figure size in inches.
-    dpi : int
-        Output DPI.
-    facecolor : str
-        Figure background color.
-    elev : float
-        Elevation angle for 3D view.
-    azim : float
-        Azimuth angle for 3D view.
-
-    Returns
-    -------
-    str
-        The saved filename.
-    """
-    _require_mpl()
-    traj = np.asarray(trajectories)
-    if traj.ndim != 3 or traj.shape[-1] != 3:
-        raise ValueError("trajectories must have shape (Np,T,3) or (T,Np,3)")
-
-    # Canonicalize to (Np, T, 3)
-    if traj.shape[0] < traj.shape[1]:
-        Np, T = traj.shape[0], traj.shape[1]
-        xyz = traj
-    else:
-        T, Np = traj.shape[0], traj.shape[1]
-        xyz = np.transpose(traj, (1, 0, 2))
-
-    C = colors or ["#1f77b4"]
-
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-    fig = plt.figure(figsize=figsize, facecolor=facecolor)
-    ax = fig.add_subplot(111, projection="3d")
-    ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
-    lines = [ax.plot([], [], [], color=C[i % len(C)], lw=linewidth)[0] for i in range(Np)]
-
-    # Set view box with a small margin
-    allx = xyz[..., 0].ravel(); ally = xyz[..., 1].ravel(); allz = xyz[..., 2].ravel()
-    pad = 0.05
-    xmin, xmax = np.min(allx), np.max(allx)
-    ymin, ymax = np.min(ally), np.max(ally)
-    zmin, zmax = np.min(allz), np.max(allz)
-    dx, dy, dz = max(xmax - xmin, 1e-9), max(ymax - ymin, 1e-9), max(zmax - zmin, 1e-9)
-    ax.set_xlim(xmin - pad * dx, xmax + pad * dx)
-    ax.set_ylim(ymin - pad * dy, ymax + pad * dy)
-    ax.set_zlim(zmin - pad * dz, zmax + pad * dz)
-    ax.view_init(elev=elev, azim=azim)
-
-    def init():
-        for ln in lines:
-            ln.set_data([], [])
-            ln.set_3d_properties([])
-        return lines
-
-    def update(frame):
-        for i, ln in enumerate(lines):
-            ln.set_data(xyz[i, :frame + 1, 0], xyz[i, :frame + 1, 1])
-            ln.set_3d_properties(xyz[i, :frame + 1, 2])
-        return lines
-
-    anim = FuncAnimation(fig, update, frames=T, init_func=init, blit=True, interval=1000 // max(fps, 1))
-    try:
-        writer = FFMpegWriter(fps=fps, metadata=dict(artist="jaxtrace"))
-    except Exception:
-        writer = PillowWriter(fps=fps)
-    anim.save(filename, writer=writer, dpi=dpi)
-    plt.close(fig)
-    return filename
+def _as_numpy(x: Any) -> np.ndarray:
+    return np.asarray(x)
 
 
-# -------------------------
-# Animation: scalar slice 2D
-# -------------------------
-
-def write_scalar_slice_video_2d(
-    sample_t: Callable[[np.ndarray, float], np.ndarray],
-    *,
-    filename: str,
-    plane: str = "xy",
-    bounds: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
-    fixed_coord: float | None = None,
-    res: Tuple[int, int] = (256, 256),
-    times: Sequence[float],
-    channel: int | None = None,
-    magnitude_if_vector: bool = True,
-    cmap: str = "viridis",
-    fps: int = 24,
-    dpi: int = 120,
-    figsize: Tuple[int, int] = (7, 6),
-    vmin: float | None = None,
-    vmax: float | None = None,
-    interpolation: str = "nearest",
-    add_colorbar: bool = True,
-    title: str | None = None,
-) -> str:
-    """
-    Write a video of a 2D scalar slice over a sequence of times.
-
-    This samples the field using the provided `sample_t(points, t)` callable, which is
-    expected to perform temporal blending between adjacent slices if needed.
-
-    Parameters
-    ----------
-    sample_t : callable
-        Function mapping (points[N,3], time) -> values[N] or values[N,C].
-    filename : str
-        Output file path, e.g., 'slice.mp4' or 'slice.gif'.
-    plane : {'xy','xz','yz'}
-        Slice plane.
-    bounds : ((xmin,xmax),(ymin,ymax),(zmin,zmax))
-        World bounds used both for sampling and axis extent.
-    fixed_coord : float, optional
-        World coordinate on the orthogonal axis; if None, uses the lower bound.
-    res : (nx, ny)
-        Grid resolution in the two in-plane dimensions.
-    times : sequence of float
-        Time values to render, one frame per time.
-    channel : int, optional
-        If the field is vector-valued, choose which component to plot. If None and
-        `magnitude_if_vector=True`, uses the vector magnitude.
-    magnitude_if_vector : bool
-        If True and field is vector-valued, plot |v| when `channel` is None.
-    cmap : str
-        Matplotlib colormap name.
-    fps : int
-        Frames per second.
-    dpi : int
-        Output DPI.
-    figsize : (w, h)
-        Figure size in inches.
-    vmin, vmax : float, optional
-        Color scaling limits; if None, inferred from the first frame.
-    interpolation : str
-        Interpolation mode for imshow.
-    add_colorbar : bool
-        Whether to include a colorbar.
-    title : str, optional
-        Title for the figure.
-
-    Returns
-    -------
-    str
-        The saved filename.
-    """
-    _require_mpl()
-    (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
-    nx, ny = map(int, res)
-
-    # Build sampling grid points for the selected plane
+def _slice_plane(points: np.ndarray, plane: Plane = "xy") -> Tuple[np.ndarray, Tuple[str, str]]:
+    plane = plane.lower()
+    if points.ndim != 2 or points.shape[1] not in (2, 3):
+        raise ValueError("points must have shape (N,2) or (N,3)")
+    if points.shape[1] == 2:
+        return points, ("x", "y")
     if plane == "xy":
-        xs = np.linspace(xmin, xmax, nx)
-        ys = np.linspace(ymin, ymax, ny)
-        GX, GY = np.meshgrid(xs, ys, indexing="xy")
-        z = zmin if fixed_coord is None else float(fixed_coord)
-        GZ = np.full_like(GX, z)
-        pts = np.stack([GX.ravel(), GY.ravel(), GZ.ravel()], axis=1)
-        extent = (xmin, xmax, ymin, ymax)
-        xlabel, ylabel = "x", "y"
-    elif plane == "xz":
-        xs = np.linspace(xmin, xmax, nx)
-        zs = np.linspace(zmin, zmax, ny)
-        GX, GZ = np.meshgrid(xs, zs, indexing="xy")
-        y = ymin if fixed_coord is None else float(fixed_coord)
-        GY = np.full_like(GX, y)
-        pts = np.stack([GX.ravel(), GY.ravel(), GZ.ravel()], axis=1)
-        extent = (xmin, xmax, zmin, zmax)
-        xlabel, ylabel = "x", "z"
-    elif plane == "yz":
-        ys = np.linspace(ymin, ymax, nx)
-        zs = np.linspace(zmin, zmax, ny)
-        GY, GZ = np.meshgrid(ys, zs, indexing="xy")
-        x = xmin if fixed_coord is None else float(fixed_coord)
-        GX = np.full_like(GY, x)
-        pts = np.stack([GX.ravel(), GY.ravel(), GZ.ravel()], axis=1)
-        extent = (ymin, ymax, zmin, zmax)
-        xlabel, ylabel = "y", "z"
+        return points[:, [0, 1]], ("x", "y")
+    if plane == "xz":
+        return points[:, [0, 2]], ("x", "z")
+    if plane == "yz":
+        return points[:, [1, 2]], ("y", "z")
+    raise ValueError("plane must be one of 'xy','xz','yz'")
+
+
+def _downsample_indices(n: int, every_kth: int, max_points: Optional[int]) -> np.ndarray:
+    idx = np.arange(n)[::max(1, int(every_kth))]
+    if max_points is not None and idx.size > max_points:
+        idx = idx[:max_points]
+    return idx
+
+
+def _infer_global_bounds_2d(sliced_frames: np.ndarray, margin_ratio: float = 0.02) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    # sliced_frames: (Tf, M, 2)
+    mins = np.min(sliced_frames.reshape(-1, 2), axis=0)
+    maxs = np.max(sliced_frames.reshape(-1, 2), axis=0)
+    span = np.maximum(maxs - mins, 1e-12)
+    margin = margin_ratio * span
+    (xmin, ymin) = mins - margin
+    (xmax, ymax) = maxs + margin
+    return (float(xmin), float(xmax)), (float(ymin), float(ymax))
+
+
+def _infer_global_bounds_3d(frames_xyz: np.ndarray, margin_ratio: float = 0.02) -> Tuple[np.ndarray, np.ndarray]:
+    # frames_xyz: (Tf, M, 3)
+    mins = np.min(frames_xyz.reshape(-1, 3), axis=0)
+    maxs = np.max(frames_xyz.reshape(-1, 3), axis=0)
+    span = np.maximum(maxs - mins, 1e-12)
+    margin = margin_ratio * span
+    lo = mins - margin
+    hi = maxs + margin
+    return lo.astype(float), hi.astype(float)
+
+
+def _frame_title(base: Optional[str], t_val: Optional[float]) -> str:
+    if base is None:
+        base = "Particles"
+    if t_val is None:
+        return base
+    return f"{base} — t={t_val:.6f}"
+
+
+def render_frames_2d(
+    positions_over_time: ArrayLike,
+    out_dir: str,
+    *,
+    times: Optional[ArrayLike] = None,
+    plane: Plane = "xy",
+    every_kth: int = 1,
+    frame_stride: int = 1,
+    max_points: Optional[int] = None,
+    figsize: Tuple[float, float] = (6.0, 5.0),
+    dpi: int = 120,
+    s: float = 1.5,
+    alpha: float = 0.9,
+    title: Optional[str] = None,
+    equal: bool = True,
+    bg_color: str = "white",
+    marker_color: Optional[str] = None,
+    file_prefix: str = "frame",
+) -> Sequence[str]:
+    """
+    Render 2D frames as PNGs to a directory. Returns the list of saved filenames.
+
+    Parameters
+    ----------
+    positions_over_time : (T,N,3) array or Trajectory-like object
+    out_dir             : output directory (will be created if missing)
+    times               : optional (T,) time labels
+    plane               : 'xy'|'xz'|'yz'
+    every_kth           : particle subsampling stride
+    frame_stride        : frame subsampling stride
+    max_points          : cap the number of plotted points per frame
+    figsize, dpi        : matplotlib figure size and DPI
+    s, alpha            : scatter size and alpha
+    title               : base title, will show time per frame when 'times' is provided
+    equal               : set equal aspect
+    bg_color            : figure background color
+    marker_color        : fixed marker color; default uses Matplotlib's cycle
+    file_prefix         : prefix for saved PNG files
+    """
+    _ensure_mpl()
+    os.makedirs(out_dir, exist_ok=True)
+
+    arr = positions_over_time
+    if hasattr(arr, "positions_over_time_array"):
+        times = _as_numpy(arr.times) if times is None else _as_numpy(times)
+        arr = arr.positions_over_time_array()
     else:
-        raise ValueError("plane must be one of 'xy','xz','yz'")
+        arr = _as_numpy(arr)
+        times = None if times is None else _as_numpy(times)
 
-    def _select_channel(arr: np.ndarray) -> np.ndarray:
-        a = np.asarray(arr)
-        if a.ndim == 1:
-            return a
-        if a.ndim == 2 and a.shape[1] > 1:
-            if channel is not None:
-                return a[:, int(channel)]
-            if magnitude_if_vector:
-                return np.linalg.norm(a, axis=1)
-            return a[:, 0]
-        if a.ndim == 2 and a.shape[1] == 1:
-            return a[:, 0]
-        raise ValueError("Unsupported output shape from sample_t; expected [N] or [N,C]")
+    if arr.ndim != 3 or arr.shape[-1] != 3:
+        raise ValueError("positions_over_time must be (T,N,3)")
 
-    # Sample first frame to initialize image, infer vmin/vmax if needed
-    first_vals = _select_channel(sample_t(pts, float(times[0]))).reshape(GX.shape)
-    if vmin is None or vmax is None:
-        vmin_auto, vmax_auto = float(np.nanmin(first_vals)), float(np.nanmax(first_vals))
-        vmin = vmin if vmin is not None else vmin_auto
-        vmax = vmax if vmax is not None else vmax_auto
+    T, N, _ = arr.shape
+    frames_idx = np.arange(0, T, max(1, int(frame_stride)))
+    pidx = _downsample_indices(N, every_kth, max_points)
 
-    fig, ax = plt.subplots(figsize=figsize)
-    norm = Normalize(vmin=vmin, vmax=vmax)
-    im = ax.imshow(
-        first_vals,
-        origin="lower",
-        extent=extent,
-        cmap=cmap,
-        norm=norm,
-        interpolation=interpolation,
-        aspect="equal",
+    # Pre-slice selected frames to compute global bounds
+    sliced_frames = []
+    for k in frames_idx:
+        pts2d, labels = _slice_plane(arr[k, pidx], plane)
+        sliced_frames.append(pts2d)
+    sliced_frames = np.stack(sliced_frames, axis=0)  # (Tf, M, 2)
+    (xmin, xmax), (ymin, ymax) = _infer_global_bounds_2d(sliced_frames)
+    xl, yl = labels
+
+    saved_files = []
+    for fi, t_idx in enumerate(frames_idx):
+        pts = sliced_frames[fi]
+        t_val = None if times is None else float(times[t_idx])
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        fig.patch.set_facecolor(bg_color)
+        ax.scatter(pts[:, 0], pts[:, 1], s=s, alpha=alpha, c=marker_color, edgecolors="none")
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+        ax.set_xlabel(xl)
+        ax.set_ylabel(yl)
+        if equal:
+            ax.set_aspect("equal", adjustable="box")
+        ax.set_title(_frame_title(title, t_val))
+        fig.tight_layout()
+        out_path = os.path.join(out_dir, f"{file_prefix}_{fi:05d}.png")
+        fig.savefig(out_path, facecolor=bg_color, bbox_inches="tight")
+        plt.close(fig)
+        saved_files.append(out_path)
+
+    return saved_files
+
+
+def render_frames_3d(
+    positions_over_time: ArrayLike,
+    out_dir: str,
+    *,
+    times: Optional[ArrayLike] = None,
+    every_kth: int = 1,
+    frame_stride: int = 1,
+    max_points: Optional[int] = None,
+    figsize: Tuple[float, float] = (7.0, 6.0),
+    dpi: int = 120,
+    s: float = 1.0,
+    alpha: float = 0.9,
+    elev: float = 20.0,
+    azim: float = 45.0,
+    title: Optional[str] = None,
+    bg_color: str = "white",
+    marker_color: Optional[str] = None,
+    file_prefix: str = "frame3d",
+) -> Sequence[str]:
+    """
+    Render 3D frames as PNGs to a directory. Returns the list of saved filenames.
+
+    Parameters
+    ----------
+    positions_over_time : (T,N,3) array or Trajectory-like object
+    out_dir             : output directory (will be created if missing)
+    times               : optional (T,) time labels
+    every_kth           : particle subsampling stride
+    frame_stride        : frame subsampling stride
+    max_points          : cap the number of plotted points per frame
+    figsize, dpi        : matplotlib figure size and DPI
+    s, alpha            : scatter size and alpha
+    elev, azim          : 3D view angles
+    title               : base title
+    bg_color            : figure background
+    marker_color        : fixed marker color; default uses Matplotlib's cycle
+    file_prefix         : prefix for saved PNG files
+    """
+    _ensure_mpl()
+    os.makedirs(out_dir, exist_ok=True)
+
+    arr = positions_over_time
+    if hasattr(arr, "positions_over_time_array"):
+        times = _as_numpy(arr.times) if times is None else _as_numpy(times)
+        arr = arr.positions_over_time_array()
+    else:
+        arr = _as_numpy(arr)
+        times = None if times is None else _as_numpy(times)
+
+    if arr.ndim != 3 or arr.shape[-1] != 3:
+        raise ValueError("positions_over_time must be (T,N,3)")
+
+    T, N, _ = arr.shape
+    frames_idx = np.arange(0, T, max(1, int(frame_stride)))
+    pidx = _downsample_indices(N, every_kth, max_points)
+    subset = arr[frames_idx][:, pidx, :]  # (Tf, M, 3)
+
+    lo, hi = _infer_global_bounds_3d(subset)
+
+    saved_files = []
+    for fi, t_idx in enumerate(frames_idx):
+        pts = subset[fi]
+        t_val = None if times is None else float(times[t_idx])
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        fig.patch.set_facecolor(bg_color)
+        ax = fig.add_subplot(111, projection="3d")
+        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=s, alpha=alpha, c=marker_color, depthshade=True, edgecolors="none")
+        ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
+        ax.set_xlim(float(lo[0]), float(hi[0]))
+        ax.set_ylim(float(lo[1]), float(hi[1]))
+        ax.set_zlim(float(lo[2]), float(hi[2]))
+        ax.view_init(elev=elev, azim=azim)
+        ax.set_title(_frame_title(title, t_val))
+        fig.tight_layout()
+        out_path = os.path.join(out_dir, f"{file_prefix}_{fi:05d}.png")
+        fig.savefig(out_path, facecolor=bg_color, bbox_inches="tight")
+        plt.close(fig)
+        saved_files.append(out_path)
+
+    return saved_files
+
+
+def encode_video_from_frames(
+    frame_files: Sequence[str],
+    output_path: str,
+    *,
+    fps: int = 24,
+    quality: int = 7,
+    pix_fmt: str = "yuv420p",
+) -> None:
+    """
+    Encode a sequence of frame files into a video using ffmpeg (via imageio-ffmpeg).
+
+    Parameters
+    ----------
+    frame_files : list of paths to images (PNG recommended)
+    output_path : output video path (.mp4 recommended)
+    fps         : frames per second
+    quality     : ffmpeg quality (0-10, imageio-ffmpeg scale; lower is better, default 7)
+    pix_fmt     : pixel format, default 'yuv420p' for web compatibility
+    """
+    _ensure_imageio()
+    if not FFMPEG_AVAILABLE:
+        raise RuntimeError("imageio-ffmpeg is required to encode MP4 (pip install imageio-ffmpeg)")
+
+    if len(frame_files) == 0:
+        raise ValueError("No frame files provided")
+
+    # Read first frame to get size
+    first = imageio.imread(frame_files[0])
+    height, width = first.shape[:2]
+
+    writer = imageio_ffmpeg.write_frames(
+        output_path,
+        size=(width, height),
+        fps=fps,
+        quality=quality,
+        pix_fmt=pix_fmt,
+        macro_block_size=None,  # allow non-multiple-of-16 sizes
     )
-    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
-    if title:
-        ax.set_title(title)
-    cbar = None
-    if add_colorbar:
-        cbar = plt.colorbar(im, ax=ax)
+    writer.send(None)  # start
 
-    # Update function
-    def update(i: int):
-        t = float(times[i])
-        vals = _select_channel(sample_t(pts, t)).reshape(GX.shape)
-        im.set_data(vals)
-        return (im,)
-
-    anim = FuncAnimation(fig, update, frames=len(times), blit=True, interval=1000 // max(fps, 1))
-    # Choose writer by extension when possible
-    ext = os.path.splitext(filename)[1].lower()
     try:
-        if ext == ".gif":
-            writer = PillowWriter(fps=fps)
-        else:
-            writer = FFMpegWriter(fps=fps, metadata=dict(artist="jaxtrace"))
-    except Exception:
-        writer = PillowWriter(fps=fps)
+        for f in frame_files:
+            frame = imageio.imread(f)
+            if frame.shape[0] != height or frame.shape[1] != width:
+                # Resize if needed
+                frame = imageio.v2.imresize(frame, (height, width))  # fallback resize
+            writer.send(frame)
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
 
-    anim.save(filename, writer=writer, dpi=dpi)
-    plt.close(fig)
-    return filename
+
+def save_gif_from_frames(
+    frame_files: Sequence[str],
+    output_path: str,
+    *,
+    fps: int = 24,
+    loop: int = 0,
+) -> None:
+    """
+    Save a sequence of frames as an animated GIF using imageio.
+
+    Parameters
+    ----------
+    frame_files : list of frame paths
+    output_path : .gif output path
+    fps         : frames per second
+    loop        : number of loops (0 for infinite)
+    """
+    _ensure_imageio()
+    if len(frame_files) == 0:
+        raise ValueError("No frame files provided")
+    duration = 1.0 / max(1, int(fps))
+    frames = [imageio.imread(f) for f in frame_files]
+    imageio.mimsave(output_path, frames, duration=duration, loop=loop)

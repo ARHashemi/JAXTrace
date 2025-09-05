@@ -1,3 +1,4 @@
+# jaxtrace/utils/spatial.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -13,9 +14,7 @@ except Exception:
     def jit(x):  # type: ignore
         return x
 
-
 Array = np.ndarray
-
 
 # -------------------------
 # AABB
@@ -66,7 +65,6 @@ class AABB:
         pts = np.asarray(pts)
         return np.clip(pts, self.lo, self.hi)
 
-
 # -------------------------
 # Transforms
 # -------------------------
@@ -116,7 +114,6 @@ def transform_points(pts: Array, *, s: Array | float = 1.0, R: Optional[Array] =
         out = out + np.asarray(t)
     return out
 
-
 # -------------------------
 # Grid hashing
 # -------------------------
@@ -160,7 +157,6 @@ def grid_hash(points: Array, cell_size: Array | float, origin: Array | float = 0
     else:
         raise ValueError("points must be 2D or 3D")
     return keys.astype(np.int64), idx
-
 
 # -------------------------
 # Reductions

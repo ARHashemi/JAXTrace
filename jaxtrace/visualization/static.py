@@ -1,297 +1,212 @@
+# jaxtrace/visualization/static.py
 from __future__ import annotations
-from typing import Optional, Sequence, Tuple, Callable
+from typing import Optional, Tuple, Union, Any
 import numpy as np
 
 try:
     import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3D projection)
     MPL_AVAILABLE = True
 except Exception:
     MPL_AVAILABLE = False
 
+Plane = str
+ArrayLike = Union[np.ndarray, "jax.Array"]  # type: ignore
 
-def _require_mpl():
+def _ensure_mpl():
     if not MPL_AVAILABLE:
-        raise ImportError("Matplotlib is required for this visualization function")
+        raise RuntimeError("Matplotlib is required (pip install matplotlib)")
 
+def _as_numpy(x: Any) -> np.ndarray:
+    # Works for NumPy or JAX arrays
+    return np.asarray(x)
 
-# -------------------------
-# Particles and trajectories
-# -------------------------
+def _slice_plane(points: np.ndarray, plane: Plane = "xy") -> Tuple[np.ndarray, Tuple[str, str]]:
+    plane = plane.lower()
+    if points.ndim != 2 or points.shape[1] not in (2, 3):
+        raise ValueError("points must have shape (N,2) or (N,3)")
+    if points.shape[1] == 2:
+        return points, ("x", "y")
+    if plane == "xy":
+        return points[:, [0, 1]], ("x", "y")
+    if plane == "xz":
+        return points[:, [0, 2]], ("x", "z")
+    if plane == "yz":
+        return points[:, [1, 2]], ("y", "z")
+    raise ValueError("plane must be one of 'xy','xz','yz'")
+
+def _infer_bounds(points2d: np.ndarray, margin: float = 0.02) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    xmin, ymin = np.min(points2d, axis=0)
+    xmax, ymax = np.max(points2d, axis=0)
+    dx = (xmax - xmin) * margin
+    dy = (ymax - ymin) * margin
+    return (xmin - dx, xmax + dx), (ymin - dy, ymax + dy)
 
 def plot_particles_2d(
-    positions: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    color: str = "#1f77b4",
-    size: float = 10.0,
+    positions: ArrayLike,
+    plane: Plane = "xy",
+    bounds: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None,
+    color: Optional[ArrayLike] = None,
+    s: float = 1.5,
+    alpha: float = 0.9,
+    every_kth: int = 1,
+    max_points: Optional[int] = None,
     title: Optional[str] = None,
     equal: bool = True,
-) -> "plt.Axes":
+    ax: Optional["plt.Axes"] = None,
+    show: bool = True,
+    save_path: Optional[str] = None,
+):
     """
-    Scatter particle positions in 2D.
+    Plot a single set of particle positions as a 2D scatter.
 
-    positions: (N,2) or (N,3) — XY used
+    positions: (N,3) or (N,2)
+    plane: 'xy'|'xz'|'yz' if 3D input
+    bounds: ((xmin,xmax),(ymin,ymax)) or None to infer
+    color: None or (N,)
+    every_kth: subsample particles by stride
+    max_points: hard cap on number of plotted points
     """
-    _require_mpl()
-    ax = ax or plt.gca()
-    P = np.asarray(positions)
-    xy = P[:, :2]
-    ax.scatter(xy[:, 0], xy[:, 1], s=size, c=color, alpha=0.9, edgecolor="none")
+    _ensure_mpl()
+    pts = _as_numpy(positions)
+    pts2, (xl, yl) = _slice_plane(pts, plane)
+
+    # Downsample
+    idx = np.arange(pts2.shape[0])[::max(1, int(every_kth))]
+    if max_points is not None and idx.size > max_points:
+        idx = idx[:max_points]
+    pts2 = pts2[idx]
+    c = None if color is None else _as_numpy(color)[idx]
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 5), dpi=120)
+    else:
+        fig = ax.figure
+
+    ax.scatter(pts2[:, 0], pts2[:, 1], c=c, s=s, alpha=alpha, edgecolors="none")
+    ax.set_xlabel(xl); ax.set_ylabel(yl)
+    if bounds is None:
+        (xmin, xmax), (ymin, ymax) = _infer_bounds(pts2)
+    else:
+        (xmin, xmax), (ymin, ymax) = bounds
+    ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
     if equal:
         ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x"); ax.set_ylabel("y")
     if title:
         ax.set_title(title)
-    return ax
-
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight")
+    if show:
+        plt.show()
+    return fig, ax
 
 def plot_particles_3d(
-    positions: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    color: str = "#1f77b4",
-    size: float = 8.0,
+    positions: ArrayLike,
+    color: Optional[ArrayLike] = None,
+    s: float = 1.0,
+    alpha: float = 0.9,
+    every_kth: int = 1,
+    max_points: Optional[int] = None,
+    elev: float = 20.0,
+    azim: float = 45.0,
     title: Optional[str] = None,
-) -> "plt.Axes":
+    ax: Optional["plt.Axes"] = None,
+    show: bool = True,
+    save_path: Optional[str] = None,
+):
     """
-    Scatter particle positions in 3D.
+    Plot a single set of particle positions as a 3D scatter.
 
     positions: (N,3)
     """
-    _require_mpl()
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-    ax = ax or plt.axes(projection="3d")
-    P = np.asarray(positions)
-    ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=color, s=size, depthshade=True)
-    ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
-    if title:
-        ax.set_title(title)
-    return ax
+    _ensure_mpl()
+    pts = _as_numpy(positions)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError("positions must be (N,3) for 3D plotting")
 
+    idx = np.arange(pts.shape[0])[::max(1, int(every_kth))]
+    if max_points is not None and idx.size > max_points:
+        idx = idx[:max_points]
+    pts = pts[idx]
+    c = None if color is None else _as_numpy(color)[idx]
 
-def _canonicalize_traj_2d(trajectories: np.ndarray) -> Tuple[np.ndarray, int, int]:
-    """
-    Convert trajectories to (Np, T, 2).
-    Accepts (Np, T, 2/3) or (T, Np, 2/3).
-    """
-    traj = np.asarray(trajectories)
-    if traj.ndim != 3:
-        raise ValueError("trajectories must have shape (Np,T,2/3) or (T,Np,2/3)")
-    if traj.shape[0] < traj.shape[1]:  # (Np, T, 2/3)
-        Np, T = traj.shape[0], traj.shape[1]
-        xy = traj[..., :2]
-    else:  # (T, Np, 2/3)
-        T, Np = traj.shape[0], traj.shape[1]
-        xy = np.transpose(traj, (1, 0, 2))[..., :2]
-    return xy, Np, T
-
-
-def _canonicalize_traj_3d(trajectories: np.ndarray) -> Tuple[np.ndarray, int, int]:
-    """
-    Convert trajectories to (Np, T, 3).
-    Accepts (Np, T, 3) or (T, Np, 3).
-    """
-    traj = np.asarray(trajectories)
-    if traj.ndim != 3:
-        raise ValueError("trajectories must have shape (Np,T,3) or (T,Np,3)")
-    if traj.shape[0] < traj.shape[1]:
-        Np, T = traj.shape[0], traj.shape[1]
-        xyz = traj
+    if ax is None:
+        fig = plt.figure(figsize=(7, 6), dpi=120)
+        ax = fig.add_subplot(111, projection="3d")
     else:
-        T, Np = traj.shape[0], traj.shape[1]
-        xyz = np.transpose(traj, (1, 0, 2))
-    return xyz, Np, T
+        fig = ax.figure
 
-
-def plot_trajectories_2d(
-    trajectories: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    colors: Optional[Sequence[str]] = None,
-    linewidth: float = 1.2,
-    alpha: float = 0.95,
-    title: Optional[str] = None,
-) -> "plt.Axes":
-    """
-    Plot 2D trajectories from tracker output.
-
-    trajectories: (Np, T, 2/3) or (T, Np, 2/3)
-    """
-    _require_mpl()
-    ax = ax or plt.gca()
-    xy, Np, _ = _canonicalize_traj_2d(trajectories)
-    C = colors or ["#1f77b4"]
-    for i in range(Np):
-        ax.plot(xy[i, :, 0], xy[i, :, 1], color=C[i % len(C)], lw=linewidth, alpha=alpha)
-    ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_aspect("equal", adjustable="box")
-    if title:
-        ax.set_title(title)
-    return ax
-
-
-def plot_trajectories_3d(
-    trajectories: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    colors: Optional[Sequence[str]] = None,
-    linewidth: float = 1.2,
-    alpha: float = 0.95,
-    title: Optional[str] = None,
-) -> "plt.Axes":
-    """
-    Plot 3D trajectories from tracker output.
-
-    trajectories: (Np, T, 3) or (T, Np, 3)
-    """
-    _require_mpl()
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-    ax = ax or plt.axes(projection="3d")
-    xyz, Np, _ = _canonicalize_traj_3d(trajectories)
-    C = colors or ["#1f77b4"]
-    for i in range(Np):
-        ax.plot3D(xyz[i, :, 0], xyz[i, :, 1], xyz[i, :, 2],
-                  color=C[i % len(C)], lw=linewidth, alpha=alpha)
+    ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=c, s=s, alpha=alpha, depthshade=True, edgecolors="none")
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
+    ax.view_init(elev=elev, azim=azim)
     if title:
         ax.set_title(title)
-    return ax
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight")
+    if show:
+        plt.show()
+    return fig, ax
 
-
-# -------------------------
-# Field slices and quiver
-# -------------------------
-
-def plot_quiver_2d(
-    X: np.ndarray,
-    Y: np.ndarray,
-    U: np.ndarray,
-    V: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    scale: Optional[float] = None,
-    width: float = 0.0025,
-    color: str = "#444444",
-    title: Optional[str] = None,
-    equal: bool = True,
-) -> "plt.Axes":
+def plot_trajectory_2d(
+    positions_over_time: ArrayLike,
+    times: Optional[ArrayLike] = None,
+    frame_index: int = -1,
+    plane: Plane = "xy",
+    **kwargs,
+):
     """
-    Plot a 2D quiver on a structured grid.
+    Plot a specific frame of a trajectory as 2D.
 
-    X, Y: (Ny,Nx) meshgrid
-    U, V: (Ny,Nx) vectors
+    positions_over_time: (T,N,3) array or Trajectory.positions_over_time
+    frame_index: which frame to plot; -1 for last
+    kwargs: forwarded to plot_particles_2d
     """
-    _require_mpl()
-    ax = ax or plt.gca()
-    ax.quiver(X, Y, U, V, angles="xy", scale_units="xy", scale=scale, width=width, color=color)
-    if equal:
-        ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    if title:
-        ax.set_title(title)
-    return ax
-
-
-def plot_scalar_slice_2d(
-    X: np.ndarray,
-    Y: np.ndarray,
-    S: np.ndarray,
-    *,
-    ax: Optional["plt.Axes"] = None,
-    cmap: str = "viridis",
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-    colorbar: bool = True,
-    title: Optional[str] = None,
-    equal: bool = True,
-) -> "plt.Axes":
-    """
-    Pseudocolor plot for a scalar slice.
-
-    X, Y: (Ny,Nx) grid
-    S:    (Ny,Nx) scalar field
-    """
-    _require_mpl()
-    ax = ax or plt.gca()
-    m = ax.pcolormesh(X, Y, S, shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
-    if colorbar:
-        plt.colorbar(m, ax=ax, fraction=0.046, pad=0.04)
-    if equal:
-        ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    if title:
-        ax.set_title(title)
-    return ax
-
-
-# -------------------------
-# Time-series preview (2D)
-# -------------------------
-
-def preview_time_series_slice_2d(
-    sample_t: Callable[[np.ndarray, float], np.ndarray],
-    *,
-    plane: str = "xy",
-    bounds: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = ((0, 1), (0, 1), (0, 1)),
-    fixed_coord: float | None = None,
-    res: Tuple[int, int] = (128, 128),
-    time: float = 0.0,
-    channel: Optional[int] = None,
-    magnitude_if_vector: bool = True,
-    cmap: str = "viridis",
-    ax: Optional["plt.Axes"] = None,
-    title: Optional[str] = None,
-) -> "plt.Axes":
-    """
-    Preview a 2D scalar slice from a time-dependent field by sampling at time `time`.
-    Temporal evaluation can mirror the common two-slice interpolation pattern used by your
-    RK methods and tracker via `sample_t` provided by the field wrapper[^1].
-
-    - sample_t: callable (points[N,3], t) -> values[N,C] or [N] if scalar
-    - plane: 'xy'|'xz'|'yz'
-    - bounds: ((xmin,xmax),(ymin,ymax),(zmin,zmax)) world bounds
-    - fixed_coord: world coordinate for the orthogonal axis. If None, uses the lower bound.
-    - channel: if sample returns vector-valued, choose component; if None and magnitude_if_vector=True, shows |v|
-    """
-    _require_mpl()
-    (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
-    nx, ny = res
-
-    if plane == "xy":
-        xs = np.linspace(xmin, xmax, nx)
-        ys = np.linspace(ymin, ymax, ny)
-        X, Y = np.meshgrid(xs, ys, indexing="xy")
-        z = zmin if fixed_coord is None else float(fixed_coord)
-        Z = np.full_like(X, z)
-        pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-        gridX, gridY = X, Y
-    elif plane == "xz":
-        xs = np.linspace(xmin, xmax, nx)
-        zs = np.linspace(zmin, zmax, ny)
-        X, Z = np.meshgrid(xs, zs, indexing="xy")
-        y = ymin if fixed_coord is None else float(fixed_coord)
-        Y = np.full_like(X, y)
-        pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-        gridX, gridY = X, Z
-    elif plane == "yz":
-        ys = np.linspace(ymin, ymax, nx)
-        zs = np.linspace(zmin, zmax, ny)
-        Y, Z = np.meshgrid(ys, zs, indexing="xy")
-        x = xmin if fixed_coord is None else float(fixed_coord)
-        X = np.full_like(Y, x)
-        pts = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-        gridX, gridY = Y, Z
+    arr = positions_over_time
+    if hasattr(arr, "positions_over_time_array"):
+        times = _as_numpy(arr.times) if times is None else _as_numpy(times)
+        arr = arr.positions_over_time_array()
     else:
-        raise ValueError("plane must be one of 'xy','xz','yz'")
+        arr = _as_numpy(arr)
+        times = None if times is None else _as_numpy(times)
+    if arr.ndim != 3 or arr.shape[-1] != 3:
+        raise ValueError("positions_over_time must be (T,N,3)")
+    T = arr.shape[0]
+    fi = (T - 1) if frame_index == -1 else int(frame_index)
+    fi = max(0, min(fi, T - 1))
+    t_lab = None if times is None else float(times[fi])
+    title = kwargs.pop("title", None)
+    if title is None:
+        title = f"Particles at frame {fi}" + (f", t={t_lab:.6f}" if t_lab is not None else "")
+    return plot_particles_2d(arr[fi], plane=plane, title=title, **kwargs)
 
-    vals = np.asarray(sample_t(pts, float(time)))
-    if vals.ndim == 2 and vals.shape[1] > 1:
-        if channel is not None:
-            vals = vals[:, int(channel)]
-        elif magnitude_if_vector:
-            vals = np.linalg.norm(vals, axis=1)
-        else:
-            vals = vals[:, 0]
-    vals = vals.reshape(gridX.shape)
+def plot_trajectory_3d(
+    positions_over_time: ArrayLike,
+    times: Optional[ArrayLike] = None,
+    frame_index: int = -1,
+    **kwargs,
+):
+    """
+    Plot a specific frame of a trajectory as 3D.
 
-    ax = plot_scalar_slice_2d(gridX, gridY, vals, ax=ax, cmap=cmap, title=title)
-    return ax
+    positions_over_time: (T,N,3) array or Trajectory.positions_over_time
+    kwargs: forwarded to plot_particles_3d
+    """
+    arr = positions_over_time
+    if hasattr(arr, "positions_over_time_array"):
+        times = _as_numpy(arr.times) if times is None else _as_numpy(times)
+        arr = arr.positions_over_time_array()
+    else:
+        arr = _as_numpy(arr)
+        times = None if times is None else _as_numpy(times)
+    if arr.ndim != 3 or arr.shape[-1] != 3:
+        raise ValueError("positions_over_time must be (T,N,3)")
+    T = arr.shape[0]
+    fi = (T - 1) if frame_index == -1 else int(frame_index)
+    fi = max(0, min(fi, T - 1))
+    t_lab = None if times is None else float(times[fi])
+    title = kwargs.pop("title", None)
+    if title is None:
+        title = f"Particles at frame {fi}" + (f", t={t_lab:.6f}" if t_lab is not None else "")
+    return plot_particles_3d(arr[fi], title=title, **kwargs)

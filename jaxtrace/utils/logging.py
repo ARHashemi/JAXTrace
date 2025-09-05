@@ -1,131 +1,294 @@
+# jaxtrace/utils/logging.py
+"""
+Logging utilities: timers, memory monitoring, and progress tracking.
+
+Provides lightweight performance monitoring tools that work with or without JAX.
+No external logging dependencies required - uses Python's built-in facilities.
+"""
+
 from __future__ import annotations
+from typing import Optional, Dict, Any, Callable, Protocol
 import time
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
-import os
-import warnings
+import gc
+import sys
+from contextlib import contextmanager
 
-import psutil
-import numpy as np
-
-# Guarded JAX import, following project style[^2,^9]
 try:
-    import jax
-    JAX_AVAILABLE = True
+    import psutil
+    PSUTIL_AVAILABLE = True
 except Exception:
-    JAX_AVAILABLE = False
-    jax = None  # type: ignore
+    PSUTIL_AVAILABLE = False
+
+# Import JAX utilities for memory monitoring
+from .jax_utils import JAX_AVAILABLE
+
+if JAX_AVAILABLE:
+    try:
+        import jax
+        import jax.numpy as jnp
+    except Exception:
+        JAX_AVAILABLE = False
 
 
-# -------------------------
-# Timing
-# -------------------------
+class ProgressCallback(Protocol):
+    """Protocol for progress callbacks used during long operations."""
+    def __call__(self, step: int, total: int, **kwargs: Any) -> None:
+        """Called periodically during operations to report progress."""
+        ...
 
-@dataclass
+
 class Timer:
     """
-    Simple wall-clock timer as context manager.
+    Simple timer for performance monitoring.
+    
+    Can be used as a context manager or manually started/stopped.
+    Tracks both wall time and optional memory usage.
     """
-    name: str = ""
-    start_time: float = 0.0
-    elapsed: float = 0.0
-
-    def __enter__(self):
+    
+    def __init__(self, name: str = "Timer", track_memory: bool = False):
+        self.name = name
+        self.track_memory = track_memory
+        self.start_time: Optional[float] = None
+        self.end_time: Optional[float] = None
+        self.start_memory: Optional[Dict[str, Any]] = None
+        self.end_memory: Optional[Dict[str, Any]] = None
+    
+    def start(self) -> None:
+        """Start the timer."""
         self.start_time = time.perf_counter()
+        if self.track_memory:
+            self.start_memory = memory_info()
+    
+    def stop(self) -> float:
+        """Stop the timer and return elapsed time in seconds."""
+        if self.start_time is None:
+            raise RuntimeError("Timer not started")
+        self.end_time = time.perf_counter()
+        if self.track_memory:
+            self.end_memory = memory_info()
+        return self.elapsed
+    
+    @property
+    def elapsed(self) -> float:
+        """Get elapsed time in seconds."""
+        if self.start_time is None:
+            return 0.0
+        end = self.end_time if self.end_time is not None else time.perf_counter()
+        return end - self.start_time
+    
+    @property
+    def memory_delta(self) -> Optional[Dict[str, Any]]:
+        """Get memory usage delta (if tracking enabled)."""
+        if not self.track_memory or self.start_memory is None or self.end_memory is None:
+            return None
+        
+        delta = {}
+        for key in self.start_memory:
+            if key in self.end_memory:
+                if isinstance(self.start_memory[key], (int, float)):
+                    delta[key] = self.end_memory[key] - self.start_memory[key]
+        return delta
+    
+    def __enter__(self) -> 'Timer':
+        self.start()
         return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.stop()
+        self.report()
+    
+    def report(self) -> None:
+        """Print a timing report."""
+        print(f"{self.name}: {self.elapsed:.6f}s")
+        if self.track_memory and self.memory_delta is not None:
+            delta = self.memory_delta
+            if "rss_mb" in delta:
+                print(f"  Memory delta: {delta['rss_mb']:.1f} MB")
+            if "gpu_mb" in delta and delta["gpu_mb"] != 0:
+                print(f"  GPU delta: {delta['gpu_mb']:.1f} MB")
 
-    def __exit__(self, exc_type, exc, tb):
-        self.elapsed = time.perf_counter() - self.start_time
 
-def timeit(fn: Callable) -> Callable:
+@contextmanager
+def timeit(name: str = "Operation", track_memory: bool = False):
     """
-    Decorator that returns (result, seconds) when calling `fn`.
+    Context manager for timing operations.
+    
+    Parameters
+    ----------
+    name : str
+        Name for the timed operation
+    track_memory : bool  
+        Whether to track memory usage
+        
+    Example
+    -------
+    >>> with timeit("My operation"):
+    ...     # do work
+    ...     pass
     """
-    def wrapped(*args, **kwargs):
-        t0 = time.perf_counter()
-        out = fn(*args, **kwargs)
-        dt = time.perf_counter() - t0
-        return out, dt
-    return wrapped
+    timer = Timer(name, track_memory=track_memory)
+    with timer:
+        yield timer
 
 
-# -------------------------
-# Memory
-# -------------------------
-
-def _human_bytes(n: float) -> str:
-    units = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-    while n >= 1024 and i < len(units) - 1:
-        n /= 1024.0
-        i += 1
-    return f"{n:.2f} {units[i]}"
-
-def memory_info() -> Dict[str, str]:
+def memory_info() -> Dict[str, Any]:
     """
-    Return process and system memory usage using psutil, consistent with earlier utilities[^2].
+    Get current memory usage information.
+    
+    Returns
+    -------
+    dict
+        Memory info with keys like 'rss_mb', 'available_mb', 'gpu_mb'
     """
-    p = psutil.Process(os.getpid())
-    rss = float(p.memory_info().rss)
-    vm = psutil.virtual_memory()
-    return {
-        "rss": _human_bytes(rss),
-        "sys_used": _human_bytes(float(vm.used)),
-        "sys_total": _human_bytes(float(vm.total)),
-        "percent": f"{vm.percent:.1f}%",
-    }
-
-def gpu_memory_info() -> Optional[Dict[str, str]]:
-    """
-    Best-effort GPU memory info.
-
-    - If JAX is available and devices are present, returns device descriptions.
-    - Else, tries `nvidia-smi` to get global summary.
-    """
-    if JAX_AVAILABLE:
+    info = {}
+    
+    # System memory via psutil (if available)
+    if PSUTIL_AVAILABLE:
         try:
-            devs = jax.devices()
-            out = {}
-            for i, d in enumerate(devs):
-                out[f"device_{i}"] = str(d)
-            return out
+            process = psutil.Process()
+            mem = process.memory_info()
+            info["rss_mb"] = mem.rss / 1024 / 1024  # Resident set size
+            info["vms_mb"] = mem.vms / 1024 / 1024  # Virtual memory size
+            
+            # System-wide memory
+            vm = psutil.virtual_memory()
+            info["available_mb"] = vm.available / 1024 / 1024
+            info["percent_used"] = vm.percent
         except Exception:
             pass
-    # Fallback to nvidia-smi
+    
+    # Fallback: sys.getsizeof for basic info
+    if not info:
+        try:
+            # Very rough estimate using garbage collection
+            gc.collect()
+            objects = gc.get_objects()
+            info["objects_count"] = len(objects)
+            info["rss_mb"] = 0.0  # placeholder
+        except Exception:
+            info["rss_mb"] = 0.0
+    
+    # GPU memory via JAX (if available)
+    info["gpu_mb"] = 0.0
+    if JAX_AVAILABLE:
+        try:
+            # Get memory info from first GPU device
+            for device in jax.devices():
+                if device.device_kind == "gpu":
+                    mem_info = device.memory_stats()
+                    if "bytes_in_use" in mem_info:
+                        info["gpu_mb"] = mem_info["bytes_in_use"] / 1024 / 1024
+                    break
+        except Exception:
+            pass
+    
+    return info
+
+
+def gpu_memory_info() -> Dict[str, Any]:
+    """
+    Get GPU memory information (JAX devices).
+    
+    Returns
+    -------
+    dict
+        GPU memory stats or empty dict if no GPU/JAX
+    """
+    if not JAX_AVAILABLE:
+        return {}
+    
+    info = {}
     try:
-        import subprocess, json
-        q = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, check=True
-        )
-        used_total = [tuple(map(float, row.split(","))) for row in q.stdout.strip().splitlines() if row.strip()]
-        return {f"gpu_{i}": f"{u:.0f} MiB / {t:.0f} MiB" for i, (u, t) in enumerate(used_total)}
+        devices = jax.devices()
+        for i, device in enumerate(devices):
+            if device.device_kind == "gpu":
+                try:
+                    mem_stats = device.memory_stats()
+                    info[f"gpu_{i}"] = {
+                        "bytes_in_use": mem_stats.get("bytes_in_use", 0),
+                        "bytes_limit": mem_stats.get("bytes_limit", 0),
+                        "mb_in_use": mem_stats.get("bytes_in_use", 0) / 1024 / 1024,
+                        "mb_limit": mem_stats.get("bytes_limit", 0) / 1024 / 1024,
+                    }
+                except Exception:
+                    info[f"gpu_{i}"] = {"error": "Could not get stats"}
     except Exception:
-        return None
+        pass
+    
+    return info
 
 
-# -------------------------
-# Progress
-# -------------------------
-
-def create_progress_callback(total: int, *, every: int = 1, prefix: str = "progress") -> Callable[[int], None]:
+def create_progress_callback(
+    name: str = "Progress", 
+    update_every: int = 100,
+    show_memory: bool = False,
+    show_rate: bool = True,
+) -> ProgressCallback:
     """
-    Create a lightweight progress callback similar to the earlier API[^1].
-
-    Usage:
-        cb = create_progress_callback(T, every=10)
-        for i in range(T):
-            # work
-            cb(i)
+    Create a progress callback for long-running operations.
+    
+    Parameters
+    ----------
+    name : str
+        Name to show in progress messages
+    update_every : int
+        Update frequency (every N steps)
+    show_memory : bool
+        Whether to show memory usage
+    show_rate : bool
+        Whether to show processing rate
+        
+    Returns
+    -------
+    ProgressCallback
+        Function that can be called with (step, total, **kwargs)
+        
+    Example
+    -------
+    >>> progress = create_progress_callback("Integration", update_every=50)
+    >>> for i in range(1000):
+    ...     # do work
+    ...     if i % 50 == 0:
+    ...         progress(i, 1000)
     """
-    total = int(total)
-    every = max(int(every), 1)
-    t0 = time.perf_counter()
-
-    def _cb(i: int):
-        if i % every == 0 or i == total - 1:
-            dt = time.perf_counter() - t0
-            pct = 100.0 * (i + 1) / total if total > 0 else 100.0
-            print(f"{prefix}: {i+1}/{total} ({pct:5.1f}%) elapsed={dt:7.2f}s", flush=True)
-
-    return _cb
+    start_time = time.perf_counter()
+    last_memory = memory_info() if show_memory else None
+    
+    def callback(step: int, total: int, **kwargs: Any) -> None:
+        if step % update_every != 0 and step != total:
+            return
+            
+        elapsed = time.perf_counter() - start_time
+        percent = 100.0 * step / max(1, total)
+        
+        # Build message
+        msg = f"{name}: {step}/{total} ({percent:.1f}%)"
+        
+        if show_rate and elapsed > 0:
+            rate = step / elapsed
+            msg += f", {rate:.1f} steps/s"
+            
+        if elapsed > 1:  # Show ETA after 1 second
+            if step > 0:
+                eta = elapsed * (total - step) / step
+                if eta < 60:
+                    msg += f", ETA {eta:.1f}s"
+                else:
+                    msg += f", ETA {eta/60:.1f}m"
+        
+        if show_memory and last_memory is not None:
+            current_memory = memory_info()
+            if "rss_mb" in current_memory:
+                msg += f", {current_memory['rss_mb']:.0f}MB"
+        
+        # Add any custom kwargs
+        if kwargs:
+            extra = ", ".join(f"{k}={v}" for k, v in kwargs.items())
+            msg += f", {extra}"
+            
+        print(f"\r{msg}", end="", flush=True)
+        
+        if step == total:
+            print()  # newline when done
+    
+    return callback

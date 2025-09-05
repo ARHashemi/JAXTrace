@@ -1,15 +1,39 @@
-# density/neighbors.py (append)
+# jaxtrace/density/neighbors.py
+"""
+Fast neighbor search using uniform hash grids.
+
+Provides device-optimized spatial data structures for range queries
+with JAX acceleration and JIT-friendly fixed-size output arrays.
+"""
 
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import Tuple
 import numpy as np
 
-try:
-    import jax
-    import jax.numpy as jnp
-    JAX_AVAILABLE = True
-except Exception:
-    JAX_AVAILABLE = False
+# Import JAX utilities with fallback
+from ..utils.jax_utils import JAX_AVAILABLE
+
+if JAX_AVAILABLE:
+    try:
+        import jax
+        import jax.numpy as jnp
+    except Exception:
+        JAX_AVAILABLE = False
+
+if not JAX_AVAILABLE:
+    import numpy as jnp  # type: ignore
+    # Mock jax functions for NumPy fallback
+    class MockJax:
+        def vmap(self, func):
+            def vectorized(args):
+                if isinstance(args, (list, tuple)):
+                    return [func(arg) for arg in args]
+                return np.array([func(arg) for arg in args])
+            return vectorized
+        def jit(self, func):
+            return func
+    jax = MockJax()
 
 
 @dataclass
@@ -20,15 +44,28 @@ class HashGridNeighbors:
     - Packs integer cells into 64-bit keys.
     - CSR-like storage: unique cell ids + (start,count) into a sorted point index array.
     - Query returns fixed-size candidate sets with -1 padding for JIT-friendliness.
+    
+    Attributes
+    ----------
+    positions : jnp.ndarray
+        Point coordinates, shape (N, D) where D=2 or 3
+    cell_size : float
+        Spatial hash grid cell size
+    per_cell_cap : int
+        Maximum candidates gathered per cell for memory control
     """
-    positions: "jax.Array"
+    positions: jnp.ndarray   # (N,D)
     cell_size: float
-    per_cell_cap: int = 64  # max candidates gathered per cell
+    per_cell_cap: int = 64      # max candidates gathered per cell
 
     def __post_init__(self):
         if not JAX_AVAILABLE:
-            raise RuntimeError("JAX is required for HashGridNeighbors")
+            print("Warning: JAX not available, HashGridNeighbors will use NumPy fallback")
+            
         P = jnp.asarray(self.positions)
+        if P.ndim != 2 or P.shape[1] not in (2, 3):
+            raise ValueError("positions must be (N,2) or (N,3)")
+        self.positions = P
         self.D = int(P.shape[1])
         self.inv = 1.0 / jnp.maximum(self.cell_size, 1e-12)
         self.origin = jnp.min(P, axis=0)
@@ -65,17 +102,29 @@ class HashGridNeighbors:
         self.unique_starts = first_idx
         self.unique_counts = counts
 
-    def _cell_of(self, q: "jax.Array") -> "jax.Array":
+    def _cell_of(self, q: jnp.ndarray) -> jnp.ndarray:
+        """Convert query point to grid cell coordinates."""
         return jnp.floor((q - self.origin) * self.inv).astype(jnp.int32) - self.Cmin
 
-    def query_many(self, Q: "jax.Array", radius: float, max_neighbors: int):
+    def query_many(self, Q: jnp.ndarray, radius: float, max_neighbors: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
-        Batched range query.
+        Batched range query for multiple points.
+
+        Parameters
+        ----------
+        Q : jnp.ndarray
+            Query points, shape (M, D)
+        radius : float
+            Search radius
+        max_neighbors : int
+            Maximum neighbors to return per query point
 
         Returns
         -------
-        idxs  : (M, K) int32, -1 padded
-        dists : (M, K) float32, inf for padded
+        idxs : jnp.ndarray
+            Neighbor indices, shape (M, K), -1 padded
+        dists : jnp.ndarray
+            Distances to neighbors, shape (M, K), inf for padded
         """
         Q = jnp.asarray(Q)
         r = jnp.asarray(radius)

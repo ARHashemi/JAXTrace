@@ -1,18 +1,36 @@
+# jaxtrace/density/kde.py
+"""
+Kernel Density Estimation with adaptive bandwidth selection.
+
+Provides Gaussian KDE with Scott/Silverman bandwidth rules, grid evaluation,
+and optional JAX acceleration with chunked processing for large datasets.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
-
 import numpy as np
 
-# Optional dependencies
-try:
-    import jax
-    import jax.numpy as jnp
-    from jax import jit, vmap
-    JAX_AVAILABLE = True
-except Exception:
-    JAX_AVAILABLE = False
+# Import JAX utilities with fallback
+from ..utils.jax_utils import JAX_AVAILABLE
 
+if JAX_AVAILABLE:
+    try:
+        import jax
+        import jax.numpy as jnp
+        from jax import jit
+    except Exception:
+        JAX_AVAILABLE = False
+
+if not JAX_AVAILABLE:
+    import numpy as jnp  # type: ignore
+    # Mock jax.jit for NumPy fallback
+    class MockJit:
+        def __call__(self, func):
+            return func
+    jit = MockJit()
+
+# Optional SciPy fallback
 try:
     from scipy.stats import gaussian_kde as scipy_gaussian_kde
     SCIPY_AVAILABLE = True
@@ -26,12 +44,32 @@ from .kernels import scott_bandwidth, silverman_bandwidth, gaussian_kernel
 class KDEEstimator:
     """
     Gaussian KDE with Scott/Silverman bandwidth rules, 2D/3D grids,
-    chunked evaluation and optional JAX acceleration, which matches your current
-    density API and fallback logic to SciPy when JAX is unavailable[^14,^1].
+    chunked evaluation and optional JAX acceleration.
+    
+    Attributes
+    ----------
+    positions : np.ndarray
+        Data points, shape (N, D)
+    bandwidth : float, optional
+        Fixed bandwidth; auto-determined if None
+    bandwidth_rule : str
+        Bandwidth selection rule: 'scott' or 'silverman'
+    normalize : bool
+        Whether to normalize density estimates
+    plane : str
+        Projection plane for 2D extraction: 'xy', 'xz', or 'yz'
+    slab_position : float
+        Position of 2D slice through 3D data
+    slab_thickness : float
+        Thickness of 2D slice
+    resolution : int or tuple
+        Grid resolution for density evaluation
+    bounds : tuple, optional
+        Domain bounds ((xmin,xmax), (ymin,ymax), (zmin,zmax))
     """
     positions: np.ndarray         # (N, D)
     bandwidth: Optional[float] = None
-    bandwidth_rule: str = "scott"  # 'scott' | 'silverman' | 'fixed'
+    bandwidth_rule: str = "scott"  # 'scott' | 'silverman'
     normalize: bool = True
     # Grid
     plane: str = "xy"              # for 2D extraction if positions are 3D
@@ -61,7 +99,7 @@ class KDEEstimator:
     # ---------- Grid builders ----------
 
     def _make_grid_2d(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        # Determine bounds if not given
+        """Create 2D evaluation grid and extract 2D points."""
         pts = self.P[:, :2] if self.D == 2 else self._slice_2d_points()
         if self.bounds is None:
             lo = pts.min(axis=0)
@@ -77,6 +115,7 @@ class KDEEstimator:
         return X, Y, pts
 
     def _make_grid_3d(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Create 3D evaluation grid."""
         if self.bounds is None:
             lo = self.P.min(axis=0)
             hi = self.P.max(axis=0)
@@ -92,7 +131,7 @@ class KDEEstimator:
         return X, Y, Z, self.P
 
     def _slice_2d_points(self) -> np.ndarray:
-        # Extract 2D slice from 3D points using a slab selection similar to your density module[^9]
+        """Extract 2D slice from 3D points using a slab selection."""
         plane = self.plane.lower()
         axis_map = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}
         if plane not in axis_map:
@@ -109,25 +148,44 @@ class KDEEstimator:
     # ---------- Evaluation ----------
 
     def evaluate_2d(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Evaluate KDE on 2D grid.
+        
+        Returns
+        -------
+        X, Y : np.ndarray
+            Grid coordinates
+        Z : np.ndarray
+            Density values on grid
+        """
         X, Y, pts = self._make_grid_2d()
         grid = np.stack([X.ravel(), Y.ravel()], axis=1)
         dens = self._evaluate_grid(grid, pts)
         Z = dens.reshape(X.shape)
 
         if self.normalize:
-            # Normalize to dimensionless density using cell and domain volume, matching your approach[^8]
             dx = (X.max() - X.min()) / max(X.shape[1] - 1, 1)
             dy = (Y.max() - Y.min()) / max(Y.shape[0] - 1, 1)
             cell_area = dx * dy
-            domain_area = (X.max() - X.min()) * (Y.max() - Y.min())
             total = (Z * cell_area).sum()
             if total > 0:
                 Z = Z * (self.N / total)
+            domain_area = (X.max() - X.min()) * (Y.max() - Y.min())
             avg = self.N / max(domain_area, 1e-12)
             Z = Z / max(avg, 1e-12)
         return X, Y, Z
 
     def evaluate_3d(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Evaluate KDE on 3D grid.
+        
+        Returns
+        -------
+        X, Y, Z : np.ndarray
+            Grid coordinates
+        D : np.ndarray
+            Density values on grid
+        """
         X, Y, Z, pts = self._make_grid_3d()
         grid = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
         dens = self._evaluate_grid(grid, pts)
@@ -138,10 +196,10 @@ class KDEEstimator:
             dy = (Y.max() - Y.min()) / max(Y.shape[0] - 1, 1)
             dz = (Z.max() - Z.min()) / max(Z.shape[2] - 1, 1)
             cell_vol = dx * dy * dz
-            domain_vol = (X.max() - X.min()) * (Y.max() - Y.min()) * (Z.max() - Z.min())
             total = (D * cell_vol).sum()
             if total > 0:
                 D = D * (self.N / total)
+            domain_vol = (X.max() - X.min()) * (Y.max() - Y.min()) * (Z.max() - Z.min())
             avg = self.N / max(domain_vol, 1e-12)
             D = D / max(avg, 1e-12)
         return X, Y, Z, D
@@ -149,13 +207,14 @@ class KDEEstimator:
     # ---------- Core grid evaluation ----------
 
     def _evaluate_grid(self, grid_xy_or_xyz: np.ndarray, pts: np.ndarray) -> np.ndarray:
+        """Evaluate KDE at grid points using available backend."""
         h = self.h
         d = grid_xy_or_xyz.shape[1]
 
         if JAX_AVAILABLE:
-            P = jnp.asarray(pts)
-            Q = jnp.asarray(grid_xy_or_xyz)
-            inv_h2 = 1.0 / (h * h)
+            P = jnp.asarray(pts, dtype=jnp.float32)
+            Q = jnp.asarray(grid_xy_or_xyz, dtype=jnp.float32)
+            inv_h2 = jnp.asarray(1.0 / (h * h), dtype=jnp.float32)
 
             @jit
             def eval_chunk(qchunk):
@@ -163,20 +222,19 @@ class KDEEstimator:
                 diffs = qchunk[:, None, :] - P[None, :, :]       # (M,N,d)
                 r2 = jnp.sum(diffs * diffs, axis=-1) * inv_h2    # (M,N)
                 k = gaussian_kernel(r2, d)                        # normalized
-                # Average over samples: KDE density estimate
                 dens = jnp.mean(k, axis=1)
                 return dens
 
-            # Chunk to avoid OOM, similar to your chunked approach[^7]
+            # Chunk to avoid OOM
             M = Q.shape[0]
             chunk = 100_000 if d == 2 else 50_000
             out = []
             for s in range(0, M, chunk):
                 e = min(s + chunk, M)
                 out.append(np.asarray(eval_chunk(Q[s:e])))
-            return np.concatenate(out, axis=0)
+            return np.concatenate(out, axis=0).astype(np.float64, copy=False)
 
-        # CPU fallback, optionally SciPy if present as in your current logic[^14]
+        # SciPy fallback
         if SCIPY_AVAILABLE:
             kde = scipy_gaussian_kde(pts.T, bw_method=h)
             return kde(grid_xy_or_xyz.T).T

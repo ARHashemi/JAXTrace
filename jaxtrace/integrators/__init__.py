@@ -8,19 +8,19 @@ signature:
 
 where:
 - x: (N,3) particle positions
-- t: scalar time
+- t: scalar physical time
 - dt: scalar or (N,) time step sizes
 - field_fn: callable (x, t) -> (N,3) velocities
 """
 
-from .base import IntegratorFn
+from .base import FieldFn
 from .euler import euler_step
 from .rk2 import rk2_step
 from .rk4 import rk4_step
 
 __all__ = [
-    "IntegratorFn",
+    "FieldFn",
     "euler_step",
-    "rk2_step",
+    "rk2_step", 
     "rk4_step",
 ]

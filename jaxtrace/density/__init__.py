@@ -26,7 +26,7 @@ __all__ = [
     "gaussian_kernel",
     "cubic_spline_kernel_2d",
     "cubic_spline_kernel_3d",
-    "wendland_c2_kernel_2d",
+    "wendland_c2_kernel_2d", 
     "wendland_c2_kernel_3d",
     "scott_bandwidth",
     "silverman_bandwidth",

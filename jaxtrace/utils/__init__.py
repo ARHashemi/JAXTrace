@@ -1,11 +1,14 @@
+# jaxtrace/utils/__init__.py
 """
 Utilities for JAXTrace.
 
 Contains:
 - jax_utils: platform config, JAX guards, jit/vmap helpers
-- spatial: geometry & spatial hashing utilities
-- logging: timers, memory monitors, progress hooks
-- random: RNG helpers unified for JAX/NumPy
+- spatial: geometry & spatial hashing utilities  
+- logging: timers, memory monitoring, progress tracking
+- random: unified JAX/NumPy random number generation
+
+All modules handle JAX availability gracefully with NumPy fallbacks.
 """
 
 from .jax_utils import (
@@ -40,6 +43,7 @@ from .logging import (
     memory_info,
     gpu_memory_info,
     create_progress_callback,
+    ProgressCallback,
 )
 
 from .random import (
@@ -48,6 +52,11 @@ from .random import (
     uniform,
     normal,
     shuffle,
+    random_choice,
+    random_integers,
+    ArrayLike,
+    KeyLike,
+    Shape,
 )
 
 __all__ = [
@@ -79,10 +88,16 @@ __all__ = [
     "memory_info",
     "gpu_memory_info",
     "create_progress_callback",
+    "ProgressCallback",
     # random
     "rng_key",
     "split_keys",
     "uniform",
     "normal",
     "shuffle",
+    "random_choice",
+    "random_integers",
+    "ArrayLike",
+    "KeyLike",
+    "Shape",
 ]
