@@ -79,8 +79,8 @@ except Exception:
 # Fields - Velocity field handling with temporal interpolation
 try:
     from .fields.time_series import TimeSeriesField  # noqa: F401
-    from .fields.structured import StructuredGridSampler  # noqa: F401
-    from .fields.unstructured import UnstructuredField  # noqa: F401
+    from .fields.structured_old import StructuredGridSampler  # noqa: F401
+    from .fields.unstructured_old import UnstructuredField  # noqa: F401
 except Exception:
     pass
 
@@ -88,7 +88,7 @@ except Exception:
 try:
     from .integrators.euler import euler_step  # noqa: F401
     from .integrators.rk2 import rk2_step  # noqa: F401
-    from .integrators.rk4 import rk4_step  # noqa: F401
+    from .integrators.rk4_old import rk4_step  # noqa: F401
 except Exception:
     pass
 

@@ -2,14 +2,21 @@
 """  
 Structured grid velocity field sampling with consistent data types.  
 
-Provides efficient interpolation on regular grids with float32  
-optimization and (N,3) shape enforcement, enhanced VTK integration,  
-and comprehensive boundary handling.  
+Provides efficient trilinear interpolation on regular grids with float32  
+optimization and (N,3) shape enforcement. Includes a JAX-native sampler  
+and a NumPy fallback, plus boundary handling.  
+
+Boundary modes:  
+- 'clamp'    : clamp to boundary cells  
+- 'zero'     : return zero velocity for out-of-bounds  
+- 'nan'      : return NaN velocity for out-of-bounds  
+- 'periodic' : wrap indices periodically  
 """  
 
 from __future__ import annotations  
+
 from dataclasses import dataclass  
-from typing import Tuple, Optional, Union  
+from typing import Tuple, Optional  
 import numpy as np  
 
 # Import JAX utilities with fallback  
@@ -17,6 +24,7 @@ from ..utils.jax_utils import JAX_AVAILABLE
 
 if JAX_AVAILABLE:  
     try:  
+        import jax  
         import jax.numpy as jnp  
         from jax import jit  
     except Exception:  
@@ -24,6 +32,7 @@ if JAX_AVAILABLE:
 
 if not JAX_AVAILABLE:  
     import numpy as jnp  # type: ignore  
+
     # Mock jit decorator  
     def jit(func):  
         return func  
@@ -31,29 +40,47 @@ if not JAX_AVAILABLE:
 from .base import BaseField, GridMeta, _ensure_float32, _ensure_positions_shape  
 
 
+# ------------------------- Internal helpers -------------------------  
+
+def _ensure_positions_shape_jax(positions: "jnp.ndarray") -> "jnp.ndarray":  
+    """  
+    Ensure positions have shape (N, 3) using jax.numpy only.  
+    Do not call this in NumPy mode; use _ensure_positions_shape instead.  
+    """  
+    pos = jnp.asarray(positions, dtype=jnp.float32)  
+    if pos.ndim == 1:  
+        pos = pos.reshape((1, pos.shape[0]))  
+    if pos.ndim != 2:  
+        raise ValueError(f"Positions must be 2D array, got shape {pos.shape}")  
+    if pos.shape[1] == 2:  
+        z = jnp.zeros((pos.shape[0], 1), dtype=jnp.float32)  
+        pos = jnp.concatenate([pos, z], axis=1)  
+    elif pos.shape[1] != 3:  
+        raise ValueError(f"Positions must have 2 or 3 columns, got {pos.shape[1]}")  
+    return pos  
+
+
+# ------------------------- Main class -------------------------  
+
 @dataclass  
 class StructuredGridSampler(BaseField):  
     """  
     Structured grid field with trilinear interpolation.  
-    
-    Optimized for regular grids with consistent float32 data types  
-    and high-performance JAX interpolation when available.  
-    Enhanced with comprehensive boundary handling and VTK integration.  
-    
+
     Attributes  
     ----------  
     velocity_data : np.ndarray  
-        Velocity field on grid, shape (Nx, Ny, Nz, 3) - standardized to float32  
+        Velocity field on grid, shape (Nx, Ny, Nz, 3), float32  
     grid_x : np.ndarray  
-        X coordinates, shape (Nx,) - standardized to float32  
+        X coordinates, shape (Nx,), float32  
     grid_y : np.ndarray  
-        Y coordinates, shape (Ny,) - standardized to float32  
+        Y coordinates, shape (Ny,), float32  
     grid_z : np.ndarray  
-        Z coordinates, shape (Nz,) - standardized to float32  
+        Z coordinates, shape (Nz,), float32  
     bounds_handling : str  
-        Boundary condition for out-of-bounds points: 'clamp' | 'zero' | 'nan' | 'periodic'  
+        Boundary mode: 'clamp' | 'zero' | 'nan' | 'periodic'  
     grid_meta : GridMeta, optional  
-        Precomputed grid metadata for optimization  
+        Precomputed grid metadata  
     """  
     velocity_data: np.ndarray  # (Nx, Ny, Nz, 3)  
     grid_x: np.ndarray         # (Nx,)  
@@ -62,58 +89,48 @@ class StructuredGridSampler(BaseField):
     bounds_handling: str = "clamp"  # 'clamp' | 'zero' | 'nan' | 'periodic'  
     grid_meta: Optional[GridMeta] = None  
 
+    # Device copies for JAX path  
+    _vel_dev: Optional["jnp.ndarray"] = None  
+    _gx_dev: Optional["jnp.ndarray"] = None  
+    _gy_dev: Optional["jnp.ndarray"] = None  
+    _gz_dev: Optional["jnp.ndarray"] = None  
+
+    # Precompiled JAX sampler  
+    _sampler_jax: Optional[callable] = None  
+
     def __post_init__(self):  
         # Convert all data to consistent float32  
         self.velocity_data = _ensure_float32(self.velocity_data)  
         self.grid_x = _ensure_float32(self.grid_x)  
         self.grid_y = _ensure_float32(self.grid_y)  
         self.grid_z = _ensure_float32(self.grid_z)  
-        
+
         # Validate shapes  
         if self.velocity_data.ndim != 4:  
             raise ValueError(f"velocity_data must be 4D (Nx,Ny,Nz,3), got {self.velocity_data.shape}")  
-        
+
         Nx, Ny, Nz, D = self.velocity_data.shape  
         if D != 3:  
             raise ValueError(f"velocity_data must have 3 components, got {D}")  
-        
+
         if self.grid_x.shape != (Nx,):  
             raise ValueError(f"grid_x shape {self.grid_x.shape} doesn't match velocity_data Nx={Nx}")  
         if self.grid_y.shape != (Ny,):  
             raise ValueError(f"grid_y shape {self.grid_y.shape} doesn't match velocity_data Ny={Ny}")  
         if self.grid_z.shape != (Nz,):  
             raise ValueError(f"grid_z shape {self.grid_z.shape} doesn't match velocity_data Nz={Nz}")  
-        
+
         # Store grid metadata  
         self.Nx, self.Ny, self.Nz = Nx, Ny, Nz  
         self.dx = float(self.grid_x[1] - self.grid_x[0]) if Nx > 1 else 1.0  
         self.dy = float(self.grid_y[1] - self.grid_y[0]) if Ny > 1 else 1.0  
         self.dz = float(self.grid_z[1] - self.grid_z[0]) if Nz > 1 else 1.0  
-        
-        # Validate grid regularity  
-        if Nx > 2:  
-            dx_var = np.var(np.diff(self.grid_x))  
-            if dx_var > 1e-6 * self.dx**2:  
-                import warnings  
-                warnings.warn("Grid X spacing is not uniform, interpolation may be inaccurate")  
-        
-        if Ny > 2:  
-            dy_var = np.var(np.diff(self.grid_y))  
-            if dy_var > 1e-6 * self.dy**2:  
-                import warnings  
-                warnings.warn("Grid Y spacing is not uniform, interpolation may be inaccurate")  
-        
-        if Nz > 2:  
-            dz_var = np.var(np.diff(self.grid_z))  
-            if dz_var > 1e-6 * self.dz**2:  
-                import warnings  
-                warnings.warn("Grid Z spacing is not uniform, interpolation may be inaccurate")  
-        
-        # Grid bounds  
+
+        # Bounds (float range in physical coordinates)  
         self.x_min, self.x_max = float(self.grid_x[0]), float(self.grid_x[-1])  
         self.y_min, self.y_max = float(self.grid_y[0]), float(self.grid_y[-1])  
         self.z_min, self.z_max = float(self.grid_z[0]), float(self.grid_z[-1])  
-        
+
         # Create grid metadata if not provided  
         if self.grid_meta is None:  
             self.grid_meta = GridMeta(  
@@ -121,408 +138,225 @@ class StructuredGridSampler(BaseField):
                 spacing=jnp.array([self.dx, self.dy, self.dz], dtype=jnp.float32),  
                 shape=(Nx, Ny, Nz),  
                 bounds=jnp.array([[self.x_min, self.y_min, self.z_min],  
-                                [self.x_max, self.y_max, self.z_max]], dtype=jnp.float32)  
+                                  [self.x_max, self.y_max, self.z_max]], dtype=jnp.float32)  
             )  
-        
-        # Compile JAX interpolation if available  
-        if JAX_AVAILABLE:  
-            self._sample_jax = jit(self._trilinear_interpolate_jax)  
-        else:  
-            self._sample_jax = self._trilinear_interpolate_numpy  
 
-    def sample(self, positions: np.ndarray) -> np.ndarray:  
+        # Prepare JAX device arrays and compile kernel if JAX available  
+        if JAX_AVAILABLE:  
+            # Device-resident arrays to avoid host-device transfers per call  
+            self._vel_dev = jax.device_put(jnp.asarray(self.velocity_data, dtype=jnp.float32))  
+            self._gx_dev = jax.device_put(jnp.asarray(self.grid_x, dtype=jnp.float32))  
+            self._gy_dev = jax.device_put(jnp.asarray(self.grid_y, dtype=jnp.float32))  
+            self._gz_dev = jax.device_put(jnp.asarray(self.grid_z, dtype=jnp.float32))  
+
+            # Pre-capture constants for JIT  
+            self._dx_j = jnp.asarray(self.dx, dtype=jnp.float32)  
+            self._dy_j = jnp.asarray(self.dy, dtype=jnp.float32)  
+            self._dz_j = jnp.asarray(self.dz, dtype=jnp.float32)  
+            self._x_min_j = jnp.asarray(self.x_min, dtype=jnp.float32)  
+            self._y_min_j = jnp.asarray(self.y_min, dtype=jnp.float32)  
+            self._z_min_j = jnp.asarray(self.z_min, dtype=jnp.float32)  
+            self._Nx_j = jnp.asarray(self.Nx, dtype=jnp.int32)  
+            self._Ny_j = jnp.asarray(self.Ny, dtype=jnp.int32)  
+            self._Nz_j = jnp.asarray(self.Nz, dtype=jnp.int32)  
+
+            mode = self.bounds_handling.lower()  
+            if mode not in ("clamp", "zero", "nan", "periodic"):  
+                raise ValueError(f"Unsupported bounds_handling: {self.bounds_handling}")  
+
+            @jit  
+            def _trilinear_jax(positions: jnp.ndarray) -> jnp.ndarray:  
+                # Ensure shape (N,3)  
+                pos = _ensure_positions_shape_jax(positions)  
+                x = pos[:, 0]  
+                y = pos[:, 1]  
+                z = pos[:, 2]  
+
+                # Compute continuous indices in grid space  
+                fx = (x - self._x_min_j) / self._dx_j  
+                fy = (y - self._y_min_j) / self._dy_j  
+                fz = (z - self._z_min_j) / self._dz_j  
+
+                # Bounds handling  
+                if mode == "periodic":  
+                    fx = fx % self._Nx_j  
+                    fy = fy % self._Ny_j  
+                    fz = fz % self._Nz_j  
+                    valid_mask = jnp.ones_like(x, dtype=bool)  
+                else:  
+                    # Valid if within physical bounds (inclusive)  
+                    valid_x = (x >= self._x_min_j) & (x <= self._x_min_j + (self._Nx_j - 1) * self._dx_j)  
+                    valid_y = (y >= self._y_min_j) & (y <= self._y_min_j + (self._Ny_j - 1) * self._dy_j)  
+                    valid_z = (z >= self._z_min_j) & (z <= self._z_min_j + (self._Nz_j - 1) * self._dz_j)  
+                    valid_mask = valid_x & valid_y & valid_z  
+
+                    if mode == "clamp":  
+                        fx = jnp.clip(fx, 0.0, jnp.maximum(self._Nx_j - 1, 0))  
+                        fy = jnp.clip(fy, 0.0, jnp.maximum(self._Ny_j - 1, 0))  
+                        fz = jnp.clip(fz, 0.0, jnp.maximum(self._Nz_j - 1, 0))  
+                    else:  
+                        # For zero/nan, we can still clamp indices to avoid OOB on gather  
+                        fx = jnp.clip(fx, 0.0, jnp.maximum(self._Nx_j - 1, 0))  
+                        fy = jnp.clip(fy, 0.0, jnp.maximum(self._Ny_j - 1, 0))  
+                        fz = jnp.clip(fz, 0.0, jnp.maximum(self._Nz_j - 1, 0))  
+
+                # Integer neighbors  
+                i0 = jnp.floor(fx).astype(jnp.int32)  
+                j0 = jnp.floor(fy).astype(jnp.int32)  
+                k0 = jnp.floor(fz).astype(jnp.int32)  
+
+                if mode == "periodic":  
+                    i1 = (i0 + 1) % self._Nx_j  
+                    j1 = (j0 + 1) % self._Ny_j  
+                    k1 = (k0 + 1) % self._Nz_j  
+                else:  
+                    i1 = jnp.clip(i0 + 1, 0, jnp.maximum(self._Nx_j - 1, 0))  
+                    j1 = jnp.clip(j0 + 1, 0, jnp.maximum(self._Ny_j - 1, 0))  
+                    k1 = jnp.clip(k0 + 1, 0, jnp.maximum(self._Nz_j - 1, 0))  
+
+                # Fractional weights  
+                wx = fx - i0.astype(jnp.float32)  
+                wy = fy - j0.astype(jnp.float32)  
+                wz = fz - k0.astype(jnp.float32)  
+
+                # Gather corner velocities (elementwise indexing)  
+                V = self._vel_dev  # (Nx, Ny, Nz, 3)  
+                v000 = V[i0, j0, k0]  
+                v100 = V[i1, j0, k0]  
+                v010 = V[i0, j1, k0]  
+                v110 = V[i1, j1, k0]  
+                v001 = V[i0, j0, k1]  
+                v101 = V[i1, j0, k1]  
+                v011 = V[i0, j1, k1]  
+                v111 = V[i1, j1, k1]  
+
+                # Trilinear interpolation  
+                c00 = v000 * (1.0 - wx)[:, None] + v100 * wx[:, None]  
+                c10 = v010 * (1.0 - wx)[:, None] + v110 * wx[:, None]  
+                c01 = v001 * (1.0 - wx)[:, None] + v101 * wx[:, None]  
+                c11 = v011 * (1.0 - wx)[:, None] + v111 * wx[:, None]  
+
+                c0 = c00 * (1.0 - wy)[:, None] + c10 * wy[:, None]  
+                c1 = c01 * (1.0 - wy)[:, None] + c11 * wy[:, None]  
+
+                vals = c0 * (1.0 - wz)[:, None] + c1 * wz[:, None]  # (N, 3)  
+
+                if mode == "zero":  
+                    vals = jnp.where(valid_mask[:, None], vals, jnp.zeros_like(vals))  
+                elif mode == "nan":  
+                    vals = jnp.where(valid_mask[:, None], vals, jnp.full_like(vals, jnp.nan))  
+                # clamp and periodic already handled  
+
+                return vals  
+
+            self._sampler_jax = _trilinear_jax  
+        else:  
+            self._sampler_jax = None  # NumPy path  
+
+    # ------------------------- Public API -------------------------  
+
+    def sample(self, positions: np.ndarray) -> "jnp.ndarray":  
         """  
-        Sample velocity field at arbitrary positions using trilinear interpolation.  
-        
+        Sample the velocity field at given positions.  
+
         Parameters  
         ----------  
-        positions : np.ndarray  
-            Query positions, shape (N, 2) or (N, 3)  
-            
+        positions : array-like, shape (N, 2|3)  
+            Query positions.  
+
         Returns  
         -------  
-        np.ndarray  
-            Interpolated velocities, shape (N, 3), dtype float32  
+        array-like  
+            Velocity vectors at positions, shape (N, 3).  
+            - If JAX is available, returns a jax.numpy array (jnp.ndarray).  
+            - Otherwise, returns a numpy array (np.ndarray).  
         """  
-        # Ensure consistent position format  
-        pos = _ensure_positions_shape(positions)  # (N, 3), float32  
-        
-        if pos.shape[0] == 0:  
-            return np.zeros((0, 3), dtype=np.float32)  
-        
-        if JAX_AVAILABLE:  
-            pos_jax = jnp.asarray(pos, dtype=jnp.float32)  
-            vel_jax = self._sample_jax(pos_jax)  
-            return np.asarray(vel_jax, dtype=np.float32)  
-        else:  
-            return self._trilinear_interpolate_numpy(pos)  
+        mode = self.bounds_handling.lower()  
+        if mode not in ("clamp", "zero", "nan", "periodic"):  
+            raise ValueError(f"Unsupported bounds_handling: {self.bounds_handling}")  
 
-    def _trilinear_interpolate_jax(self, positions: jnp.ndarray) -> jnp.ndarray:  
-        """JAX-optimized trilinear interpolation."""  
-        x, y, z = positions[:, 0], positions[:, 1], positions[:, 2]  
-        
-        # Convert to grid coordinates  
-        fx = (x - self.x_min) / self.dx  
-        fy = (y - self.y_min) / self.dy  
-        fz = (z - self.z_min) / self.dz  
-        
-        # Handle bounds  
-        if self.bounds_handling == "periodic":  
-            fx = fx % self.Nx  
-            fy = fy % self.Ny  
-            fz = fz % self.Nz  
-        elif self.bounds_handling == "clamp":  
-            fx = jnp.clip(fx, 0, self.Nx - 1)  
-            fy = jnp.clip(fy, 0, self.Ny - 1)  
-            fz = jnp.clip(fz, 0, self.Nz - 1)  
-        
-        # Integer indices  
-        ix = jnp.floor(fx).astype(jnp.int32)  
-        iy = jnp.floor(fy).astype(jnp.int32)  
-        iz = jnp.floor(fz).astype(jnp.int32)  
-        
-        # Handle periodic boundaries for indices  
-        if self.bounds_handling == "periodic":  
-            ix = ix % self.Nx  
-            iy = iy % self.Ny  
-            iz = iz % self.Nz  
-            ix_p1 = (ix + 1) % self.Nx  
-            iy_p1 = (iy + 1) % self.Ny  
-            iz_p1 = (iz + 1) % self.Nz  
+        if JAX_AVAILABLE and self._sampler_jax is not None:  
+            pos = _ensure_positions_shape_jax(positions)  
+            return self._sampler_jax(pos)  
         else:  
-            # Clamp indices to valid range  
-            ix = jnp.clip(ix, 0, self.Nx - 2)  
-            iy = jnp.clip(iy, 0, self.Ny - 2)  
-            iz = jnp.clip(iz, 0, self.Nz - 2)  
-            ix_p1 = ix + 1  
-            iy_p1 = iy + 1  
-            iz_p1 = iz + 1  
-        
-        # Fractional parts  
-        tx = fx - jnp.floor(fx) if self.bounds_handling == "periodic" else fx - ix  
-        ty = fy - jnp.floor(fy) if self.bounds_handling == "periodic" else fy - iy  
-        tz = fz - jnp.floor(fz) if self.bounds_handling == "periodic" else fz - iz  
-        
-        # Get corner values  
-        v000 = self.velocity_data[ix, iy, iz]          # (N, 3)  
-        v100 = self.velocity_data[ix_p1, iy, iz]  
-        v010 = self.velocity_data[ix, iy_p1, iz]  
-        v110 = self.velocity_data[ix_p1, iy_p1, iz]  
-        v001 = self.velocity_data[ix, iy, iz_p1]  
-        v101 = self.velocity_data[ix_p1, iy, iz_p1]  
-        v011 = self.velocity_data[ix, iy_p1, iz_p1]  
-        v111 = self.velocity_data[ix_p1, iy_p1, iz_p1]  
-        
-        # Trilinear interpolation  
-        tx = tx[:, None]  # (N, 1)  
-        ty = ty[:, None]  # (N, 1)  
-        tz = tz[:, None]  # (N, 1)  
-        
-        v_xy0 = v000 * (1 - tx) * (1 - ty) + v100 * tx * (1 - ty) + \
-                v010 * (1 - tx) * ty + v110 * tx * ty  
-        
-        v_xy1 = v001 * (1 - tx) * (1 - ty) + v101 * tx * (1 - ty) + \
-                v011 * (1 - tx) * ty + v111 * tx * ty  
-        
-        result = v_xy0 * (1 - tz) + v_xy1 * tz  
-        
-        # Handle out-of-bounds for non-periodic cases  
-        if self.bounds_handling not in ("clamp", "periodic"):  
-            original_fx = (positions[:, 0] - self.x_min) / self.dx  
-            original_fy = (positions[:, 1] - self.y_min) / self.dy  
-            original_fz = (positions[:, 2] - self.z_min) / self.dz  
-            
-            oob_mask = (  
-                (original_fx < 0) | (original_fx >= self.Nx) |  
-                (original_fy < 0) | (original_fy >= self.Ny) |  
-                (original_fz < 0) | (original_fz >= self.Nz)  
-            )[:, None]  
-            
-            if self.bounds_handling == "zero":  
-                result = jnp.where(oob_mask, 0.0, result)  
-            elif self.bounds_handling == "nan":  
-                result = jnp.where(oob_mask, jnp.nan, result)  
-        
-        return result.astype(jnp.float32)  
+            # NumPy fallback  
+            pos = _ensure_positions_shape(positions)  
+            x = pos[:, 0]  
+            y = pos[:, 1]  
+            z = pos[:, 2]  
 
-    def _trilinear_interpolate_numpy(self, positions: np.ndarray) -> np.ndarray:  
-        """NumPy fallback for trilinear interpolation."""  
-        x, y, z = positions[:, 0], positions[:, 1], positions[:, 2]  
-        
-        # Convert to grid coordinates  
-        fx = (x - self.x_min) / self.dx  
-        fy = (y - self.y_min) / self.dy  
-        fz = (z - self.z_min) / self.dz  
-        
-        # Handle bounds  
-        if self.bounds_handling == "periodic":  
-            fx = fx % self.Nx  
-            fy = fy % self.Ny  
-            fz = fz % self.Nz  
-        elif self.bounds_handling == "clamp":  
-            fx = np.clip(fx, 0, self.Nx - 1)  
-            fy = np.clip(fy, 0, self.Ny - 1)  
-            fz = np.clip(fz, 0, self.Nz - 1)  
-        
-        # Integer indices  
-        ix = np.floor(fx).astype(np.int32)  
-        iy = np.floor(fy).astype(np.int32)  
-        iz = np.floor(fz).astype(np.int32)  
-        
-        # Handle periodic boundaries for indices  
-        if self.bounds_handling == "periodic":  
-            ix = ix % self.Nx  
-            iy = iy % self.Ny  
-            iz = iz % self.Nz  
-            ix_p1 = (ix + 1) % self.Nx  
-            iy_p1 = (iy + 1) % self.Ny  
-            iz_p1 = (iz + 1) % self.Nz  
-        else:  
-            # Clamp indices  
-            ix = np.clip(ix, 0, self.Nx - 2)  
-            iy = np.clip(iy, 0, self.Ny - 2)  
-            iz = np.clip(iz, 0, self.Nz - 2)  
-            ix_p1 = ix + 1  
-            iy_p1 = iy + 1  
-            iz_p1 = iz + 1  
-        
-        # Fractional parts  
-        tx = fx - ix
-        ty = fy - iy
-        tz = fz - iz
-        
-        # Get corner values - ensure indices are within bounds
-        ix = np.clip(ix, 0, self.Nx - 1)
-        iy = np.clip(iy, 0, self.Ny - 1)
-        iz = np.clip(iz, 0, self.Nz - 1)
-        ix_p1 = np.clip(ix_p1, 0, self.Nx - 1)
-        iy_p1 = np.clip(iy_p1, 0, self.Ny - 1)
-        iz_p1 = np.clip(iz_p1, 0, self.Nz - 1)
-        
-        v000 = self.velocity_data[ix, iy, iz]          # (N, 3)
-        v100 = self.velocity_data[ix_p1, iy, iz]
-        v010 = self.velocity_data[ix, iy_p1, iz]
-        v110 = self.velocity_data[ix_p1, iy_p1, iz]
-        v001 = self.velocity_data[ix, iy, iz_p1]
-        v101 = self.velocity_data[ix_p1, iy, iz_p1]
-        v011 = self.velocity_data[ix, iy_p1, iz_p1]
-        v111 = self.velocity_data[ix_p1, iy_p1, iz_p1]
-        
-        # Trilinear interpolation
-        tx = tx[:, None]  # (N, 1)
-        ty = ty[:, None]  # (N, 1)
-        tz = tz[:, None]  # (N, 1)
-        
-        v_xy0 = v000 * (1 - tx) * (1 - ty) + v100 * tx * (1 - ty) + \
-                v010 * (1 - tx) * ty + v110 * tx * ty
-        
-        v_xy1 = v001 * (1 - tx) * (1 - ty) + v101 * tx * (1 - ty) + \
-                v011 * (1 - tx) * ty + v111 * tx * ty
-        
-        result = v_xy0 * (1 - tz) + v_xy1 * tz
-        
-        # Handle out-of-bounds for non-periodic cases
-        if self.bounds_handling not in ("clamp", "periodic"):
-            original_fx = (positions[:, 0] - self.x_min) / self.dx
-            original_fy = (positions[:, 1] - self.y_min) / self.dy
-            original_fz = (positions[:, 2] - self.z_min) / self.dz
-            
-            oob_mask = (
-                (original_fx < 0) | (original_fx >= self.Nx) |
-                (original_fy < 0) | (original_fy >= self.Ny) |
-                (original_fz < 0) | (original_fz >= self.Nz)
-            )[:, None]
-            
-            if self.bounds_handling == "zero":
-                result = np.where(oob_mask, 0.0, result)
-            elif self.bounds_handling == "nan":
-                result = np.where(oob_mask, np.nan, result)
-        
-        return result.astype(np.float32)
+            # Convert to continuous grid indices  
+            fx = (x - self.x_min) / self.dx  
+            fy = (y - self.y_min) / self.dy  
+            fz = (z - self.z_min) / self.dz  
 
-    def get_spatial_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Return spatial bounds of the structured grid."""
-        bounds_min = np.array([self.x_min, self.y_min, self.z_min], dtype=np.float32)
-        bounds_max = np.array([self.x_max, self.y_max, self.z_max], dtype=np.float32)
+            if mode == "periodic":  
+                fx = np.mod(fx, max(self.Nx, 1))  
+                fy = np.mod(fy, max(self.Ny, 1))  
+                fz = np.mod(fz, max(self.Nz, 1))  
+                valid_mask = np.ones_like(x, dtype=bool)  
+            else:  
+                valid_x = (x >= self.x_min) & (x <= self.x_min + (self.Nx - 1) * self.dx)  
+                valid_y = (y >= self.y_min) & (y <= self.y_min + (self.Ny - 1) * self.dy)  
+                valid_z = (z >= self.z_min) & (z <= self.z_min + (self.Nz - 1) * self.dz)  
+                valid_mask = valid_x & valid_y & valid_z  
+
+                fx = np.clip(fx, 0.0, max(self.Nx - 1, 0))  
+                fy = np.clip(fy, 0.0, max(self.Ny - 1, 0))  
+                fz = np.clip(fz, 0.0, max(self.Nz - 1, 0))  
+
+            i0 = np.floor(fx).astype(np.int32)  
+            j0 = np.floor(fy).astype(np.int32)  
+            k0 = np.floor(fz).astype(np.int32)  
+            if mode == "periodic":  
+                i1 = (i0 + 1) % max(self.Nx, 1)  
+                j1 = (j0 + 1) % max(self.Ny, 1)  
+                k1 = (k0 + 1) % max(self.Nz, 1)  
+            else:  
+                i1 = np.clip(i0 + 1, 0, max(self.Nx - 1, 0))
+                j1 = np.clip(j0 + 1, 0, max(self.Ny - 1, 0))
+                k1 = np.clip(k0 + 1, 0, max(self.Nz - 1, 0))
+
+            wx = fx - i0.astype(np.float32)
+            wy = fy - j0.astype(np.float32)
+            wz = fz - k0.astype(np.float32)
+
+            V = self.velocity_data  # (Nx, Ny, Nz, 3)
+            v000 = V[i0, j0, k0]
+            v100 = V[i1, j0, k0]
+            v010 = V[i0, j1, k0]
+            v110 = V[i1, j1, k0]
+            v001 = V[i0, j0, k1]
+            v101 = V[i1, j0, k1]
+            v011 = V[i0, j1, k1]
+            v111 = V[i1, j1, k1]
+
+            c00 = v000 * (1.0 - wx)[:, None] + v100 * wx[:, None]
+            c10 = v010 * (1.0 - wx)[:, None] + v110 * wx[:, None]
+            c01 = v001 * (1.0 - wx)[:, None] + v101 * wx[:, None]
+            c11 = v011 * (1.0 - wx)[:, None] + v111 * wx[:, None]
+
+            c0 = c00 * (1.0 - wy)[:, None] + c10 * wy[:, None]
+            c1 = c01 * (1.0 - wy)[:, None] + c11 * wy[:, None]
+
+            vals = c0 * (1.0 - wz)[:, None] + c1 * wz[:, None]  # (N, 3)
+
+            if mode == "zero":
+                vals[~valid_mask] = 0.0
+            elif mode == "nan":
+                vals[~valid_mask] = np.nan
+
+            return vals
+
+    def get_spatial_bounds(self) -> Tuple["jnp.ndarray", "jnp.ndarray"]:
+        """
+        Return spatial bounds as (min, max), each shape (3,).
+        """
+        bounds_min = jnp.asarray([self.x_min, self.y_min, self.z_min], dtype=jnp.float32)
+        bounds_max = jnp.asarray([self.x_max, self.y_max, self.z_max], dtype=jnp.float32)
         return bounds_min, bounds_max
-
-    def get_grid_metadata(self) -> GridMeta:
-        """Return grid metadata."""
-        return self.grid_meta
-
-    def memory_usage_mb(self) -> float:
-        """Estimate memory usage in MB."""
-        velocity_size = self.velocity_data.size * 4  # float32
-        grid_size = (self.grid_x.size + self.grid_y.size + self.grid_z.size) * 4
-        return (velocity_size + grid_size) / 1024**2
-
-    def validate_data(self) -> bool:
-        """
-        Validate grid data consistency.
-        
-        Returns
-        -------
-        bool
-            True if valid
-            
-        Raises
-        ------
-        ValueError
-            If data is inconsistent
-        """
-        # Check for NaN/infinite values
-        if not np.all(np.isfinite(self.velocity_data)):
-            raise ValueError("velocity_data contains non-finite values")
-        
-        if not np.all(np.isfinite(self.grid_x)):
-            raise ValueError("grid_x contains non-finite values")
-        
-        if not np.all(np.isfinite(self.grid_y)):
-            raise ValueError("grid_y contains non-finite values")
-        
-        if not np.all(np.isfinite(self.grid_z)):
-            raise ValueError("grid_z contains non-finite values")
-        
-        # Check monotonicity
-        if not np.all(np.diff(self.grid_x) > 0):
-            raise ValueError("grid_x must be monotonically increasing")
-        
-        if not np.all(np.diff(self.grid_y) > 0):
-            raise ValueError("grid_y must be monotonically increasing")
-        
-        if not np.all(np.diff(self.grid_z) > 0):
-            raise ValueError("grid_z must be monotonically increasing")
-        
-        return True
-
-    def extract_2d_slice(self, plane: str = "xy", index: Optional[int] = None) -> 'StructuredGridSampler':
-        """
-        Extract 2D slice from 3D grid.
-        
-        Parameters
-        ----------
-        plane : str
-            Slice plane: 'xy', 'xz', or 'yz'
-        index : int, optional
-            Index for slice. If None, uses middle of domain.
-            
-        Returns
-        -------
-        StructuredGridSampler
-            2D slice sampler
-        """
-        if plane == "xy":
-            if index is None:
-                index = self.Nz // 2
-            if index < 0 or index >= self.Nz:
-                raise ValueError(f"Z index {index} out of range [0, {self.Nz-1}]")
-            
-            velocity_2d = self.velocity_data[:, :, index, :]  # (Nx, Ny, 3)
-            velocity_2d = velocity_2d[:, :, None, :]          # (Nx, Ny, 1, 3)
-            grid_z_slice = np.array([self.grid_z[index]], dtype=np.float32)
-            
-            return StructuredGridSampler(
-                velocity_data=velocity_2d,
-                grid_x=self.grid_x,
-                grid_y=self.grid_y,
-                grid_z=grid_z_slice,
-                bounds_handling=self.bounds_handling
-            )
-            
-        elif plane == "xz":
-            if index is None:
-                index = self.Ny // 2
-            if index < 0 or index >= self.Ny:
-                raise ValueError(f"Y index {index} out of range [0, {self.Ny-1}]")
-            
-            velocity_2d = self.velocity_data[:, index, :, :]  # (Nx, Nz, 3)
-            velocity_2d = velocity_2d[:, None, :, :]          # (Nx, 1, Nz, 3)
-            grid_y_slice = np.array([self.grid_y[index]], dtype=np.float32)
-            
-            return StructuredGridSampler(
-                velocity_data=velocity_2d,
-                grid_x=self.grid_x,
-                grid_y=grid_y_slice,
-                grid_z=self.grid_z,
-                bounds_handling=self.bounds_handling
-            )
-            
-        elif plane == "yz":
-            if index is None:
-                index = self.Nx // 2
-            if index < 0 or index >= self.Nx:
-                raise ValueError(f"X index {index} out of range [0, {self.Nx-1}]")
-            
-            velocity_2d = self.velocity_data[index, :, :, :]  # (Ny, Nz, 3)
-            velocity_2d = velocity_2d[None, :, :, :]          # (1, Ny, Nz, 3)
-            grid_x_slice = np.array([self.grid_x[index]], dtype=np.float32)
-            
-            return StructuredGridSampler(
-                velocity_data=velocity_2d,
-                grid_x=grid_x_slice,
-                grid_y=self.grid_y,
-                grid_z=self.grid_z,
-                bounds_handling=self.bounds_handling
-            )
-        else:
-            raise ValueError(f"Unknown plane '{plane}'. Use 'xy', 'xz', or 'yz'.")
-
-    def sample_at_grid_point(self, i: int, j: int, k: int) -> np.ndarray:
-        """
-        Sample velocity at specific grid point.
-        
-        Parameters
-        ----------
-        i, j, k : int
-            Grid indices
-            
-        Returns
-        -------
-        np.ndarray
-            Velocity at grid point, shape (3,)
-        """
-        if not (0 <= i < self.Nx and 0 <= j < self.Ny and 0 <= k < self.Nz):
-            raise ValueError(f"Grid indices ({i}, {j}, {k}) out of bounds")
-        
-        return self.velocity_data[i, j, k].copy()
-
-    def get_velocity_magnitude_range(self) -> Tuple[float, float]:
-        """Get range of velocity magnitudes in the field."""
-        speed = np.linalg.norm(self.velocity_data, axis=-1)  # (Nx, Ny, Nz)
-        return float(np.min(speed)), float(np.max(speed))
-
-    def get_divergence(self) -> np.ndarray:
-        """
-        Compute velocity divergence using finite differences.
-        
-        Returns
-        -------
-        np.ndarray
-            Divergence field, shape (Nx, Ny, Nz)
-        """
-        # Central differences with boundary handling
-        div = np.zeros((self.Nx, self.Ny, self.Nz), dtype=np.float32)
-        
-        # dU/dx
-        div[1:-1, :, :] += (self.velocity_data[2:, :, :, 0] - self.velocity_data[:-2, :, :, 0]) / (2 * self.dx)
-        div[0, :, :] += (self.velocity_data[1, :, :, 0] - self.velocity_data[0, :, :, 0]) / self.dx  # Forward diff
-        div[-1, :, :] += (self.velocity_data[-1, :, :, 0] - self.velocity_data[-2, :, :, 0]) / self.dx  # Backward diff
-        
-        # dV/dy
-        div[:, 1:-1, :] += (self.velocity_data[:, 2:, :, 1] - self.velocity_data[:, :-2, :, 1]) / (2 * self.dy)
-        div[:, 0, :] += (self.velocity_data[:, 1, :, 1] - self.velocity_data[:, 0, :, 1]) / self.dy
-        div[:, -1, :] += (self.velocity_data[:, -1, :, 1] - self.velocity_data[:, -2, :, 1]) / self.dy
-        
-        # dW/dz
-        div[:, :, 1:-1] += (self.velocity_data[:, :, 2:, 2] - self.velocity_data[:, :, :-2, 2]) / (2 * self.dz)
-        div[:, :, 0] += (self.velocity_data[:, :, 1, 2] - self.velocity_data[:, :, 0, 2]) / self.dz
-        div[:, :, -1] += (self.velocity_data[:, :, -1, 2] - self.velocity_data[:, :, -2, 2]) / self.dz
-        
-        return div
-
-
-# Factory functions
-
+    
+# ------------------------- Factory functions -------------------------
 def create_structured_field_from_arrays(
     velocity_data: np.ndarray,
     x_coords: np.ndarray,
@@ -693,8 +527,3 @@ def create_uniform_grid(
         grid_z=z_coords,
         **kwargs
     )
-
-
-# Aliases for backwards compatibility
-StructuredVelocityField = StructuredGridSampler
-StructuredSampler = StructuredGridSampler

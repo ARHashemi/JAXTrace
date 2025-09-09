@@ -799,7 +799,7 @@ def main():
     config = {
         'data_directory': '/home/arhashemi/Workspace/welding/Cases/002_caseCoarse.gid/post/0eule/',
         'case_name': 'caseCoarse',
-        'n_particles': 300,  # Reduced for stability
+        'n_particles': 10000,  # Reduced for stability
         'output_directory': 'output_jaxtrace'
     }
     

@@ -1,18 +1,9 @@
 # jaxtrace/integrators/base.py
-"""
-Base types and protocols for numerical integration.
-
-Defines the function signatures used by all integrators in JAXTrace.
-All integrators follow the common pattern:
-
-    new_positions = integrator_step(positions, time, dt, field_function)
-"""
 
 from __future__ import annotations
 from typing import Callable, Protocol, Union
 import numpy as np
 
-# Import JAX utilities
 from ..utils.jax_utils import JAX_AVAILABLE
 
 if JAX_AVAILABLE:
@@ -21,14 +12,16 @@ if JAX_AVAILABLE:
         ArrayLike = Union[np.ndarray, jnp.ndarray]
     except Exception:
         JAX_AVAILABLE = False
-        
+
 if not JAX_AVAILABLE:
     import numpy as jnp  # type: ignore
     ArrayLike = np.ndarray
 
+# NEW: Allow time to be a Python float or a JAX scalar (0-D array)
+FloatScalar = Union[float, jnp.ndarray]
 
 # Field function signature: takes positions and time, returns velocities
-FieldFn = Callable[[jnp.ndarray, float], jnp.ndarray]
+FieldFn = Callable[[jnp.ndarray, FloatScalar], jnp.ndarray]
 """
 Field function protocol.
 
@@ -36,7 +29,7 @@ Parameters
 ----------
 positions : jnp.ndarray
     Particle positions, shape (N, 3)
-time : float
+time : float or jnp scalar
     Current simulation time
 
 Returns

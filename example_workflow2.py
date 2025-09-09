@@ -622,22 +622,26 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
     
     # Seed particles in multiple strategic regions
     positions_list = []
-    n_per_region = n_particles // 4
+    n_regions = 3
+    n_per_region = n_particles // n_regions
     
     # Region 1: Domain center (high activity zone)
     center = [(bounds_min[i] + bounds_max[i]) / 2 for i in range(3)]
-    size = [(bounds_max[i] - bounds_min[i]) * 0.3 for i in range(3)]
+    # size = [(bounds_max[i] - bounds_min[i]) * 0.99 for i in range(3)]
+    size = [(bounds_max[0] - bounds_min[0]) * 0.9,
+            (bounds_max[1] - bounds_min[1]) * 0.3, 
+            (bounds_max[2] - bounds_min[2]) * 0.9]
     region1_min = [center[i] - size[i]/2 for i in range(3)]
     region1_max = [center[i] + size[i]/2 for i in range(3)]
-    
-    pos1 = random_seeds(n_per_region, [region1_min, region1_max], rng_seed=42)
+    n_region_1 = int(n_per_region*1.5)
+    pos1 = random_seeds(n_region_1, [region1_min, region1_max], rng_seed=42)
     positions_list.append(pos1)
     
     # Region 2: Near domain boundaries (boundary effects)
     boundary_thickness = min(bounds_max[i] - bounds_min[i] for i in range(3)) * 0.1
-    
+    n_region_2 = int(n_per_region*0.7)
     pos2 = random_seeds(
-        n_per_region,
+        n_region_2,
         [[bounds_min[0], bounds_min[1], bounds_min[2]],
          [bounds_min[0] + boundary_thickness, bounds_max[1], bounds_max[2]]],
         rng_seed=43
@@ -646,19 +650,20 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
     
     # Region 3: High gradient zones (sample field to find)
     # For simplicity, use random sampling with slight bias toward center
-    pos3 = random_seeds(
-        n_per_region,
-        domain_bounds,  # Use proper bounds format
-        rng_seed=44
-    )
-    positions_list.append(pos3)
+    # pos3 = random_seeds(
+    #     n_per_region,
+    #     domain_bounds,  # Use proper bounds format
+    #     rng_seed=44
+    # )
+    # positions_list.append(pos3)
     
     # Region 4: Remaining particles distributed randomly
-    remaining = n_particles - 3 * n_per_region
+    remaining = n_particles - n_region_1 - n_region_2 #n_particles - (n_regions-1) * n_per_region
     pos4 = random_seeds(remaining, domain_bounds, rng_seed=45)
     positions_list.append(pos4)
     
     initial_positions = np.vstack(positions_list)
+    # print(f"   🌱 Initial positions shape: {initial_positions.shape}")
     n_particles_actual = initial_positions.shape[0]
     
     print(f"   🌱 Seeded {n_particles_actual} particles in 4 strategic regions")
@@ -670,8 +675,8 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
         oom_recovery=True,
         use_jax_jit=True,
         batch_size=300,  # Smaller batches for stability
-        progress_callback=lambda p: print(f"      ⏳ Tracking progress: {p*100:.1f}%") 
-                         if int(p * 20) != int((p - 0.05) * 20) else None  # Every 5%
+        progress_callback=None#lambda p: print(f"      ⏳ Tracking progress: {p*100:.1f}%") 
+                        #  if int(p * 20) != int((p - 0.05) * 20) else None  # Every 5%
     )
     
     # FIXED: Create proper boundary condition with domain bounds
@@ -695,21 +700,21 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
         {
             'name': 'RK4 High Resolution' + (' (Periodic)' if use_time_periodicity else ''),
             'integrator': 'rk4',
-            'n_timesteps': int(80 * base_timesteps_factor),
+            'n_timesteps': 4000,#int(80 * base_timesteps_factor),
             'batch_size': 200
-        },
-        {
-            'name': 'RK2 Medium Resolution' + (' (Periodic)' if use_time_periodicity else ''), 
-            'integrator': 'rk2',
-            'n_timesteps': int(60 * base_timesteps_factor),
-            'batch_size': 300
-        },
-        {
-            'name': 'Euler Simple' + (' (Periodic)' if use_time_periodicity else ''),
-            'integrator': 'euler', 
-            'n_timesteps': int(40 * base_timesteps_factor),
-            'batch_size': 500
-        }
+        }# ,
+        # {
+        #     'name': 'RK2 Medium Resolution' + (' (Periodic)' if use_time_periodicity else ''), 
+        #     'integrator': 'rk2',
+        #     'n_timesteps': int(60 * base_timesteps_factor),
+        #     'batch_size': 300
+        # },
+        # {
+        #     'name': 'Euler Simple' + (' (Periodic)' if use_time_periodicity else ''),
+        #     'integrator': 'euler', 
+        #     'n_timesteps': int(40 * base_timesteps_factor),
+        #     'batch_size': 500
+        # }
     ]
     
     trajectory = None
@@ -732,6 +737,7 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
                 boundary_condition=boundary_fn,
                 **options.__dict__
             )
+            print(f"      ✅ Tracker created successfully")
             
             # Estimate memory and runtime
             runtime_est = tracker.estimate_runtime(
@@ -739,6 +745,7 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
                 strategy['n_timesteps'],
                 calibration_particles=min(50, n_particles_actual // 10)
             )
+            print(f"      ✅ Runtime estimation completed")
             
             if runtime_est['success']:
                 print(f"      ⏱️  Estimated time: {runtime_est['estimated_runtime_minutes']:.1f} min")
@@ -747,6 +754,8 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
                 if runtime_est['estimated_memory_gb'] > 10:
                     print(f"      ⚠️  High memory usage, reducing batch size...")
                     options.batch_size = max(100, options.batch_size // 2)
+            else:
+                print(f"      ⚠️  Runtime estimation failed, proceeding with caution...")
             
             # Execute tracking
             start_time = time.time()
@@ -1289,6 +1298,129 @@ def create_time_periodic_field(original_field, config):
 #         else:
 #             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
+# class TimePeriodicFieldWrapper:
+#     """
+#     Wrapper that makes a time series field periodic by repeating a time slice.
+#     Implements the same interface as the base field (evaluate/__call__), with periodic time behavior.
+#     """
+
+#     def __init__(self, original_field, period_start, period_end, n_periods, transition_smoothing=0.1):
+#         self.original_field = original_field
+#         self.period_start = period_start
+#         self.period_end = period_end
+#         self.period_duration = period_end - period_start
+#         self.n_periods = n_periods
+#         self.total_duration = n_periods * self.period_duration
+#         self.transition_smoothing = transition_smoothing
+
+#         # Cache bounds
+#         self._spatial_bounds = original_field.get_spatial_bounds()
+
+#         # Validate period
+#         orig_t_start, orig_t_end = original_field.get_time_bounds()
+#         if period_start < orig_t_start or period_end > orig_t_end:
+#             raise ValueError(f"Period [{period_start}, {period_end}] outside original time range [{orig_t_start}, {orig_t_end}]")
+
+#     # --- Robust evaluation dispatcher ---
+#     def _eval_base(self, t, x):
+#         """
+#         Dispatch evaluation to the underlying field using the interface it provides.
+#         Supports: __call__(t, x), evaluate(t, x), interp(t, x), interpolate(t, x)
+#         """
+#         f = self.original_field
+#         if hasattr(f, "__call__"):
+#             return f(t, x)
+#         if hasattr(f, "evaluate"):
+#             return f.evaluate(t, x)
+#         if hasattr(f, "interp"):
+#             return f.interp(t, x)
+#         if hasattr(f, "interpolate"):
+#             return f.interpolate(t, x)
+#         raise TypeError("Underlying field is not callable and has no evaluate/interp/interpolate method")
+
+#     # --- Public API used by tracker(s) ---
+#     def __call__(self, t, x):
+#         """Evaluate velocity field at time t and positions x with periodic time."""
+#         t_periodic = self._map_to_periodic_time(t)
+#         if self.transition_smoothing > 0 and np.isscalar(t):
+#             return self._evaluate_with_smoothing(t, x, t_periodic)
+#         return self._eval_base(t_periodic, x)
+
+#     # Some trackers call .evaluate instead of __call__
+#     def evaluate(self, t, x):
+#         t_periodic = self._map_to_periodic_time(t)
+#         if self.transition_smoothing > 0 and np.isscalar(t):
+#             return self._evaluate_with_smoothing(t, x, t_periodic)
+#         return self._eval_base(t_periodic, x)
+
+#     # --- Internals ---
+#     def _map_to_periodic_time(self, t):
+#         """Map simulation time to time within the original period."""
+#         if np.isscalar(t):
+#             return self.period_start + (t % self.period_duration)
+#         t_arr = np.asarray(t)
+#         return self.period_start + (t_arr % self.period_duration)
+
+#     def _evaluate_with_smoothing(self, t, x, t_periodic):
+#         """Evaluate with smooth transitions near period boundaries."""
+#         smoothing_width = self.transition_smoothing * self.period_duration
+#         t_in_period = t % self.period_duration
+
+#         # Near end of period: blend end -> start
+#         if t_in_period > (self.period_duration - smoothing_width):
+#             alpha = (self.period_duration - t_in_period) / smoothing_width
+#             v_now = self._eval_base(t_periodic, x)
+
+#             # Equivalent time near the beginning of the next period
+#             t_begin = self.period_start + (t_in_period - self.period_duration + smoothing_width)
+#             v_begin = self._eval_base(t_begin, x)
+#             return alpha * v_now + (1 - alpha) * v_begin
+
+#         # Near beginning of period: blend start -> end
+#         if t_in_period < smoothing_width:
+#             alpha = t_in_period / smoothing_width
+#             v_now = self._eval_base(t_periodic, x)
+
+#             # Equivalent time near the end of the previous period
+#             t_end = self.period_end - smoothing_width + t_in_period
+#             v_end = self._eval_base(t_end, x)
+#             return alpha * v_now + (1 - alpha) * v_end
+
+#         # Away from boundaries
+#         return self._eval_base(t_periodic, x)
+
+#     # --- Compatibility methods/properties often used by code ---
+#     def get_time_bounds(self):
+#         """Time bounds of the periodic simulation."""
+#         return (0.0, self.total_duration)
+
+#     def get_spatial_bounds(self):
+#         """Same spatial bounds as the original field."""
+#         return self._spatial_bounds
+
+#     def validate_data(self):
+#         self.original_field.validate_data()
+#         if self.period_duration <= 0:
+#             raise ValueError(f"Invalid period duration: {self.period_duration}")
+#         if self.n_periods < 1:
+#             raise ValueError(f"Invalid number of periods: {self.n_periods}")
+
+#     @property
+#     def data(self):
+#         return self.original_field.data
+
+#     @property
+#     def T(self):
+#         # If the tracker uses this, it's just an approximate "time steps" count
+#         return int(self.original_field.T) * int(self.n_periods)
+
+#     @property
+#     def N(self):
+#         return self.original_field.N
+
+#     def memory_usage_mb(self):
+#         return self.original_field.memory_usage_mb()
+
 class TimePeriodicFieldWrapper:
     """
     Wrapper that makes a time series field periodic by repeating a time slice.
@@ -1304,15 +1436,78 @@ class TimePeriodicFieldWrapper:
         self.total_duration = n_periods * self.period_duration
         self.transition_smoothing = transition_smoothing
 
-        # Cache bounds
+        # Cache bounds and field info
         self._spatial_bounds = original_field.get_spatial_bounds()
+        self._base_T = int(getattr(original_field, "T", 0))
+        if self._base_T == 0 and hasattr(original_field, "times"):
+            try:
+                self._base_T = int(len(original_field.times))
+            except Exception:
+                self._base_T = 0
+
+        # Expose time-like attributes so trackers that rely on attributes (not methods)
+        # will see the extended periodic time range.
+        self.t_min = 0.0
+        self.t_max = float(self.total_duration)
+
+        # Optional: synthetic times cache
+        self._times = None
 
         # Validate period
         orig_t_start, orig_t_end = original_field.get_time_bounds()
         if period_start < orig_t_start or period_end > orig_t_end:
-            raise ValueError(f"Period [{period_start}, {period_end}] outside original time range [{orig_t_start}, {orig_t_end}]")
+            raise ValueError(
+                f"Period [{period_start}, {period_end}] outside original time range "
+                f"[{orig_t_start}, {orig_t_end}]"
+            )
 
-    # --- Robust evaluation dispatcher ---
+    # ---------- Robust argument order detection ----------
+    @staticmethod
+    def _is_positions_like(arr) -> bool:
+        import numpy as np
+        try:
+            a = np.asarray(arr)
+        except Exception:
+            return False
+        if a.ndim == 2 and a.shape[1] in (2, 3):
+            return True
+        if a.ndim == 1 and a.size in (2, 3):
+            return True
+        return False
+
+    @staticmethod
+    def _is_scalar_like(x) -> bool:
+        import numpy as np
+        try:
+            a = np.asarray(x)
+        except Exception:
+            return np.isscalar(x)
+        return a.ndim == 0
+
+    def _parse_time_and_positions(self, a, b):
+        """
+        Accept both call conventions:
+        - (t, positions) or (positions, t)
+        Returns (t: float or array, positions: array)
+        """
+        import numpy as np
+        if self._is_positions_like(a) and self._is_scalar_like(b):
+            return float(np.asarray(b)), np.asarray(a)
+        if self._is_positions_like(b) and self._is_scalar_like(a):
+            return float(np.asarray(a)), np.asarray(b)
+
+        # Fallbacks
+        if self._is_scalar_like(a) and not self._is_scalar_like(b):
+            return float(np.asarray(a)), np.asarray(b)
+        if self._is_scalar_like(b) and not self._is_scalar_like(a):
+            return float(np.asarray(b)), np.asarray(a)
+
+        raise TypeError(
+            f"Cannot determine (t, positions) from arguments: "
+            f"a.shape={getattr(np.asarray(a), 'shape', None)}, "
+            f"b.shape={getattr(np.asarray(b), 'shape', None)}"
+        )
+        # --- Robust evaluation dispatcher to underlying field ---
     def _eval_base(self, t, x):
         """
         Dispatch evaluation to the underlying field using the interface it provides.
@@ -1327,31 +1522,10 @@ class TimePeriodicFieldWrapper:
             return f.interp(t, x)
         if hasattr(f, "interpolate"):
             return f.interpolate(t, x)
-        raise TypeError("Underlying field is not callable and has no evaluate/interp/interpolate method")
-
-    # --- Public API used by tracker(s) ---
-    def __call__(self, t, x):
-        """Evaluate velocity field at time t and positions x with periodic time."""
-        t_periodic = self._map_to_periodic_time(t)
-        if self.transition_smoothing > 0 and np.isscalar(t):
-            return self._evaluate_with_smoothing(t, x, t_periodic)
-        return self._eval_base(t_periodic, x)
-
-    # Some trackers call .evaluate instead of __call__
-    def evaluate(self, t, x):
-        t_periodic = self._map_to_periodic_time(t)
-        if self.transition_smoothing > 0 and np.isscalar(t):
-            return self._evaluate_with_smoothing(t, x, t_periodic)
-        return self._eval_base(t_periodic, x)
-
-    # --- Internals ---
-    def _map_to_periodic_time(self, t):
-        """Map simulation time to time within the original period."""
-        if np.isscalar(t):
-            return self.period_start + (t % self.period_duration)
-        t_arr = np.asarray(t)
-        return self.period_start + (t_arr % self.period_duration)
-
+        raise TypeError(
+            "Underlying field is not callable and has no evaluate/interp/interpolate method"
+        )
+    
     def _evaluate_with_smoothing(self, t, x, t_periodic):
         """Evaluate with smooth transitions near period boundaries."""
         smoothing_width = self.transition_smoothing * self.period_duration
@@ -1380,34 +1554,70 @@ class TimePeriodicFieldWrapper:
         # Away from boundaries
         return self._eval_base(t_periodic, x)
 
-    # --- Compatibility methods/properties often used by code ---
+    # --- Public API used by tracker(s) ---
+    def __call__(self, a, b):
+        """Evaluate velocity field; accepts (t, positions) or (positions, t)."""
+        t, x = self._parse_time_and_positions(a, b)
+        t_periodic = self._map_to_periodic_time(t)
+        if self.transition_smoothing > 0 and np.isscalar(t):
+            return self._evaluate_with_smoothing(t, x, t_periodic)
+        return self._eval_base(t_periodic, x)
+
+    def evaluate(self, a, b):
+        """Alternative evaluation API; accepts (t, positions) or (positions, t)."""
+        t, x = self._parse_time_and_positions(a, b)
+        t_periodic = self._map_to_periodic_time(t)
+        if self.transition_smoothing > 0 and np.isscalar(t):
+            return self._evaluate_with_smoothing(t, x, t_periodic)
+        return self._eval_base(t_periodic, x)
+    
+        # --- Time mapping and bounds ---
+    def _map_to_periodic_time(self, t):
+        """Map simulation time to time within the original period: [start, end)."""
+        import numpy as np
+        if np.isscalar(t):
+            return self.period_start + (t % self.period_duration)
+        t_arr = np.asarray(t)
+        return self.period_start + (t_arr % self.period_duration)
+
     def get_time_bounds(self):
         """Time bounds of the periodic simulation."""
-        return (0.0, self.total_duration)
-
-    def get_spatial_bounds(self):
-        """Same spatial bounds as the original field."""
-        return self._spatial_bounds
-
-    def validate_data(self):
-        self.original_field.validate_data()
-        if self.period_duration <= 0:
-            raise ValueError(f"Invalid period duration: {self.period_duration}")
-        if self.n_periods < 1:
-            raise ValueError(f"Invalid number of periods: {self.n_periods}")
+        return (self.t_min, self.t_max)
 
     @property
-    def data(self):
-        return self.original_field.data
+    def times(self):
+        """
+        Synthetic time array across the periodic duration.
+        Useful for components that inspect field.times.
+        """
+        import numpy as np
+        if self._times is not None:
+            return self._times
+        if self._base_T and self._base_T > 1:
+            # Build times per period with same sampling count as the base field
+            t0 = 0.0
+            times_period = np.linspace(
+                t0, self.period_duration, self._base_T, endpoint=False, dtype=np.float32
+            )
+            self._times = np.concatenate(
+                [times_period + p * self.period_duration for p in range(self.n_periods)]
+            ).astype(np.float32)
+        else:
+            # Fallback: just two points
+            self._times = np.array([0.0, self.total_duration], dtype=np.float32)
+        return self._times
 
     @property
     def T(self):
-        # If the tracker uses this, it's just an approximate "time steps" count
-        return int(self.original_field.T) * int(self.n_periods)
+        """Effective number of time samples across the periodic duration."""
+        if self._base_T and self._base_T > 0:
+            return self._base_T * int(self.n_periods)
+        # Fallback to length of synthetic times
+        return int(len(self.times))
 
     @property
     def N(self):
-        return self.original_field.N
+        return int(getattr(self.original_field, "N", 0))
 
     def memory_usage_mb(self):
         return self.original_field.memory_usage_mb()
@@ -2638,20 +2848,45 @@ def export_enhanced_results_to_vtk(trajectory, density_results=None, field_info=
     
     try:
         # 1. Standard VTK export (always available)
+        # print(f"   📤 Exporting trajectory to standard VTK...")
+        
+        # trajectory_file = output_path / "enhanced_trajectory.vtp"
+        
+        # export_trajectory_to_vtk(
+        #     trajectory=trajectory,
+        #     filename=str(trajectory_file),
+        #     include_velocities=True,
+        #     include_metadata=True,
+        #     time_series=True
+        # )
+        
+        # print(f"      ✅ Standard trajectory exported: {trajectory_file}")
+        # print(f"         File size: {trajectory_file.stat().st_size / 1024:.1f} KB")
+        # 1. Standard VTK export (time-series)
         print(f"   📤 Exporting trajectory to standard VTK...")
-        
-        trajectory_file = output_path / "enhanced_trajectory.vtp"
-        
-        export_trajectory_to_vtk(
+
+        trajectory_base = output_path / "enhanced_trajectory.vtp"
+        result = export_trajectory_to_vtk(
             trajectory=trajectory,
-            filename=str(trajectory_file),
+            filename=str(trajectory_base),
             include_velocities=True,
             include_metadata=True,
             time_series=True
-        )
-        
-        print(f"      ✅ Standard trajectory exported: {trajectory_file}")
-        print(f"         File size: {trajectory_file.stat().st_size / 1024:.1f} KB")
+        )        
+        if result['mode'] == 'series':
+            print(f"      ✅ Standard trajectory exported as time series: {result['directory']}")
+            print(f"         Files written: {result['count']}")
+
+        # In time_series=True mode, files live in <stem>_series/
+        series_dir = output_path / f"{trajectory_base.stem}_series"
+        print(f"      ✅ Standard trajectory exported as time series: {series_dir}")
+
+        # Optional: count files and show a quick summary
+        try:
+            n_series_files = len(list(series_dir.glob("*.vt*")))
+            print(f"         Files written: {n_series_files}")
+        except Exception as _:
+            pass
         
         # 2. Enhanced VTK export (if available)
         if ENHANCED_WRITERS_AVAILABLE:
@@ -2756,7 +2991,7 @@ def export_enhanced_results_to_vtk(trajectory, density_results=None, field_info=
                 'enhanced_writers_used': ENHANCED_WRITERS_AVAILABLE
             },
             'export_files': {
-                'standard_trajectory': str(trajectory_file.name),
+                # 'standard_trajectory': str(trajectory_file.name),
                 'enhanced_features_used': ENHANCED_WRITERS_AVAILABLE,
                 'density_fields': len([f for f in output_path.glob("density_*.vti")])
             },
@@ -2780,35 +3015,62 @@ def export_enhanced_results_to_vtk(trajectory, density_results=None, field_info=
 
 def export_results_to_vtk(trajectory, field_info, output_dir="output"):
     """Export results to VTK format for advanced visualization (ORIGINAL)."""
-    print(f"\n💾 Exporting results to VTK format...")
+    # print(f"\n💾 Exporting results to VTK format...")
     
+    # try:
+    #     output_path = Path(output_dir)
+    #     output_path.mkdir(exist_ok=True)
+        
+    #     # Export trajectory
+    #     vtk_file = output_path / "particle_trajectories.vtp"
+        
+    #     export_trajectory_to_vtk(
+    #         trajectory=trajectory,
+    #         filename=str(vtk_file),
+    #         include_velocities=True,
+    #         include_metadata=True,
+    #         time_series=True
+    #     )
+        
+    #     print(f"   ✅ Trajectory exported: {vtk_file}")
+    #     print(f"   📊 File contains:")
+    #     print(f"      - {trajectory.N} particle paths")
+    #     print(f"      - {trajectory.T} time steps") 
+    #     print(f"      - Velocity data: {'Yes' if trajectory.velocities is not None else 'No'}")
+    #     print(f"      - File size: {vtk_file.stat().st_size / 1024:.1f} KB")
+        
+    # except ImportError:
+    #     print(f"   ⚠️  VTK export not available - skipping")
+    # except Exception as e:
+    #     print(f"   ❌ VTK export failed: {e}")
+    print(f"\n💾 Exporting results to VTK format...")
+
     try:
         output_path = Path(output_dir)
         output_path.mkdir(exist_ok=True)
-        
-        # Export trajectory
-        vtk_file = output_path / "particle_trajectories.vtp"
-        
+
+        # Export trajectory (time series)
+        vtk_base = output_path / "particle_trajectories.vtp"
         export_trajectory_to_vtk(
             trajectory=trajectory,
-            filename=str(vtk_file),
+            filename=str(vtk_base),
             include_velocities=True,
             include_metadata=True,
             time_series=True
         )
-        
-        print(f"   ✅ Trajectory exported: {vtk_file}")
-        print(f"   📊 File contains:")
+
+        series_dir = output_path / f"{vtk_base.stem}_series"
+        print(f"   ✅ Trajectory exported as time series: {series_dir}")
+        n_series_files = len(list(series_dir.glob("*.vt*")))
+        print(f"   📊 Files written: {n_series_files}")
         print(f"      - {trajectory.N} particle paths")
-        print(f"      - {trajectory.T} time steps") 
+        print(f"      - {trajectory.T} time steps")
         print(f"      - Velocity data: {'Yes' if trajectory.velocities is not None else 'No'}")
-        print(f"      - File size: {vtk_file.stat().st_size / 1024:.1f} KB")
-        
+
     except ImportError:
         print(f"   ⚠️  VTK export not available - skipping")
     except Exception as e:
         print(f"   ❌ VTK export failed: {e}")
-
 
 def generate_summary_report(field, trajectory, stats, strategy, output_dir="output"):
     """Generate comprehensive summary report (ORIGINAL)."""
@@ -2995,8 +3257,8 @@ def main():
         'data_directory': '/home/arhashemi/Workspace/welding/Cases/002_caseCoarse.gid/post/0eule/',
         'case_name': 'caseCoarse',
         'n_particles': 10000,
-        'output_directory': 'jaxtrace_enhanced_output',
-        'dt': 0.01,  # Time step for integration
+        'output_directory': 'output_jaxtrace_enhanced',
+        'dt': 0.0025,  # Time step for integration
         
         # NEW: Time periodicity options
         'use_time_periodicity': True,  # Enable periodic field

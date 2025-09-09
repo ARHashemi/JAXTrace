@@ -86,7 +86,7 @@ except ImportError:
 
 # Import integration functions  
 try:  
-    from ..integration import (  
+    from ..integrators import (  
         euler_step,  
         rk2_step,  
         rk4_step  

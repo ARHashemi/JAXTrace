@@ -529,18 +529,57 @@ else:
         raise ImportError("VTK I/O not available - install vtk package")
 
 
+# def export_trajectory_to_vtk(trajectory, filename, include_velocities=True, 
+#                            include_metadata=True, time_series=False, format='xml'):
+#     """
+#     Export trajectory to VTK format (main export function).
+    
+#     Args:
+#         trajectory: JAXTrace trajectory object
+#         filename: Output filename
+#         include_velocities: Include velocity data if available
+#         include_metadata: Include metadata (particle IDs, timesteps)
+#         time_series: Export as time series if True, single file if False
+#         format: 'xml' or 'binary'
+#     """
+#     if not VTK_IO_AVAILABLE:
+#         raise ImportError("VTK not available - cannot export trajectory")
+    
+#     writer = VTKTrajectoryWriter()
+    
+#     if time_series:
+#         # Export as time series to directory
+#         output_dir = Path(filename).parent / (Path(filename).stem + "_series")
+#         writer.write_time_series(
+#             trajectory=trajectory,
+#             output_directory=str(output_dir),
+#             include_velocities=include_velocities,
+#             format=format
+#         )
+#         print(f"Trajectory exported as time series to {output_dir}")
+#     else:
+#         # Export as single trajectory file
+#         writer.write_trajectory(
+#             trajectory=trajectory,
+#             filename=filename,
+#             include_velocities=include_velocities,
+#             include_particle_ids=include_metadata,
+#             include_timestep_data=include_metadata,
+#             format=format
+#         )
+#         print(f"Trajectory exported to {filename}")
 def export_trajectory_to_vtk(trajectory, filename, include_velocities=True, 
                            include_metadata=True, time_series=False, format='xml'):
     """
     Export trajectory to VTK format (main export function).
-    
-    Args:
-        trajectory: JAXTrace trajectory object
-        filename: Output filename
-        include_velocities: Include velocity data if available
-        include_metadata: Include metadata (particle IDs, timesteps)
-        time_series: Export as time series if True, single file if False
-        format: 'xml' or 'binary'
+
+    Returns
+    -------
+    dict
+        - If time_series=False:
+            {'mode': 'single', 'file': '<path>'}
+        - If time_series=True:
+            {'mode': 'series', 'directory': '<dir>', 'count': <int>}
     """
     if not VTK_IO_AVAILABLE:
         raise ImportError("VTK not available - cannot export trajectory")
@@ -548,7 +587,6 @@ def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
     writer = VTKTrajectoryWriter()
     
     if time_series:
-        # Export as time series to directory
         output_dir = Path(filename).parent / (Path(filename).stem + "_series")
         writer.write_time_series(
             trajectory=trajectory,
@@ -557,8 +595,8 @@ def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
             format=format
         )
         print(f"Trajectory exported as time series to {output_dir}")
+        return {'mode': 'series', 'directory': str(output_dir), 'count': int(trajectory.T)}
     else:
-        # Export as single trajectory file
         writer.write_trajectory(
             trajectory=trajectory,
             filename=filename,
@@ -568,7 +606,7 @@ def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
             format=format
         )
         print(f"Trajectory exported to {filename}")
-
+        return {'mode': 'single', 'file': str(filename)}
 
 # Status and utility functions
 def get_vtk_status():
