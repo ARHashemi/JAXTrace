@@ -291,21 +291,70 @@ class SPHDensityEstimator:
 
         return vmap(single)(Q)
 
+    # def evaluate(self, eval_points: np.ndarray) -> np.ndarray:
+    #     """
+    #     Evaluate SPH density at given evaluation points.
+        
+    #     Parameters
+    #     ----------
+    #     eval_points : np.ndarray
+    #         Points to evaluate density at, shape (M, D)
+            
+    #     Returns
+    #     -------
+    #     np.ndarray
+    #         Density values at evaluation points, shape (M,)
+    #     """
+    #     Q = jnp.asarray(eval_points, dtype=jnp.float32)
+    #     chunk = 50_000 if self.D == 2 else 25_000
+    #     outs = []
+    #     for s in range(0, Q.shape[0], chunk):
+    #         e = min(s + chunk, Q.shape[0])
+    #         outs.append(self._evaluate_jit(Q[s:e]))
+    #     rho = jnp.concatenate(outs, axis=0)
+
+    #     if self.normalize:
+    #         if self.D == 2:
+    #             xmin, xmax = float(jnp.min(Q[:, 0])), float(jnp.max(Q[:, 0]))
+    #             ymin, ymax = float(jnp.min(Q[:, 1])), float(jnp.max(Q[:, 1]))
+    #             area = max((xmax - xmin) * (ymax - ymin), 1e-12)
+    #             avg = self.N / area
+    #             rho = rho / avg
+    #         else:
+    #             xmin, xmax = float(jnp.min(Q[:, 0])), float(jnp.max(Q[:, 0]))
+    #             ymin, ymax = float(jnp.min(Q[:, 1])), float(jnp.max(Q[:, 1]))
+    #             zmin, zmax = float(jnp.min(Q[:, 2])), float(jnp.max(Q[:, 2]))
+    #             vol = max((xmax - xmin) * (ymax - ymin) * (zmax - zmin), 1e-12)
+    #             avg = self.N / vol
+    #             rho = rho / avg
+
+    #     return np.asarray(rho)
+
     def evaluate(self, eval_points: np.ndarray) -> np.ndarray:
         """
         Evaluate SPH density at given evaluation points.
-        
-        Parameters
-        ----------
-        eval_points : np.ndarray
-            Points to evaluate density at, shape (M, D)
-            
-        Returns
-        -------
-        np.ndarray
-            Density values at evaluation points, shape (M,)
+
+        Accepts (M,D) points where D must match the estimator's dimensionality.
+        If D=2 and (M,3) is provided, project to the configured plane.
         """
-        Q = jnp.asarray(eval_points, dtype=jnp.float32)
+        Q_np = np.asarray(eval_points, dtype=np.float32)
+        if Q_np.ndim != 2:
+            raise ValueError(f"eval_points must be 2D, got {Q_np.shape}")
+
+        if self.D == 2:
+            # Project 3D (x,y,z) -> 2D (i,j) if necessary
+            if Q_np.shape[1] == 3:
+                axis_map = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}
+                i, j, _ = axis_map[self.plane.lower()]
+                Q_np = Q_np[:, [i, j]]
+            elif Q_np.shape[1] != 2:
+                raise ValueError(f"2D SPH expects (M,2) or (M,3) points, got {Q_np.shape}")
+        else:
+            # 3D mode
+            if Q_np.shape[1] != 3:
+                raise ValueError(f"3D SPH expects (M,3) points, got {Q_np.shape}")
+
+        Q = jnp.asarray(Q_np, dtype=jnp.float32)
         chunk = 50_000 if self.D == 2 else 25_000
         outs = []
         for s in range(0, Q.shape[0], chunk):
@@ -328,4 +377,4 @@ class SPHDensityEstimator:
                 avg = self.N / vol
                 rho = rho / avg
 
-        return np.asarray(rho)
+        return np.asarray(rho, dtype=np.float32)

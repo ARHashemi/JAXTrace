@@ -2,7 +2,8 @@ jaxtrace/
   __init__.py                 # Lightweight; no env mutations, re-exports common API
   io/
     __init__.py
-    vtk_io.py                 # Read/write VTK series; includes write_particle_series
+    vtk_reader.py                 # Read VTK series
+    vtk_writer.py                 # Write VTK series; includes write_particle_series
     hdf5_io.py                # Chunked HDF5 series; trajectories I/O
     registry.py               # open_dataset(...) to select backend
   fields/

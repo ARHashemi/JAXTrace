@@ -562,7 +562,6 @@ class TimeSeriesField(TimeDependentField):
                 if 0 <= li < Ttot and 0 <= ri < Ttot:
                     rep_data[ri] = alpha * rep_data[ri] + (1.0 - alpha) * rep_data[li]
 
-
 # ----------- Factory helpers -----------
 
 def create_time_series_from_arrays(

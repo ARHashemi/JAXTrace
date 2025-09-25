@@ -1056,25 +1056,605 @@ def visualize_boundary_effect(boundary_func: BoundaryCondition,
         print("Matplotlib required for visualization")
 
 
+# ---------------------------------------------------------------------------
+# Inlet/Outlet Boundary Conditions
+# ---------------------------------------------------------------------------
+
+def inlet_outlet_boundary_factory(bounds: Union[np.ndarray, list],
+                                 inlet_axis: str = 'x',
+                                 inlet_position: str = 'min',
+                                 outlet_position: str = 'max',
+                                 inlet_particle_generator: Optional[Callable] = None) -> BoundaryCondition:
+    """
+    Create inlet/outlet boundary condition.
+
+    Particles are absorbed at the outlet boundary and new particles can be
+    injected at the inlet boundary.
+
+    Parameters
+    ----------
+    bounds : array-like
+        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
+    inlet_axis : str, default 'x'
+        Axis for inlet/outlet ('x', 'y', or 'z')
+    inlet_position : str, default 'min'
+        Inlet at 'min' or 'max' position along axis
+    outlet_position : str, default 'max'
+        Outlet at 'min' or 'max' position along axis
+    inlet_particle_generator : callable, optional
+        Function to generate new particles at inlet
+
+    Returns
+    -------
+    BoundaryCondition
+        Inlet/outlet boundary condition function
+    """
+    bounds_std = _ensure_bounds_shape(bounds)
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+
+    if inlet_axis not in axis_map:
+        raise ValueError(f"inlet_axis must be 'x', 'y', or 'z', got {inlet_axis}")
+
+    axis_idx = axis_map[inlet_axis]
+
+    def _inlet_outlet_bc(x: np.ndarray) -> np.ndarray:
+        """Apply inlet/outlet boundary condition."""
+        x = _ensure_float32(x)
+        result = x.copy()
+
+        # Get axis boundaries
+        axis_min = bounds_std[0, axis_idx]
+        axis_max = bounds_std[1, axis_idx]
+
+        # Determine inlet and outlet positions
+        if inlet_position == 'min':
+            inlet_bound = axis_min
+            outlet_bound = axis_max if outlet_position == 'max' else axis_min
+        else:
+            inlet_bound = axis_max
+            outlet_bound = axis_min if outlet_position == 'min' else axis_max
+
+        # Absorb particles at outlet
+        if outlet_position == 'min':
+            outlet_mask = result[:, axis_idx] < outlet_bound
+        else:
+            outlet_mask = result[:, axis_idx] > outlet_bound
+
+        # Mark absorbed particles with NaN
+        result[outlet_mask] = np.nan
+
+        # Apply periodic wrapping at inlet/outlet boundaries
+        # This prevents particles from going beyond bounds
+        if inlet_position == 'min':
+            # Particles that go below inlet are wrapped to outlet
+            inlet_mask = result[:, axis_idx] < inlet_bound
+            result[inlet_mask, axis_idx] = outlet_bound
+        else:
+            # Particles that go above inlet are wrapped to outlet
+            inlet_mask = result[:, axis_idx] > inlet_bound
+            result[inlet_mask, axis_idx] = outlet_bound
+
+        # Apply reflective boundary to other axes
+        for i in range(3):
+            if i != axis_idx:
+                # Reflect particles that go outside bounds in other dimensions
+                low_mask = result[:, i] < bounds_std[0, i]
+                high_mask = result[:, i] > bounds_std[1, i]
+
+                result[low_mask, i] = 2 * bounds_std[0, i] - result[low_mask, i]
+                result[high_mask, i] = 2 * bounds_std[1, i] - result[high_mask, i]
+
+        return result.astype(np.float32)
+
+    return _inlet_outlet_bc
+
+
+def flow_through_boundary_factory(bounds: Union[np.ndarray, list],
+                                 flow_axis: str = 'x',
+                                 flow_direction: str = 'positive') -> BoundaryCondition:
+    """
+    Create flow-through boundary condition for steady flow simulations.
+
+    Particles enter at one end and exit at the other end of the specified axis.
+    Other axes use reflective boundaries.
+
+    Parameters
+    ----------
+    bounds : array-like
+        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
+    flow_axis : str, default 'x'
+        Primary flow axis ('x', 'y', or 'z')
+    flow_direction : str, default 'positive'
+        Flow direction: 'positive' (min to max) or 'negative' (max to min)
+
+    Returns
+    -------
+    BoundaryCondition
+        Flow-through boundary condition function
+    """
+    bounds_std = _ensure_bounds_shape(bounds)
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+
+    if flow_axis not in axis_map:
+        raise ValueError(f"flow_axis must be 'x', 'y', or 'z', got {flow_axis}")
+
+    axis_idx = axis_map[flow_axis]
+
+    def _flow_through_bc(x: np.ndarray) -> np.ndarray:
+        """Apply flow-through boundary condition."""
+        x = _ensure_float32(x)
+        result = x.copy()
+
+        # Get flow axis boundaries
+        axis_min = bounds_std[0, axis_idx]
+        axis_max = bounds_std[1, axis_idx]
+
+        if flow_direction == 'positive':
+            # Flow from min to max
+            # Absorb particles that exit at max
+            exit_mask = result[:, axis_idx] > axis_max
+            # Periodic wrap particles that go below min
+            inlet_mask = result[:, axis_idx] < axis_min
+            result[inlet_mask, axis_idx] = axis_min + (axis_min - result[inlet_mask, axis_idx])
+        else:
+            # Flow from max to min
+            # Absorb particles that exit at min
+            exit_mask = result[:, axis_idx] < axis_min
+            # Periodic wrap particles that go above max
+            inlet_mask = result[:, axis_idx] > axis_max
+            result[inlet_mask, axis_idx] = axis_max - (result[inlet_mask, axis_idx] - axis_max)
+
+        # Replace exited particles with new inlet particles
+        if np.any(exit_mask):
+            n_exited = np.sum(exit_mask)
+
+            # Generate new particles at the inlet
+            new_particles = np.zeros((n_exited, 3), dtype=np.float32)
+
+            if flow_direction == 'positive':
+                # Place new particles at inlet (x_min)
+                new_particles[:, axis_idx] = axis_min
+            else:
+                # Place new particles at inlet (x_max)
+                new_particles[:, axis_idx] = axis_max
+
+            # Randomly distribute across other dimensions at inlet
+            for i in range(3):
+                if i != axis_idx:
+                    # Random positions within bounds for non-flow axes
+                    new_particles[:, i] = np.random.uniform(
+                        bounds_std[0, i],
+                        bounds_std[1, i],
+                        n_exited
+                    ).astype(np.float32)
+
+            # Replace exited particles with new inlet particles
+            result[exit_mask] = new_particles
+
+        # Apply reflective boundaries to other axes
+        for i in range(3):
+            if i != axis_idx:
+                # Reflect at boundaries in non-flow directions
+                low_mask = result[:, i] < bounds_std[0, i]
+                high_mask = result[:, i] > bounds_std[1, i]
+
+                result[low_mask, i] = 2 * bounds_std[0, i] - result[low_mask, i]
+                result[high_mask, i] = 2 * bounds_std[1, i] - result[high_mask, i]
+
+        return result.astype(np.float32)
+
+    return _flow_through_bc
+
+
+def _replace_exited_particles_at_grid_positions(result: np.ndarray, exit_mask: np.ndarray,
+                                             inlet_position: float, axis_idx: int,
+                                             bounds: np.ndarray, concentrations: Dict[str, int]) -> None:
+    """
+    Replace exited particles by regenerating them at their nearest grid positions.
+
+    This maintains spatial consistency by ensuring particles are replaced at grid
+    positions closest to where they originally were, preventing gaps and overlaps.
+    """
+    axis_names = ['x', 'y', 'z']
+    other_axes = [i for i in range(3) if i != axis_idx]
+
+    # Get grid resolutions for inlet face
+    inlet_resolutions = []
+    for i in other_axes:
+        axis_name = axis_names[i]
+        resolution = max(1, int(concentrations[axis_name]))
+        inlet_resolutions.append(resolution)
+
+    # Create coordinate arrays for the inlet face dimensions
+    coord_arrays = []
+    for i, res in enumerate(inlet_resolutions):
+        axis_i = other_axes[i]
+        coords = np.linspace(bounds[0, axis_i], bounds[1, axis_i], res, dtype=np.float32)
+        coord_arrays.append(coords)
+
+    # For each exited particle, find its nearest grid position and replace it there
+    exited_indices = np.where(exit_mask)[0]
+
+    for particle_idx in exited_indices:
+        # Get the particle's position in the two inlet face dimensions
+        particle_pos = result[particle_idx]
+
+        # Find nearest grid position for each dimension
+        grid_coords = []
+        for i, axis_i in enumerate(other_axes):
+            particle_coord = particle_pos[axis_i]
+            # Find nearest grid point
+            coords = coord_arrays[i]
+            nearest_idx = np.argmin(np.abs(coords - particle_coord))
+            grid_coords.append(coords[nearest_idx])
+
+        # Replace particle at inlet with grid-aligned position
+        result[particle_idx, axis_idx] = inlet_position
+        if len(other_axes) >= 1:
+            result[particle_idx, other_axes[0]] = grid_coords[0]
+        if len(other_axes) >= 2:
+            result[particle_idx, other_axes[1]] = grid_coords[1]
+
+
+def _generate_inlet_grid_particles_sequential(n_particles: int, inlet_position: float,
+                                          axis_idx: int, bounds: np.ndarray,
+                                          concentrations: Dict[str, int],
+                                          grid_state: dict) -> np.ndarray:
+    """
+    Generate particles using sequential cycling through grid positions.
+
+    This ensures perfect uniformity by cycling through grid positions in order,
+    avoiding overlaps and gaps regardless of the number of particles needed.
+
+    Parameters
+    ----------
+    n_particles : int
+        Number of particles to generate
+    inlet_position : float
+        Position along the flow axis where inlet is located
+    axis_idx : int
+        Index of the flow axis (0=x, 1=y, 2=z)
+    bounds : np.ndarray
+        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
+    concentrations : dict
+        User-defined concentrations {'x': int, 'y': int, 'z': int}
+    grid_state : dict
+        State tracking for grid positions {'next_position_index': int, 'grid_positions': array}
+
+    Returns
+    -------
+    np.ndarray
+        Generated particles at inlet, shape (n_particles, 3)
+    """
+    axis_names = ['x', 'y', 'z']
+    other_axes = [i for i in range(3) if i != axis_idx]
+
+    # Get grid resolutions for inlet face
+    inlet_resolutions = []
+    for i in other_axes:
+        axis_name = axis_names[i]
+        resolution = max(1, int(concentrations[axis_name]))
+        inlet_resolutions.append(resolution)
+
+    # Create grid positions if not cached
+    if grid_state['grid_positions'] is None:
+        coord_arrays = []
+        for i, res in enumerate(inlet_resolutions):
+            axis_i = other_axes[i]
+            coords = np.linspace(bounds[0, axis_i], bounds[1, axis_i], res, dtype=np.float32)
+            coord_arrays.append(coords)
+
+        # Create all grid positions
+        if len(coord_arrays) == 2:
+            Grid1, Grid2 = np.meshgrid(coord_arrays[0], coord_arrays[1], indexing='ij')
+            grid_positions = np.column_stack([Grid1.ravel(), Grid2.ravel()])
+        elif len(coord_arrays) == 1:
+            grid_positions = np.column_stack([coord_arrays[0], np.zeros(len(coord_arrays[0]))])
+        else:
+            grid_positions = np.array([[0.0, 0.0]])
+
+        grid_state['grid_positions'] = grid_positions
+        grid_state['total_positions'] = len(grid_positions)
+
+    # Get cached grid positions
+    grid_positions = grid_state['grid_positions']
+    total_positions = grid_state['total_positions']
+
+    # Generate particles by cycling through grid positions
+    particles = np.zeros((n_particles, 3), dtype=np.float32)
+    particles[:, axis_idx] = inlet_position
+
+    for i in range(n_particles):
+        # Get next grid position (cycle through)
+        pos_idx = (grid_state['next_position_index'] + i) % total_positions
+        grid_pos = grid_positions[pos_idx]
+
+        # Assign coordinates
+        if len(other_axes) >= 1:
+            particles[i, other_axes[0]] = grid_pos[0]
+        if len(other_axes) >= 2:
+            particles[i, other_axes[1]] = grid_pos[1]
+
+    # Update state for next call
+    grid_state['next_position_index'] = (grid_state['next_position_index'] + n_particles) % total_positions
+
+    return particles
+
+
+def _generate_inlet_grid_particles(n_particles: int, inlet_position: float,
+                                 axis_idx: int, bounds: np.ndarray,
+                                 concentrations: Dict[str, int]) -> np.ndarray:
+    """
+    Generate particles in a 2D uniform grid directly on the inlet face.
+
+    Parameters
+    ----------
+    n_particles : int
+        Number of particles to generate
+    inlet_position : float
+        Position along the flow axis where inlet is located
+    axis_idx : int
+        Index of the flow axis (0=x, 1=y, 2=z)
+    bounds : np.ndarray
+        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
+    concentrations : dict
+        User-defined concentrations {'x': int, 'y': int, 'z': int}
+
+    Returns
+    -------
+    np.ndarray
+        Generated particles at inlet, shape (n_particles, 3)
+    """
+    axis_names = ['x', 'y', 'z']
+
+    # Get the two dimensions perpendicular to the flow axis for the inlet face
+    other_axes = [i for i in range(3) if i != axis_idx]
+
+    # Get the resolution for the two inlet face dimensions
+    inlet_resolutions = []
+    for i in other_axes:
+        axis_name = axis_names[i]
+        resolution = max(1, int(concentrations[axis_name]))
+        inlet_resolutions.append(resolution)
+
+    # Create coordinate arrays for the inlet face dimensions
+    coord_arrays = []
+    for i, res in enumerate(inlet_resolutions):
+        axis_i = other_axes[i]
+        coords = np.linspace(bounds[0, axis_i], bounds[1, axis_i], res, dtype=np.float32)
+        coord_arrays.append(coords)
+
+    # Create 2D meshgrid for the inlet face
+    if len(coord_arrays) == 2:
+        Grid1, Grid2 = np.meshgrid(coord_arrays[0], coord_arrays[1], indexing='ij')
+        grid1_flat = Grid1.ravel()
+        grid2_flat = Grid2.ravel()
+    elif len(coord_arrays) == 1:
+        # Handle 1D case (degenerate inlet)
+        grid1_flat = coord_arrays[0]
+        grid2_flat = np.array([0.0])  # Dummy dimension
+    else:
+        # Fallback
+        grid1_flat = np.array([0.0])
+        grid2_flat = np.array([0.0])
+
+    # Total particles in the inlet face grid
+    total_inlet_particles = len(grid1_flat) if len(coord_arrays) == 1 else len(grid1_flat)
+
+    # Generate particles
+    particles = np.zeros((n_particles, 3), dtype=np.float32)
+
+    # Set flow axis coordinate to inlet position
+    particles[:, axis_idx] = inlet_position
+
+    # Distribute particles across the inlet face using optimal grid sampling
+    if n_particles <= total_inlet_particles:
+        # Use systematic sampling to ensure even distribution without duplicates
+        # This divides the grid into n_particles equal sections and takes one point from each
+        step = total_inlet_particles / n_particles
+        indices = np.array([int(i * step) for i in range(n_particles)])
+
+        # Ensure indices are unique and within bounds
+        indices = np.clip(indices, 0, total_inlet_particles - 1)
+        indices = np.unique(indices)
+
+        # If we lost some indices due to rounding, add them back
+        while len(indices) < n_particles and len(indices) < total_inlet_particles:
+            # Find the largest gap in the current indices and add a point there
+            if len(indices) == 0:
+                indices = np.array([0])
+            else:
+                # Find gaps and fill them
+                gaps = np.diff(np.concatenate([[0], indices, [total_inlet_particles]]))
+                max_gap_idx = np.argmax(gaps[:-1])  # Don't consider the last gap
+                if max_gap_idx == 0:
+                    new_idx = indices[0] // 2
+                else:
+                    new_idx = (indices[max_gap_idx-1] + indices[max_gap_idx]) // 2
+                indices = np.sort(np.append(indices, new_idx))
+                indices = np.unique(indices)
+
+        # Take only the first n_particles if we have too many
+        indices = indices[:n_particles]
+    else:
+        # More particles than grid points - use each grid point at least once, then distribute extras
+        base_indices = np.arange(total_inlet_particles)
+        extra_particles = n_particles - total_inlet_particles
+
+        if extra_particles > 0:
+            # Distribute extra particles evenly across the grid
+            extra_step = total_inlet_particles / extra_particles
+            extra_indices = np.array([int(i * extra_step) for i in range(extra_particles)])
+            indices = np.concatenate([base_indices, extra_indices])
+        else:
+            indices = base_indices
+
+    for i in range(n_particles):
+        grid_idx = indices[i]
+
+        # Assign coordinates for the inlet face dimensions
+        if len(other_axes) >= 1:
+            particles[i, other_axes[0]] = grid1_flat[grid_idx]
+        if len(other_axes) >= 2 and len(coord_arrays) == 2:
+            particles[i, other_axes[1]] = grid2_flat[grid_idx]
+        elif len(other_axes) >= 2:
+            # For degenerate case, use middle of bounds for second dimension
+            particles[i, other_axes[1]] = (bounds[0, other_axes[1]] + bounds[1, other_axes[1]]) / 2
+
+    return particles
+
+
+def continuous_inlet_boundary_factory(bounds: Union[np.ndarray, list],
+                                     flow_axis: str = 'x',
+                                     flow_direction: str = 'positive',
+                                     inlet_distribution: str = 'uniform',
+                                     concentrations: Optional[Dict[str, int]] = None) -> BoundaryCondition:
+    """
+    Create boundary condition with continuous particle injection at inlet.
+
+    This boundary condition maintains a steady stream of particles by replacing
+    particles that exit at the outlet with new particles at the inlet, maintaining
+    the original spatial distribution.
+
+    Parameters
+    ----------
+    bounds : array-like
+        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
+    flow_axis : str, default 'x'
+        Primary flow axis ('x', 'y', or 'z')
+    flow_direction : str, default 'positive'
+        Flow direction: 'positive' (min to max) or 'negative' (max to min)
+    inlet_distribution : str, default 'uniform'
+        Distribution of new particles at inlet: 'uniform', 'gaussian', 'grid'
+    concentrations : dict, optional
+        User-defined concentrations for grid-based inlet generation
+        {'x': int, 'y': int, 'z': int} particles per unit length
+
+    Returns
+    -------
+    BoundaryCondition
+        Continuous inlet boundary condition function
+    """
+    bounds_std = _ensure_bounds_shape(bounds)
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+
+    # Initialize grid state for consistent particle placement
+    grid_state = {'next_position_index': 0, 'grid_positions': None}
+
+    if flow_axis not in axis_map:
+        raise ValueError(f"flow_axis must be 'x', 'y', or 'z', got {flow_axis}")
+
+    axis_idx = axis_map[flow_axis]
+
+    def _continuous_inlet_bc(x: np.ndarray) -> np.ndarray:
+        """Apply continuous inlet boundary condition."""
+        x = _ensure_float32(x)
+        result = x.copy()
+
+        # Get flow axis boundaries
+        axis_min = bounds_std[0, axis_idx]
+        axis_max = bounds_std[1, axis_idx]
+
+        if flow_direction == 'positive':
+            # Flow from min to max
+            # Absorb particles that exit at max
+            exit_mask = result[:, axis_idx] > axis_max
+            # Inlet is at min
+            inlet_position = axis_min
+        else:
+            # Flow from max to min
+            # Absorb particles that exit at min
+            exit_mask = result[:, axis_idx] < axis_min
+            # Inlet is at max
+            inlet_position = axis_max
+
+        # Replace exited particles with new inlet particles
+        if np.any(exit_mask):
+            if inlet_distribution == 'grid' and concentrations is not None:
+                # Replace particles at their nearest grid positions to maintain spatial consistency
+                _replace_exited_particles_at_grid_positions(
+                    result, exit_mask, inlet_position, axis_idx, bounds_std, concentrations
+                )
+            else:
+                # For non-grid distributions, use original replacement logic
+                n_exited = np.sum(exit_mask)
+
+                # Generate new particles at the inlet
+                new_particles = np.zeros((n_exited, 3), dtype=np.float32)
+
+                # Place at inlet position
+                new_particles[:, axis_idx] = inlet_position
+
+                # Original random distribution
+                for i in range(3):
+                    if i != axis_idx:
+                        dim_min = bounds_std[0, i]
+                        dim_max = bounds_std[1, i]
+
+                        if inlet_distribution == 'uniform':
+                            # Uniform distribution across inlet face
+                            new_particles[:, i] = np.random.uniform(
+                                dim_min, dim_max, n_exited
+                            ).astype(np.float32)
+                        elif inlet_distribution == 'gaussian':
+                            # Gaussian distribution centered in inlet face
+                            center = (dim_min + dim_max) / 2
+                            sigma = (dim_max - dim_min) / 6  # 3-sigma covers most of range
+                            new_particles[:, i] = np.clip(
+                                np.random.normal(center, sigma, n_exited),
+                                dim_min, dim_max
+                            ).astype(np.float32)
+
+                # Replace exited particles
+                result[exit_mask] = new_particles
+
+        # Handle particles that try to go backwards through inlet
+        if flow_direction == 'positive':
+            # Particles going below inlet get repositioned slightly inside
+            backward_mask = result[:, axis_idx] < axis_min
+            result[backward_mask, axis_idx] = axis_min + 0.001 * (axis_max - axis_min)
+        else:
+            # Particles going above inlet get repositioned slightly inside
+            backward_mask = result[:, axis_idx] > axis_max
+            result[backward_mask, axis_idx] = axis_max - 0.001 * (axis_max - axis_min)
+
+        # Apply reflective boundaries to other axes
+        for i in range(3):
+            if i != axis_idx:
+                # Reflect at boundaries in non-flow directions
+                low_mask = result[:, i] < bounds_std[0, i]
+                high_mask = result[:, i] > bounds_std[1, i]
+
+                result[low_mask, i] = 2 * bounds_std[0, i] - result[low_mask, i]
+                result[high_mask, i] = 2 * bounds_std[1, i] - result[high_mask, i]
+
+        return result.astype(np.float32)
+
+    return _continuous_inlet_bc
+
+
 # Export commonly used boundary conditions for convenience
 __all__ = [
     # Core functions
     'periodic_boundary', 'reflective_boundary', 'clamping_boundary', 'absorbing_boundary_factory',
     'mixed_boundary', 'distance_based_boundary',
-    
-    # Geometric boundaries  
+
+    # Geometric boundaries
     'spherical_boundary', 'cylindrical_boundary',
-    
+
+    # Inlet/outlet boundaries
+    'inlet_outlet_boundary_factory', 'flow_through_boundary_factory', 'continuous_inlet_boundary_factory',
+
     # Utilities
     'check_boundary_violations', 'test_boundary_condition', 'create_boundary_from_config',
     'no_boundary', 'compose_boundary_conditions',
-    
+
     # Predefined conditions
     'unit_box_periodic', 'unit_box_reflective', 'centered_box_periodic', 'unit_sphere_reflective',
-    
+
     # Classes and protocols
     'BoundaryCondition', 'CompositeBoundaryCondition',
-    
+
     # Visualization
     'visualize_boundary_effect'
 ]

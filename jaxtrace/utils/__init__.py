@@ -59,6 +59,20 @@ from .random import (
     Shape,
 )
 
+from .diagnostics import (
+    check_system_requirements,
+    get_feature_status,
+    print_feature_summary,
+    check_requirements_for_workflow,
+    suggest_installation_commands,
+)
+
+from .reporting import (
+    generate_summary_report,
+    generate_enhanced_summary_report,
+    generate_performance_report,
+)
+
 __all__ = [
     # jax_utils
     "JAX_AVAILABLE",
@@ -100,4 +114,14 @@ __all__ = [
     "ArrayLike",
     "KeyLike",
     "Shape",
+    # diagnostics
+    "check_system_requirements",
+    "get_feature_status",
+    "print_feature_summary",
+    "check_requirements_for_workflow",
+    "suggest_installation_commands",
+    # reporting
+    "generate_summary_report",
+    "generate_enhanced_summary_report",
+    "generate_performance_report",
 ]

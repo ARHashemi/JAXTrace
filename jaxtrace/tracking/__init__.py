@@ -39,35 +39,44 @@ from .seeding import (
     seed_density_analysis  
 )  
 
-from .boundary import (  
-    periodic_boundary,  
-    reflective_boundary,  
-    clamping_boundary,  
-    absorbing_boundary_factory,  
-    mixed_boundary,  
-    spherical_boundary,  
-    cylindrical_boundary,  
-    distance_based_boundary,  
-    no_boundary,  
-    unit_box_periodic,  
-    unit_box_reflective,  
-    centered_box_periodic,  
-    unit_sphere_reflective,  
-    compose_boundary_conditions,  
-    check_boundary_violations,  
-    test_boundary_condition,  
-    create_boundary_from_config,  
-    visualize_boundary_effect,  
-    BoundaryCondition,  
-    CompositeBoundaryCondition  
+from .boundary import (
+    periodic_boundary,
+    reflective_boundary,
+    clamping_boundary,
+    absorbing_boundary_factory,
+    mixed_boundary,
+    spherical_boundary,
+    cylindrical_boundary,
+    distance_based_boundary,
+    inlet_outlet_boundary_factory,
+    flow_through_boundary_factory,
+    continuous_inlet_boundary_factory,
+    no_boundary,
+    unit_box_periodic,
+    unit_box_reflective,
+    centered_box_periodic,
+    unit_sphere_reflective,
+    compose_boundary_conditions,
+    check_boundary_violations,
+    test_boundary_condition,
+    create_boundary_from_config,
+    visualize_boundary_effect,
+    BoundaryCondition,
+    CompositeBoundaryCondition
 )  
 
-from .tracker import (  
-    ParticleTracker,  
-    TrackerOptions,  
-    create_tracker,  
-    track_particles_simple,  
-    compare_integrators  
+from .tracker import (
+    ParticleTracker,
+    TrackerOptions,
+    create_tracker,
+    track_particles_simple,
+    compare_integrators
+)
+
+from .analysis import (
+    analyze_trajectory_results,
+    compute_mixing_metrics,
+    analyze_particle_clustering,
 )  
 
 # Import field module components (compatible with actual fields module)  
@@ -127,33 +136,41 @@ __all__ = [
     'seed_density_analysis',  
     
     # Boundary conditions  
-    'periodic_boundary',  
-    'reflective_boundary',   
-    'clamping_boundary',  
-    'absorbing_boundary_factory',  
-    'mixed_boundary',  
-    'spherical_boundary',  
-    'cylindrical_boundary',  
-    'distance_based_boundary',  
-    'no_boundary',  
-    'unit_box_periodic',  
-    'unit_box_reflective',   
-    'centered_box_periodic',  
-    'unit_sphere_reflective',  
-    'compose_boundary_conditions',  
-    'check_boundary_violations',  
+    'periodic_boundary',
+    'reflective_boundary',
+    'clamping_boundary',
+    'absorbing_boundary_factory',
+    'mixed_boundary',
+    'spherical_boundary',
+    'cylindrical_boundary',
+    'distance_based_boundary',
+    'inlet_outlet_boundary_factory',
+    'flow_through_boundary_factory',
+    'continuous_inlet_boundary_factory',
+    'no_boundary',
+    'unit_box_periodic',
+    'unit_box_reflective',
+    'centered_box_periodic',
+    'unit_sphere_reflective',
+    'compose_boundary_conditions',
+    'check_boundary_violations',
     'test_boundary_condition',  
     'create_boundary_from_config',  
     'visualize_boundary_effect',  
     'BoundaryCondition',  
     'CompositeBoundaryCondition',  
     
-    # Tracking  
-    'ParticleTracker',  
-    'TrackerOptions',  
-    'create_tracker',   
-    'track_particles_simple',  
-    'compare_integrators'  
+    # Tracking
+    'ParticleTracker',
+    'TrackerOptions',
+    'create_tracker',
+    'track_particles_simple',
+    'compare_integrators',
+
+    # Analysis
+    'analyze_trajectory_results',
+    'compute_mixing_metrics',
+    'analyze_particle_clustering'  
 ]  
 
 # Conditionally add field and integration exports if available  

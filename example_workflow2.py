@@ -626,27 +626,31 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
     n_per_region = n_particles // n_regions
     
     # Region 1: Domain center (high activity zone)
-    center = [(bounds_min[i] + bounds_max[i]) / 2 for i in range(3)]
+    # center = [(bounds_min[i] + bounds_max[i]) / 2 for i in range(3)]
+    
     # size = [(bounds_max[i] - bounds_min[i]) * 0.99 for i in range(3)]
-    size = [(bounds_max[0] - bounds_min[0]) * 0.9,
-            (bounds_max[1] - bounds_min[1]) * 0.3, 
+    size = [(bounds_max[0] - bounds_min[0]) * 0.35,
+            (bounds_max[1] - bounds_min[1]) * 0.5, 
             (bounds_max[2] - bounds_min[2]) * 0.9]
+    center = [(bounds_min[0] + size[0]/2),
+              (bounds_min[1] + bounds_max[1]) / 2,
+              (bounds_min[2] + bounds_max[2]) / 2]
     region1_min = [center[i] - size[i]/2 for i in range(3)]
     region1_max = [center[i] + size[i]/2 for i in range(3)]
-    n_region_1 = int(n_per_region*1.5)
+    n_region_1 = int(n_particles*0.75)#int(n_per_region*1.5)
     pos1 = random_seeds(n_region_1, [region1_min, region1_max], rng_seed=42)
     positions_list.append(pos1)
     
     # Region 2: Near domain boundaries (boundary effects)
-    boundary_thickness = min(bounds_max[i] - bounds_min[i] for i in range(3)) * 0.1
-    n_region_2 = int(n_per_region*0.7)
-    pos2 = random_seeds(
-        n_region_2,
-        [[bounds_min[0], bounds_min[1], bounds_min[2]],
-         [bounds_min[0] + boundary_thickness, bounds_max[1], bounds_max[2]]],
-        rng_seed=43
-    )
-    positions_list.append(pos2)
+    # boundary_thickness = min(bounds_max[i] - bounds_min[i] for i in range(3)) * 0.1
+    n_region_2 = 0# int(n_per_region*0.7)
+    # pos2 = random_seeds(
+    #     n_region_2,
+    #     [[bounds_min[0], bounds_min[1], bounds_min[2]],
+    #      [bounds_min[0] + boundary_thickness, bounds_max[1], bounds_max[2]]],
+    #     rng_seed=43
+    # )
+    # positions_list.append(pos2)
     
     # Region 3: High gradient zones (sample field to find)
     # For simplicity, use random sampling with slight bias toward center
@@ -674,7 +678,7 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
         record_velocities=True,
         oom_recovery=True,
         use_jax_jit=True,
-        batch_size=300,  # Smaller batches for stability
+        batch_size=1000,  # Smaller batches for stability
         progress_callback=None#lambda p: print(f"      ⏳ Tracking progress: {p*100:.1f}%") 
                         #  if int(p * 20) != int((p - 0.05) * 20) else None  # Every 5%
     )
@@ -701,7 +705,7 @@ def execute_particle_tracking_analysis(field, n_particles=600, dt = 0.01, use_ti
             'name': 'RK4 High Resolution' + (' (Periodic)' if use_time_periodicity else ''),
             'integrator': 'rk4',
             'n_timesteps': 4000,#int(80 * base_timesteps_factor),
-            'batch_size': 200
+            'batch_size': 1000
         }# ,
         # {
         #     'name': 'RK2 Medium Resolution' + (' (Periodic)' if use_time_periodicity else ''), 
@@ -2293,14 +2297,34 @@ def perform_density_estimation_analysis(trajectory, output_dir="output"):
                 return est
             raise
 
+    # def eval_density(estimator, pts):
+    #     # Support both .evaluate() and .pdf()
+    #     if hasattr(estimator, "evaluate_3d"):
+    #         return estimator.evaluate_3d()#(pts)
+    #     if hasattr(estimator, "evaluate"):
+    #         return estimator.evaluate(pts)
+    #     raise AttributeError("Estimator has neither .evaluate() nor .pdf()")
     def eval_density(estimator, pts):
-        # Support both .evaluate() and .pdf()
-        if hasattr(estimator, "evaluate_3d"):
-            return estimator.evaluate_3d()#(pts)
+        """
+        Return densities at the given points (M,d). Prefer pointwise API.
+
+        - Use estimator.evaluate(pts) if available.
+        - Use estimator.pdf(pts) if available.
+        - As a last resort, if a grid-evaluator exists (evaluate_2d/evaluate_3d), return
+        the grid densities flattened (caller must NOT reshape to a different grid).
+        """
         if hasattr(estimator, "evaluate"):
             return estimator.evaluate(pts)
-        raise AttributeError("Estimator has neither .evaluate() nor .pdf()")
-
+        if hasattr(estimator, "pdf"):
+            return estimator.pdf(pts)
+        # Fallbacks (not preferred; shape may differ from the caller's grid)
+        if hasattr(estimator, "evaluate_2d") and pts.shape[1] == 2:
+            X, Y, Z = estimator.evaluate_2d()
+            return Z.ravel()  # NOTE: caller should not reshape unless matching X,Y
+        if hasattr(estimator, "evaluate_3d") and pts.shape[1] == 3:
+            X, Y, Z, D = estimator.evaluate_3d()
+            return D.ravel()
+        raise AttributeError("Estimator has neither .evaluate/.pdf nor grid evaluators")
     # Precompute bounds and evaluation grid (so SPH doesn't depend on KDE success)
     bounds_min = np.min(final_positions, axis=0)
     bounds_max = np.max(final_positions, axis=0)
@@ -2366,7 +2390,10 @@ def perform_density_estimation_analysis(trajectory, output_dir="output"):
         for h_rel in smoothing_rels:
             h_abs = max(h_rel * domain_size, 1e-9)
             sph_est = make_sph(final_positions, smoothing_length=h_abs, kernel="cubic_spline")
-            dens_sph = eval_density(sph_est, eval_points_2d).reshape(X_eval.shape)
+            # dens_sph = eval_density(sph_est, eval_points_2d).reshape(X_eval.shape)
+            # SPH in 2D mode expects (M,2) evaluation points
+            eval_points_xy = np.column_stack([X_eval.ravel(), Y_eval.ravel()])
+            dens_sph = eval_density(sph_est, eval_points_xy).reshape(X_eval.shape)
 
             key = f"h_{h_rel:.2f}"
             sph_results[key] = {
@@ -2404,7 +2431,7 @@ def perform_density_estimation_analysis(trajectory, output_dir="output"):
             # Scott
             ax = axes[0, 1]
             im = ax.contourf(Xp, Yp, density_results["kde"]["scott"]["density"], levels=20, cmap="viridis")
-            ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
+            # ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
             bw_s = density_results["kde"]["scott"]["bandwidth"]
             ax.set_title(f"KDE (Scott){'' if bw_s is None else f' - bw={bw_s:.3g}'}")
             ax.set_aspect("equal", adjustable="box")
@@ -2413,7 +2440,7 @@ def perform_density_estimation_analysis(trajectory, output_dir="output"):
             # Silverman
             ax = axes[0, 2]
             im = ax.contourf(Xp, Yp, density_results["kde"]["silverman"]["density"], levels=20, cmap="viridis")
-            ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
+            # ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
             bw_si = density_results["kde"]["silverman"]["bandwidth"]
             ax.set_title(f"KDE (Silverman){'' if bw_si is None else f' - bw={bw_si:.3g}'}")
             ax.set_aspect("equal", adjustable="box")
@@ -2429,7 +2456,7 @@ def perform_density_estimation_analysis(trajectory, output_dir="output"):
             for idx, key in enumerate(sph_keys):
                 ax = axes[1, idx]
                 im = ax.contourf(Xp, Yp, density_results["sph"][key]["density"], levels=20, cmap="plasma")
-                ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
+                # ax.scatter(final_positions[:, 0], final_positions[:, 1], c="w", s=8, alpha=0.6, edgecolors="k", linewidths=0.3)
                 ax.set_title(f"SPH {key} - h={density_results['sph'][key]['smoothing_length']:.3g}")
                 ax.set_aspect("equal", adjustable="box")
                 plt.colorbar(im, ax=ax)
@@ -3265,7 +3292,7 @@ def main():
         'periodic_config': {
             'time_slice': None, #[118, 159],           # Use full time range (or specify (start, end))
             'n_periods': None,               # Simulate 8 periods
-            'target_duration': 5000,      # Or specify target duration instead
+            'target_duration': 4000,      # Or specify target duration instead
             'transition_smoothing': 0.15  # 15% smoothing at period boundaries
         }
     }

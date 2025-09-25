@@ -38,6 +38,10 @@ old*/
 
 # python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 
 # test files

@@ -48,8 +48,10 @@ __all__ = [
     "clamp_to_bounds",
     # Seeding
     "random_seeds",
+    # Analysis
+    "analyze_trajectory_results",
     # Density estimation
-    "KDEEstimator", 
+    "KDEEstimator",
     "SPHDensityEstimator",
     # Visualization - Essential plotting (only existing functions)
     "plot_particles_2d",
@@ -59,9 +61,12 @@ __all__ = [
     "animate_trajectory_plotly_2d",
     # Export utilities (only existing functions)
     "render_frames_2d",
-    "render_frames_3d", 
+    "render_frames_3d",
     "encode_video_from_frames",
     "save_gif_from_frames",
+    # System utilities
+    "check_system_requirements",
+    "generate_summary_report",
 ]
 
 # Essential utilities - always available
@@ -79,8 +84,8 @@ except Exception:
 # Fields - Velocity field handling with temporal interpolation
 try:
     from .fields.time_series import TimeSeriesField  # noqa: F401
-    from .fields.structured_old import StructuredGridSampler  # noqa: F401
-    from .fields.unstructured_old import UnstructuredField  # noqa: F401
+    from .fields.structured import StructuredGridSampler  # noqa: F401
+    from .fields.unstructured import UnstructuredField  # noqa: F401
 except Exception:
     pass
 
@@ -88,7 +93,7 @@ except Exception:
 try:
     from .integrators.euler import euler_step  # noqa: F401
     from .integrators.rk2 import rk2_step  # noqa: F401
-    from .integrators.rk4_old import rk4_step  # noqa: F401
+    from .integrators.rk4 import rk4_step  # noqa: F401
 except Exception:
     pass
 
@@ -97,9 +102,10 @@ try:
     from .tracking.particles import Trajectory  # noqa: F401
     from .tracking.tracker import ParticleTracker, TrackerOptions  # noqa: F401
     from .tracking.seeding import random_seeds  # noqa: F401
+    from .tracking.analysis import analyze_trajectory_results  # noqa: F401
     from .tracking.boundary import (
         periodic_boundary,  # noqa: F401
-        reflect_boundary,   # noqa: F401  
+        reflect_boundary,   # noqa: F401
         clamp_to_bounds,    # noqa: F401
     )
 except Exception:
@@ -139,6 +145,13 @@ try:
         encode_video_from_frames,  # noqa: F401
         save_gif_from_frames, # noqa: F401
     )
+except Exception:
+    pass
+
+# System utilities
+try:
+    from .utils.diagnostics import check_system_requirements  # noqa: F401
+    from .utils.reporting import generate_summary_report  # noqa: F401
 except Exception:
     pass
 
