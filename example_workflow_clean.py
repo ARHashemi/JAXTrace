@@ -1,16 +1,32 @@
 #!/usr/bin/env python3
 """
-Clean JAXTrace VTK Time Series Analysis Workflow
+JAXTrace Complete Workflow Example
 
-This example demonstrates the complete JAXTrace workflow using the core
-package functions, showcasing:
+This comprehensive example demonstrates the full JAXTrace particle tracking workflow,
+showcasing the improved features including:
+
+🔧 NEW FEATURES IN THIS VERSION:
+- Uniform grid particle seeding with user-defined concentrations
+- Continuous inlet/outlet boundary conditions with grid preservation
+- Enhanced YZ density slice visualization
+- Improved error handling and memory management
+
+📊 WORKFLOW COMPONENTS:
 - System diagnostics and capability checking
-- VTK time series data loading
-- Particle tracking with density estimation
-- Advanced visualization and analysis
-- Comprehensive reporting
+- VTK time series data loading with memory optimization
+- Uniform grid particle seeding (instead of random)
+- Flow-through boundary conditions (inlet → outlet)
+- Advanced density analysis (KDE and SPH)
+- Multi-plot visualization including YZ density slices
+- Comprehensive trajectory analysis and reporting
 
-All functionality is now cleanly separated into the core JAXTrace package.
+💡 KEY IMPROVEMENTS:
+- Grid-preserving inlet particle replacement
+- Efficient progress reporting with single-line updates
+- Robust error handling for density analysis
+- Configurable visualization parameters
+
+All functionality is cleanly organized in the core JAXTrace package modules.
 """
 
 import numpy as np
@@ -23,7 +39,6 @@ import jaxtrace as jt
 from jaxtrace.fields import TimeSeriesField
 from jaxtrace.tracking import (
     create_tracker,
-    random_seeds,
     uniform_grid_seeds,
     analyze_trajectory_results
 )
@@ -111,7 +126,17 @@ def main():
     print("7. VISUALIZATION")
     print("="*80)
 
-    create_visualizations(trajectory, density_results)
+    # YZ slice density parameters (user configurable)
+    # These parameters control the new YZ density slice visualization
+    slice_x0 = None       # X position for slice plane (default: 0.7 * x_max)
+                         # Examples: 0.5, 1.2, bounds_max[0]*0.8
+    slice_levels = 20     # Number of contour levels or array of specific levels
+                         # Examples: 15, 25, [0.1, 0.5, 1.0, 2.0, 5.0]
+    slice_cutoff = 95     # Percentile cutoff for intensity (removes extreme outliers)
+                         # Examples: 90, 99, 100 (no cutoff)
+
+    create_visualizations(trajectory, density_results,
+                         slice_x0=slice_x0, slice_levels=slice_levels, slice_cutoff=slice_cutoff)
 
     # 8. Export results
     print("\n" + "="*80)
@@ -137,7 +162,7 @@ def create_or_load_velocity_field():
 
     # Try to load VTK data
     data_patterns = [
-        "/home/arhashemi/Workspace/welding/Cases/001_caseCoarse.gid/post/0eule/",
+        "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/",
         "data/**/caseCoarse_*.pvtu",
         "example_data/**/case*_*.vtu",
         "../example_data/**/case*_*.vtu"
@@ -409,16 +434,25 @@ def perform_density_analysis(trajectory):
 
         # SPH Analysis
         print("🔬 Performing SPH analysis...")
-        sph_estimator = SPHDensityEstimator(smoothing_length=0.1)
-        sph_density = sph_estimator.compute_density(final_positions)
+        try:
+            if len(final_positions) < 2:
+                raise ValueError("At least 2 particles required for SPH analysis")
+            sph_estimator = SPHDensityEstimator(positions=final_positions, smoothing_length=0.1)
+            sph_density = sph_estimator.compute_density()
+        except Exception as e:
+            print(f"   ⚠️  SPH analysis failed: {e}")
+            sph_estimator = None
+            sph_density = None
 
-        density_results['sph'] = {
-            'estimator': sph_estimator,
-            'densities': sph_density,
-            'smoothing_length': sph_estimator.smoothing_length
-        }
-
-        print(f"   ✅ SPH density range: [{np.min(sph_density):.3e}, {np.max(sph_density):.3e}]")
+        if sph_estimator is not None and sph_density is not None:
+            density_results['sph'] = {
+                'estimator': sph_estimator,
+                'densities': sph_density,
+                'smoothing_length': sph_estimator.smoothing_length
+            }
+            print(f"   ✅ SPH density range: [{np.min(sph_density):.3e}, {np.max(sph_density):.3e}]")
+        else:
+            print("   ⚠️  SPH analysis skipped due to errors")
 
         return density_results
 
@@ -427,8 +461,135 @@ def perform_density_analysis(trajectory):
         return None
 
 
-def create_visualizations(trajectory, density_results=None):
-    """Create comprehensive visualizations."""
+def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff_percentile=95):
+    """
+    Create a density contour plot at a YZ slice.
+
+    Parameters
+    ----------
+    trajectory : Trajectory
+        JAXTrace trajectory object
+    output_dir : Path
+        Output directory for saving plots
+    x0 : float, optional
+        X position for the slice. Default is 0.7 * x_max
+    levels : int or array-like, optional
+        Contour levels. Default is 15 levels
+    cutoff_percentile : float, optional
+        Percentile cutoff for contour levels (default 95%)
+    """
+    try:
+        from jaxtrace.density.kde import KDEEstimator
+
+        # Get final particle positions
+        final_positions = trajectory.positions[-1]  # Shape: (N, 3)
+
+        # Determine domain bounds
+        x_min, x_max = np.min(final_positions[:, 0]), np.max(final_positions[:, 0])
+        y_min, y_max = np.min(final_positions[:, 1]), np.max(final_positions[:, 1])
+        z_min, z_max = np.min(final_positions[:, 2]), np.max(final_positions[:, 2])
+
+        # Set default slice position
+        if x0 is None:
+            x0 = 0.7 * x_max
+
+        print(f"   📍 Creating YZ density slice at x = {x0:.3f}")
+
+        # Filter particles near the slice (within a small tolerance)
+        tolerance = (x_max - x_min) * 0.05  # 5% of domain width
+        slice_mask = np.abs(final_positions[:, 0] - x0) < tolerance
+
+        if np.sum(slice_mask) < 10:
+            print(f"   ⚠️  Too few particles ({np.sum(slice_mask)}) near slice x = {x0:.3f}")
+            return
+
+        # Get particles in the slice
+        slice_particles = final_positions[slice_mask]
+        slice_yz = slice_particles[:, [1, 2]]  # Extract Y,Z coordinates
+
+        print(f"   📊 Using {len(slice_yz)} particles for density estimation")
+
+        # Create KDE density estimator
+        kde = KDEEstimator(positions=slice_yz, bandwidth_rule='scott')
+
+        # Create grid for evaluation
+        grid_resolution = 50
+        y_grid = np.linspace(y_min, y_max, grid_resolution)
+        z_grid = np.linspace(z_min, z_max, grid_resolution)
+        Y_grid, Z_grid = np.meshgrid(y_grid, z_grid)
+
+        # Evaluate density on grid
+        grid_points = np.column_stack([Y_grid.ravel(), Z_grid.ravel()])
+        density_flat = kde.evaluate(grid_points)
+        density_2d = density_flat.reshape(Y_grid.shape)
+
+        # Set contour levels
+        if levels is None:
+            levels = 15
+
+        # Apply cutoff if specified
+        if cutoff_percentile < 100:
+            cutoff_value = np.percentile(density_2d, cutoff_percentile)
+            density_2d = np.minimum(density_2d, cutoff_value)
+
+        # Create the plot
+        _, ax = plt.subplots(figsize=(10, 8))
+
+        # Create filled contours
+        if isinstance(levels, int):
+            contour = ax.contourf(Y_grid, Z_grid, density_2d, levels=levels, cmap='viridis')
+        else:
+            contour = ax.contourf(Y_grid, Z_grid, density_2d, levels=levels, cmap='viridis')
+
+        # Add contour lines
+        ax.contour(Y_grid, Z_grid, density_2d, levels=contour.levels[::2],
+                  colors='white', alpha=0.5, linewidths=0.5)
+
+        # Overlay particle positions
+        ax.scatter(slice_yz[:, 0], slice_yz[:, 1], c='red', s=8, alpha=0.7,
+                  label=f'Particles (n={len(slice_yz)})')
+
+        # Formatting
+        ax.set_xlabel('Y')
+        ax.set_ylabel('Z')
+        ax.set_title(f'Density Contour at YZ Slice (x = {x0:.3f})')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal', adjustable='box')
+
+        # Add colorbar
+        plt.colorbar(contour, ax=ax, label='Particle Density')
+
+        # Save plot
+        plt.tight_layout()
+        slice_filename = f"density_yz_slice_x_{x0:.3f}.png".replace('.', '_')
+        plt.savefig(output_dir / slice_filename, dpi=150, bbox_inches='tight')
+        plt.close()
+
+        print(f"   ✅ Saved {slice_filename}")
+
+    except ImportError:
+        print("   ⚠️  KDE analysis requires scipy - skipping YZ slice")
+    except Exception as e:
+        print(f"   ⚠️  YZ slice creation failed: {e}")
+
+
+def create_visualizations(trajectory, density_results=None, slice_x0=None, slice_levels=None, slice_cutoff=95):
+    """Create comprehensive visualizations.
+
+    Parameters
+    ----------
+    trajectory : Trajectory
+        JAXTrace trajectory object
+    density_results : dict, optional
+        Results from density analysis
+    slice_x0 : float, optional
+        X position for YZ density slice. Default is 0.7 * x_max
+    slice_levels : int or array-like, optional
+        Contour levels for density slice. Default is 15
+    slice_cutoff : float, optional
+        Percentile cutoff for contour levels (default 95%)
+    """
 
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
@@ -453,7 +614,7 @@ def create_visualizations(trajectory, density_results=None):
         _, ax = plt.subplots(figsize=(12, 8))
 
         plot_trajectory_2d(
-            trajectory=trajectory,
+            positions_over_time=trajectory.positions,
             ax=ax,
             max_particles=50,  # Limit for readability
             title="Particle Trajectories",
@@ -496,6 +657,10 @@ def create_visualizations(trajectory, density_results=None):
             plt.savefig(output_dir / "density_analysis.png", dpi=150, bbox_inches='tight')
             plt.close()
             print("   ✅ Saved density_analysis.png")
+
+        # YZ slice density contour plot
+        print("🎯 Creating YZ slice density contour...")
+        create_yz_density_slice(trajectory, output_dir, x0=slice_x0, levels=slice_levels, cutoff_percentile=slice_cutoff)
 
         print(f"✅ All visualizations saved to {output_dir}/")
 

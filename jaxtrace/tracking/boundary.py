@@ -1250,15 +1250,38 @@ def _replace_exited_particles_at_grid_positions(result: np.ndarray, exit_mask: n
                                              inlet_position: float, axis_idx: int,
                                              bounds: np.ndarray, concentrations: Dict[str, int]) -> None:
     """
-    Replace exited particles by regenerating them at their nearest grid positions.
+    Replace exited particles at their nearest grid positions on the inlet face.
 
-    This maintains spatial consistency by ensuring particles are replaced at grid
-    positions closest to where they originally were, preventing gaps and overlaps.
+    This function ensures spatial consistency by maintaining the uniform grid pattern
+    when particles are reintroduced at the inlet. Each exited particle is replaced
+    at the grid position closest to where it originally was, preventing gaps and
+    overlaps in the particle distribution.
+
+    Parameters
+    ----------
+    result : np.ndarray
+        Particle positions array to modify in-place, shape (N, 3)
+    exit_mask : np.ndarray
+        Boolean mask indicating which particles have exited, shape (N,)
+    inlet_position : float
+        Position along the flow axis where particles are reintroduced
+    axis_idx : int
+        Index of the flow axis (0=x, 1=y, 2=z)
+    bounds : np.ndarray
+        Domain bounds [[min_x, min_y, min_z], [max_x, max_y, max_z]]
+    concentrations : Dict[str, int]
+        Grid density per unit length for each axis {'x': int, 'y': int, 'z': int}
+
+    Notes
+    -----
+    This approach maintains perfect grid uniformity by ensuring that each particle
+    is replaced at exactly the same type of grid location it came from. This prevents
+    the clustering and gaps that would occur with random or sequential replacement.
     """
     axis_names = ['x', 'y', 'z']
     other_axes = [i for i in range(3) if i != axis_idx]
 
-    # Get grid resolutions for inlet face
+    # Get grid resolutions for inlet face dimensions (perpendicular to flow)
     inlet_resolutions = []
     for i in other_axes:
         axis_name = axis_names[i]
@@ -1272,18 +1295,16 @@ def _replace_exited_particles_at_grid_positions(result: np.ndarray, exit_mask: n
         coords = np.linspace(bounds[0, axis_i], bounds[1, axis_i], res, dtype=np.float32)
         coord_arrays.append(coords)
 
-    # For each exited particle, find its nearest grid position and replace it there
+    # Replace each exited particle at its nearest grid position
     exited_indices = np.where(exit_mask)[0]
 
     for particle_idx in exited_indices:
-        # Get the particle's position in the two inlet face dimensions
         particle_pos = result[particle_idx]
 
-        # Find nearest grid position for each dimension
+        # Find nearest grid position for each perpendicular dimension
         grid_coords = []
         for i, axis_i in enumerate(other_axes):
             particle_coord = particle_pos[axis_i]
-            # Find nearest grid point
             coords = coord_arrays[i]
             nearest_idx = np.argmin(np.abs(coords - particle_coord))
             grid_coords.append(coords[nearest_idx])
@@ -1295,90 +1316,6 @@ def _replace_exited_particles_at_grid_positions(result: np.ndarray, exit_mask: n
         if len(other_axes) >= 2:
             result[particle_idx, other_axes[1]] = grid_coords[1]
 
-
-def _generate_inlet_grid_particles_sequential(n_particles: int, inlet_position: float,
-                                          axis_idx: int, bounds: np.ndarray,
-                                          concentrations: Dict[str, int],
-                                          grid_state: dict) -> np.ndarray:
-    """
-    Generate particles using sequential cycling through grid positions.
-
-    This ensures perfect uniformity by cycling through grid positions in order,
-    avoiding overlaps and gaps regardless of the number of particles needed.
-
-    Parameters
-    ----------
-    n_particles : int
-        Number of particles to generate
-    inlet_position : float
-        Position along the flow axis where inlet is located
-    axis_idx : int
-        Index of the flow axis (0=x, 1=y, 2=z)
-    bounds : np.ndarray
-        Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
-    concentrations : dict
-        User-defined concentrations {'x': int, 'y': int, 'z': int}
-    grid_state : dict
-        State tracking for grid positions {'next_position_index': int, 'grid_positions': array}
-
-    Returns
-    -------
-    np.ndarray
-        Generated particles at inlet, shape (n_particles, 3)
-    """
-    axis_names = ['x', 'y', 'z']
-    other_axes = [i for i in range(3) if i != axis_idx]
-
-    # Get grid resolutions for inlet face
-    inlet_resolutions = []
-    for i in other_axes:
-        axis_name = axis_names[i]
-        resolution = max(1, int(concentrations[axis_name]))
-        inlet_resolutions.append(resolution)
-
-    # Create grid positions if not cached
-    if grid_state['grid_positions'] is None:
-        coord_arrays = []
-        for i, res in enumerate(inlet_resolutions):
-            axis_i = other_axes[i]
-            coords = np.linspace(bounds[0, axis_i], bounds[1, axis_i], res, dtype=np.float32)
-            coord_arrays.append(coords)
-
-        # Create all grid positions
-        if len(coord_arrays) == 2:
-            Grid1, Grid2 = np.meshgrid(coord_arrays[0], coord_arrays[1], indexing='ij')
-            grid_positions = np.column_stack([Grid1.ravel(), Grid2.ravel()])
-        elif len(coord_arrays) == 1:
-            grid_positions = np.column_stack([coord_arrays[0], np.zeros(len(coord_arrays[0]))])
-        else:
-            grid_positions = np.array([[0.0, 0.0]])
-
-        grid_state['grid_positions'] = grid_positions
-        grid_state['total_positions'] = len(grid_positions)
-
-    # Get cached grid positions
-    grid_positions = grid_state['grid_positions']
-    total_positions = grid_state['total_positions']
-
-    # Generate particles by cycling through grid positions
-    particles = np.zeros((n_particles, 3), dtype=np.float32)
-    particles[:, axis_idx] = inlet_position
-
-    for i in range(n_particles):
-        # Get next grid position (cycle through)
-        pos_idx = (grid_state['next_position_index'] + i) % total_positions
-        grid_pos = grid_positions[pos_idx]
-
-        # Assign coordinates
-        if len(other_axes) >= 1:
-            particles[i, other_axes[0]] = grid_pos[0]
-        if len(other_axes) >= 2:
-            particles[i, other_axes[1]] = grid_pos[1]
-
-    # Update state for next call
-    grid_state['next_position_index'] = (grid_state['next_position_index'] + n_particles) % total_positions
-
-    return particles
 
 
 def _generate_inlet_grid_particles(n_particles: int, inlet_position: float,
@@ -1512,34 +1449,65 @@ def continuous_inlet_boundary_factory(bounds: Union[np.ndarray, list],
     """
     Create boundary condition with continuous particle injection at inlet.
 
-    This boundary condition maintains a steady stream of particles by replacing
-    particles that exit at the outlet with new particles at the inlet, maintaining
-    the original spatial distribution.
+    This boundary condition creates a flow-through system where particles enter
+    at one boundary (inlet) and exit at the opposite boundary (outlet). When
+    particles exit, they are immediately replaced with new particles at the inlet,
+    maintaining a steady stream and preserving the original spatial distribution.
+
+    The key innovation is the grid-preserving replacement strategy: when using
+    'grid' distribution, exiting particles are replaced at their nearest grid
+    positions on the inlet face, preventing clustering and maintaining perfect
+    spatial uniformity throughout the simulation.
 
     Parameters
     ----------
     bounds : array-like
         Domain bounds [[xmin, ymin, zmin], [xmax, ymax, zmax]]
     flow_axis : str, default 'x'
-        Primary flow axis ('x', 'y', or 'z')
+        Primary flow axis ('x', 'y', or 'z'). Particles flow along this axis.
     flow_direction : str, default 'positive'
-        Flow direction: 'positive' (min to max) or 'negative' (max to min)
+        Flow direction along the axis:
+        - 'positive': particles enter at min boundary, exit at max boundary
+        - 'negative': particles enter at max boundary, exit at min boundary
     inlet_distribution : str, default 'uniform'
-        Distribution of new particles at inlet: 'uniform', 'gaussian', 'grid'
+        Distribution of new particles at inlet:
+        - 'uniform': random uniform distribution across inlet face
+        - 'gaussian': gaussian distribution centered on inlet face
+        - 'grid': uniform grid distribution (requires concentrations parameter)
     concentrations : dict, optional
-        User-defined concentrations for grid-based inlet generation
-        {'x': int, 'y': int, 'z': int} particles per unit length
+        Grid density per unit length for each axis when using 'grid' distribution.
+        Format: {'x': int, 'y': int, 'z': int}. Only used with inlet_distribution='grid'.
 
     Returns
     -------
     BoundaryCondition
-        Continuous inlet boundary condition function
+        Boundary condition function that can be used with ParticleTracker
+
+    Examples
+    --------
+    >>> # Create flow-through boundary with grid inlet distribution
+    >>> concentrations = {'x': 10, 'y': 5, 'z': 3}
+    >>> boundary = continuous_inlet_boundary_factory(
+    ...     bounds=[[-1, -1, -1], [1, 1, 1]],
+    ...     flow_axis='x',
+    ...     flow_direction='positive',
+    ...     inlet_distribution='grid',
+    ...     concentrations=concentrations
+    ... )
+
+    >>> # Use with tracker
+    >>> tracker = create_tracker(..., boundary_condition=boundary)
+
+    Notes
+    -----
+    This boundary condition is particularly useful for:
+    - Modeling steady-state flow systems
+    - Maintaining particle concentration in flow simulations
+    - Preventing particle depletion in long-time simulations
+    - Studying transport phenomena with continuous injection
     """
     bounds_std = _ensure_bounds_shape(bounds)
     axis_map = {'x': 0, 'y': 1, 'z': 2}
-
-    # Initialize grid state for consistent particle placement
-    grid_state = {'next_position_index': 0, 'grid_positions': None}
 
     if flow_axis not in axis_map:
         raise ValueError(f"flow_axis must be 'x', 'y', or 'z', got {flow_axis}")
