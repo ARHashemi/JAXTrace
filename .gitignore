@@ -45,7 +45,7 @@ __pycache__/
 .venv/
 
 # test files
-test*
+# test*
 
 # files created by other applicaitons
 .~lock*

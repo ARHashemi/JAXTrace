@@ -91,6 +91,12 @@ print(f"JAX available: {jt.JAX_AVAILABLE}")
 jt.check_system_requirements()  # Display system capabilities
 ```
 
+**Or run comprehensive tests:**
+```bash
+python tests/smoke_test.py      # Quick functionality test
+python tests/structure_test.py  # Package structure validation
+```
+
 ## 🚀 Quick Start
 
 ### Basic Particle Tracking
