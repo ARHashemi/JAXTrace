@@ -118,8 +118,8 @@ tracker = create_tracker(
 
 # Generate initial particle positions
 initial_positions = jt.random_seeds(
-    n_particles=10000,
-    domain_bounds=((0,0,0), (1,1,1)),
+    n=10000,
+    bounds=((0,0,0), (1,1,1)),
     rng_seed=42
 )
 
@@ -184,8 +184,8 @@ sph_density = sph.evaluate(query_points)
 - **`jaxtrace.visualization`**: Static and interactive plotting tools
 
 ### Examples
-- **`example_workflow.py`**: Complete workflow with inlet/outlet boundaries
-- **`example_workflow_minimal.py`**: Basic tracking example
+- **`example_workflow_minimal.py`**: Minimal working example (~150 lines) with synthetic data
+- **`example_workflow.py`**: Complete workflow with VTK data loading and advanced features
 
 ## 🤝 Contributing
 
