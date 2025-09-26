@@ -49,3 +49,6 @@ test*
 
 # files created by other applicaitons
 .~lock*
+.claude/
+.mypy_cache/
+.ruff_cache/

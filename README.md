@@ -1,8 +1,13 @@
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![JAX](https://img.shields.io/badge/JAX-accelerated-green.svg)](https://jax.readthedocs.io/)
+[![License](https://img.shields.io/badge/license-EUPL--1.2-blue?logo=europeanunion)](LICENSE)
+[![GitHub](https://img.shields.io/badge/github-JAXTrace-lightgrey?logo=github)](https://github.com/ARHashemi/JAXTrace)
+
 # JAXTrace
 
 🚀 **Memory-optimized Lagrangian particle tracking with JAX acceleration**
 
-JAXTrace is a high-performance Python package for particle tracking in fluid flows, featuring advanced memory management strategies, JAX acceleration, and comprehensive analysis tools. Designed for computational fluid dynamics applications with large-scale particle simulations.
+JAXTrace is a high-performance Python package for particle tracking in time-dependent velocity fields, featuring JAX acceleration, advanced memory management strategies, and comprehensive analysis tools. Designed for computational fluid dynamics applications with large-scale particle simulations.
 
 ## ✨ Key Features & Strengths
 
@@ -83,7 +88,7 @@ pip install .
 import jaxtrace as jt
 print(f"JAXTrace {jt.__version__}")
 print(f"JAX available: {jt.JAX_AVAILABLE}")
-jt.get_system_info()  # Display system capabilities
+jt.check_system_requirements()  # Display system capabilities
 ```
 
 ## 🚀 Quick Start
@@ -94,7 +99,7 @@ import numpy as np
 import jaxtrace as jt
 
 # Load velocity field data
-field = jt.io.open_dataset("path/to/velocity_*.vtk").load_time_series()
+field = jt.open_dataset("path/to/velocity_*.vtk").load_time_series()
 ts_field = jt.TimeSeriesField(
     data=field["velocity_data"],
     times=field["times"],
@@ -102,7 +107,8 @@ ts_field = jt.TimeSeriesField(
 )
 
 # Configure particle tracking
-tracker = jt.create_tracker(
+from jaxtrace.tracking import create_tracker
+tracker = create_tracker(
     integrator_name="rk4",
     field=ts_field,
     boundary_condition=jt.periodic_boundary(domain_bounds),
@@ -130,7 +136,8 @@ print(f"Tracked {trajectory.N} particles for {trajectory.T} timesteps")
 ### Advanced Inlet/Outlet Boundaries
 ```python
 # Create continuous inlet boundary with grid preservation
-inlet_boundary = jt.continuous_inlet_boundary_factory(
+from jaxtrace.tracking.boundary import continuous_inlet_boundary_factory
+inlet_boundary = continuous_inlet_boundary_factory(
     inlet_position=0.0,
     outlet_position=1.0,
     flow_axis="x",
@@ -138,7 +145,7 @@ inlet_boundary = jt.continuous_inlet_boundary_factory(
     concentrations={"x": 50, "y": 20, "z": 20}  # Grid resolution
 )
 
-tracker = jt.create_tracker(
+tracker = create_tracker(
     integrator_name="rk4",
     field=ts_field,
     boundary_condition=inlet_boundary
@@ -153,7 +160,10 @@ kde = jt.KDEEstimator(
     bandwidth_rule="scott",
     normalize=True
 )
-density_grid = kde.evaluate_on_grid(grid_bounds, resolution=100)
+# For 2D evaluation
+X, Y, density_2d = kde.evaluate_2d()
+# For 3D evaluation
+X, Y, Z, density_3d = kde.evaluate_3d()
 
 # SPH Density Estimation
 sph = jt.SPHDensityEstimator(
@@ -174,28 +184,42 @@ sph_density = sph.evaluate(query_points)
 - **`jaxtrace.visualization`**: Static and interactive plotting tools
 
 ### Examples
-- **`example_workflow_clean.py`**: Complete workflow with inlet/outlet boundaries
+- **`example_workflow.py`**: Complete workflow with inlet/outlet boundaries
 - **`example_workflow_minimal.py`**: Basic tracking example
-- **`example_workflow2.py`**: Advanced features demonstration
 
 ## 🤝 Contributing
 
 JAXTrace is developed for high-performance particle tracking in fluid dynamics. Contributions welcome for:
-- New integrator schemes
 - Advanced boundary conditions
 - GPU optimization
 - Visualization enhancements
+- I/O enhancements
+- Documentation & Examples
 
 ## 📄 License
 
-This project is licensed under the terms specified in the LICENSE file.
+This project is licensed under the European Union Public License (EUPL), Version 1.2, with additional terms specified in the LICENSE file.
 
 ## 🔬 Citation
 
 If you use JAXTrace in your research, please cite:
+
+**Plain text:**
 ```
 JAXTrace: Memory-optimized Lagrangian particle tracking with JAX acceleration
 https://github.com/ARHashemi/JAXTrace
+```
+
+**BibTeX:**
+```bibtex
+@software{jaxtrace2025,
+  title = {JAXTrace: Memory-optimized Lagrangian particle tracking with JAX acceleration},
+  author = {JAXTrace Contributors},
+  year = {2025},
+  url = {https://github.com/ARHashemi/JAXTrace},
+  note = {High-performance particle tracking for fluid dynamics},
+  version = {0.1.1}
+}
 ```
 
 ---
