@@ -1,0 +1,42 @@
+jaxtrace/
+  __init__.py                 # Lightweight; no env mutations, re-exports common API
+  io/
+    __init__.py
+    vtk_reader.py                 # Read VTK series
+    vtk_writer.py                 # Write VTK series; includes write_particle_series
+    hdf5_io.py                # Chunked HDF5 series; trajectories I/O
+    registry.py               # open_dataset(...) to select backend
+  fields/
+    __init__.py
+    base.py                   # Field, TimeDependentField, GridMeta
+    structured.py             # Trilinear sampling on structured grids
+    time_series.py            # Time-series wrapper with lazy loading and device buffers
+  integrators/
+    __init__.py
+    base.py                   # Integrator protocol
+    euler.py
+    rk2.py
+    rk4.py
+  tracking/
+    __init__.py
+    particles.py              # ParticleState PyTree
+    boundary.py               # Periodic/reflect/clamp
+    seeding.py                # Seed generators
+    tracker.py                # JAX lax.scan loop
+  density/
+    __init__.py
+    kernels.py                # KDE & SPH kernels
+    neighbors.py              # JAX cell-list/grid-hash neighbor search
+    kde.py                    # Static & dynamic KDE
+    sph.py                    # SPH density
+  visualization/
+    __init__.py
+    static.py                 # Matplotlib static plots
+    dynamic.py                # Plotly/PyVista interactive previews
+    export_viz.py             # MP4/AVI exporters (frames/animations)
+  utils/
+    __init__.py
+    jax_utils.py              # Platform config, jit/vmap helpers
+    spatial.py                # Merged geometry+spatial: AABB, transforms, hashing, reductions
+    logging.py                # Timers, memory monitors, progress hooks
+    random.py                 # RNG helpers
