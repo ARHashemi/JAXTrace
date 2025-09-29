@@ -220,7 +220,7 @@ https://github.com/ARHashemi/JAXTrace
 ```bibtex
 @software{jaxtrace2025,
   title = {JAXTrace: Memory-optimized Lagrangian particle tracking with JAX acceleration},
-  author = {JAXTrace Contributors},
+  author = {A.R. Hashemi},
   year = {2025},
   url = {https://github.com/ARHashemi/JAXTrace},
   note = {High-performance particle tracking for fluid dynamics},
