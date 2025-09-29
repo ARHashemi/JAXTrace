@@ -9,7 +9,7 @@
 
 JAXTrace is a high-performance Python package for particle tracking in time-dependent velocity fields, featuring JAX acceleration, advanced memory management strategies, and comprehensive analysis tools. Designed for computational fluid dynamics applications with large-scale particle simulations.
 
-## ✨ Key Features & Strengths
+## ✨ Key Features
 
 ### 🔥 **JAX-Powered Performance**
 - **Optional JAX acceleration** with automatic NumPy fallbacks
@@ -204,7 +204,7 @@ JAXTrace is developed for high-performance particle tracking in fluid dynamics. 
 
 ## 📄 License
 
-This project is licensed under the European Union Public License (EUPL), Version 1.2, with additional terms specified in the LICENSE file.
+This project is licensed under the European Union Public License (EUPL), Version 1.2, with additional terms specified in the [LICENSE](LICENSE) file.
 
 ## 🔬 Citation
 
