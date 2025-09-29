@@ -1,4 +1,4 @@
-# output images
+# outputs
 *.jpg
 *.mkv
 *.avi
@@ -14,15 +14,21 @@ selected*/
 process*/
 videos*/
 contour_prediction*/
+*output/
+*output*/
+output*/
 *.tar.gz
 *.zip
 *.zip.*
 *.7z
+*.rar
+*.npy
 
 # old files
 *.bak
 *.old
 *old.py
+old*/
 
 # databases
 *.hdf5
@@ -32,10 +38,17 @@ contour_prediction*/
 
 # python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 
 # test files
-test*
+# test*
 
 # files created by other applicaitons
 .~lock*
+.claude/
+.mypy_cache/
+.ruff_cache/
