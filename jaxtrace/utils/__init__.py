@@ -73,6 +73,17 @@ from .reporting import (
     generate_performance_report,
 )
 
+from .memory_tracker import (
+    GPUMemoryTracker,
+    initialize_memory_tracking,
+    get_memory_tracker,
+    track_memory,
+    track_variable_memory,
+    track_operation_memory,
+    configure_memory_optimization,
+    memory_tracked,
+)
+
 __all__ = [
     # jax_utils
     "JAX_AVAILABLE",
@@ -124,4 +135,13 @@ __all__ = [
     "generate_summary_report",
     "generate_enhanced_summary_report",
     "generate_performance_report",
+    # memory_tracker
+    "GPUMemoryTracker",
+    "initialize_memory_tracking",
+    "get_memory_tracker",
+    "track_memory",
+    "track_variable_memory",
+    "track_operation_memory",
+    "configure_memory_optimization",
+    "memory_tracked",
 ]

@@ -28,9 +28,10 @@ from .registry import (
     open_hdf5_series  
 )  
 
-# Enhanced VTK functionality (conditional import with comprehensive error handling)  
-VTK_IO_AVAILABLE = False  
-VTK_STRUCTURED_AVAILABLE = False  
+# Enhanced VTK functionality (conditional import with comprehensive error handling)
+VTK_IO_AVAILABLE = False
+VTK_STRUCTURED_AVAILABLE = False
+MEMORY_OPTIMIZED_AVAILABLE = False  
 
 try:  
     from .vtk_reader import (  
@@ -716,6 +717,28 @@ __all__ = [
     'open_hdf5_series',
     'export_trajectory_vtk'
 ]
+
+# Memory-optimized loading functionality
+try:
+    from .memory_optimized_loader import (
+        MemoryOptimizedConfig,
+        MemoryOptimizedLoader,
+        load_optimized_dataset,
+        estimate_memory_usage
+    )
+    MEMORY_OPTIMIZED_AVAILABLE = True
+except ImportError:
+    MEMORY_OPTIMIZED_AVAILABLE = False
+
+# Add memory optimized exports to __all__
+if MEMORY_OPTIMIZED_AVAILABLE:
+    __all__.extend([
+        'MemoryOptimizedConfig',
+        'MemoryOptimizedLoader',
+        'load_optimized_dataset',
+        'estimate_memory_usage',
+        'MEMORY_OPTIMIZED_AVAILABLE'
+    ])
 
 # Remove None entries from __all__
 __all__ = [item for item in __all__ if item is not None]
