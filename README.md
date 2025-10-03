@@ -99,6 +99,31 @@ python tests/structure_test.py  # Package structure validation
 
 ## 🚀 Quick Start
 
+### Running JAXTrace
+
+JAXTrace provides multiple entrypoints for different use cases:
+
+```bash
+# 1. Quick test (recommended first run)
+python run.py --test
+# or
+python -m jaxtrace --test
+
+# 2. Run with default configuration
+python run.py
+# or
+python example_workflow.py
+
+# 3. Run with custom configuration file
+python run.py --config myconfig.py
+
+# 4. Module-based execution
+python -m jaxtrace
+
+# 5. Check version
+python -m jaxtrace --version
+```
+
 ### Basic Particle Tracking
 ```python
 import numpy as np

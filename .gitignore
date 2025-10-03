@@ -17,6 +17,7 @@ contour_prediction*/
 *output/
 *output*/
 output*/
+output_test/
 *.tar.gz
 *.zip
 *.zip.*
@@ -24,11 +25,11 @@ output*/
 *.rar
 *.npy
 
-# old files
+# old files (but not archive/old_examples/)
 *.bak
 *.old
 *old.py
-old*/
+/old*/
 
 # databases
 *.hdf5
@@ -43,12 +44,32 @@ __pycache__/
 *.pyd
 .Python
 .venv/
+*.egg-info/
+dist/
+build/
 
 # test files
 # test*
 
-# files created by other applicaitons
+# files created by other applications
 .~lock*
 .claude/
 .mypy_cache/
 .ruff_cache/
+
+# memory reports and debug output (outside archive)
+memory_report_*.json
+memory_tracking_*.json
+*_tracking.json
+
+# archive subfolders with large files (keep only docs and scripts)
+archive/output_archives/
+archive/old_implementation/
+archive/memory_reports/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
