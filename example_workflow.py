@@ -70,11 +70,165 @@ from jaxtrace.utils import (
 print(f"JAXTrace v{jt.__version__}")
 
 
-def main():
-    """Main workflow demonstrating JAXTrace capabilities."""
+def main(config=None):
+    """
+    Main workflow demonstrating JAXTrace capabilities.
+
+    Parameters
+    ----------
+    config : dict, optional
+        Configuration dictionary with the following keys:
+
+        **Data Loading:**
+        - 'data_pattern' : str
+            Path pattern for VTK files (e.g., "/path/to/data_*.pvtu")
+        - 'max_timesteps_to_load' : int
+            Maximum number of timesteps to load from data (default: 40)
+
+        **Octree FEM:**
+        - 'max_elements_per_leaf' : int
+            Max elements before octree subdivision (default: 32)
+        - 'max_octree_depth' : int
+            Maximum octree depth (default: 12)
+
+        **Particle Seeding:**
+        - 'particle_concentrations' : dict
+            Particle density per unit length: {'x': int, 'y': int, 'z': int}
+            Default: {'x': 60, 'y': 50, 'z': 15}
+        - 'particle_distribution' : str
+            Particle distribution type: 'uniform', 'gaussian', 'random'
+            - 'uniform': Evenly spaced grid (default)
+            - 'gaussian': Normal distribution centered in domain
+            - 'random': Random uniform distribution
+            Default: 'uniform'
+        - 'gaussian_std' : dict, optional
+            Standard deviation for Gaussian distribution (fraction of domain)
+            Example: {'x': 0.1, 'y': 0.15, 'z': 0.2}
+            Default: {'x': 0.2, 'y': 0.2, 'z': 0.2}
+        - 'particle_bounds' : list of two arrays, optional
+            Initial particle region: [min_xyz, max_xyz]
+            Default: Use entire field domain
+        - 'particle_bounds_fraction' : dict, optional
+            Fraction of domain for particles: {'x': (min_frac, max_frac), 'y': ..., 'z': ...}
+            Example: {'x': (0.0, 0.2), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+            Default: Entire domain (0.0, 1.0) for all axes
+
+        **Tracking:**
+        - 'n_timesteps' : int
+            Number of tracking timesteps (default: 2000)
+        - 'dt' : float
+            Time step size (default: 0.0025)
+        - 'time_span' : tuple of (float, float), optional
+            Simulation time range (t_start, t_end)
+            Default: (0.0, 4.0)
+        - 'batch_size' : int
+            Particles per batch (default: 1000)
+        - 'integrator' : str
+            Integration method: 'rk4', 'euler', etc. (default: 'rk4')
+
+        **Boundary Conditions:**
+        - 'flow_axis' : str
+            Flow direction: 'x', 'y', or 'z' (default: 'x')
+        - 'boundary_inlet' : str
+            Inlet (first wall) boundary type:
+            - 'continuous': Continuous particle injection (default)
+            - 'none': No inlet, no particle injection
+            - 'reflective': Reflective wall
+            - 'periodic': Periodic boundary
+            Default: 'continuous'
+        - 'boundary_outlet' : str
+            Outlet (last wall) boundary type:
+            - 'absorbing': Particles exit and are replaced at inlet (default)
+            - 'reflective': Reflective wall
+            - 'periodic': Periodic boundary
+            Default: 'absorbing'
+        - 'inlet_distribution' : str
+            Inlet particle distribution: 'grid' or 'random' (default: 'grid')
+            Only used when boundary_inlet='continuous'
+
+        **Visualization:**
+        - 'slice_x0' : float, optional
+            X position for YZ density slice (default: 0.7 * x_max)
+        - 'slice_levels' : int or array-like
+            Density contour levels (default: 20)
+        - 'slice_cutoff_min' : float
+            Lower percentile cutoff for density (default: 0, range: 0-100)
+        - 'slice_cutoff_max' : float
+            Upper percentile cutoff for density (default: 95, range: 0-100)
+
+        **GPU:**
+        - 'device' : str
+            Device to use: 'gpu' or 'cpu' (default: 'gpu')
+        - 'memory_limit_gb' : float
+            GPU memory limit in GB (default: 3.0)
+    """
+
+    # Set default configuration
+    if config is None:
+        config = {}
+
+    # Apply defaults
+    cfg = {
+        # Data loading
+        'data_pattern': "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu",
+        'max_timesteps_to_load': 40,
+
+        # Octree FEM
+        'max_elements_per_leaf': 32,
+        'max_octree_depth': 12,
+
+        # Particle seeding
+        'particle_concentrations': {'x': 60, 'y': 50, 'z': 15},
+        'particle_distribution': 'uniform',  # 'uniform', 'gaussian', 'random'
+        'gaussian_std': {'x': 0.2, 'y': 0.2, 'z': 0.2},  # For Gaussian distribution
+        'particle_bounds': None,  # Will use entire domain
+        'particle_bounds_fraction': None,  # Optional fractional bounds
+
+        # Tracking
+        'n_timesteps': 2000,
+        'dt': 0.0025,
+        'time_span': (0.0, 4.0),
+        'batch_size': 1000,
+        'integrator': 'rk4',
+
+        # Boundary conditions
+        'flow_axis': 'x',
+        'boundary_inlet': 'continuous',  # 'continuous', 'none', 'reflective', 'periodic'
+        'boundary_outlet': 'absorbing',  # 'absorbing', 'reflective', 'periodic'
+        'inlet_distribution': 'grid',
+
+        # Visualization
+        'slice_x0': None,
+        'slice_levels': 20,
+        'slice_cutoff_min': 0,
+        'slice_cutoff_max': 95,
+
+        # GPU
+        'device': 'gpu',
+        'memory_limit_gb': 3.0,
+    }
+
+    # Update with user-provided config
+    cfg.update(config)
+
+    print("="*80)
+    print("CONFIGURATION SUMMARY")
+    print("="*80)
+    print(f"📁 Data pattern: {cfg['data_pattern']}")
+    print(f"⏱  Timesteps to load: {cfg['max_timesteps_to_load']}")
+    print(f"🌲 Octree: max_elements={cfg['max_elements_per_leaf']}, max_depth={cfg['max_octree_depth']}")
+    print(f"🎯 Particles: {cfg['particle_concentrations']}, distribution={cfg['particle_distribution']}")
+    if cfg['particle_distribution'] == 'gaussian':
+        print(f"   Gaussian std: {cfg['gaussian_std']}")
+    if cfg['particle_bounds_fraction']:
+        print(f"📦 Particle region: {cfg['particle_bounds_fraction']}")
+    print(f"🏃 Tracking: {cfg['n_timesteps']} steps, dt={cfg['dt']}, integrator={cfg['integrator']}")
+    print(f"🚪 Boundary: {cfg['flow_axis']}-axis, inlet={cfg['boundary_inlet']}, outlet={cfg['boundary_outlet']}")
+    print(f"💻 Device: {cfg['device']}, memory={cfg['memory_limit_gb']} GB")
+    print("="*80)
 
     # 1. System diagnostics
-    print("="*80)
+    print("\n" + "="*80)
     print("1. SYSTEM DIAGNOSTICS")
     print("="*80)
 
@@ -90,12 +244,12 @@ def main():
 
     jt.configure(
         dtype="float32",
-        device="gpu",  # Use GPU for optimized octree FEM
-        memory_limit_gb=3.0
+        device=cfg['device'],
+        memory_limit_gb=cfg['memory_limit_gb']
     )
 
-    config = jt.get_config()
-    print(f"✅ JAXTrace configured: {config}")
+    jt_config = jt.get_config()
+    print(f"✅ JAXTrace configured: {jt_config}")
     print(f"✅ JAX device: {jax.devices()}")
 
     # 3. Load or create velocity field
@@ -104,21 +258,35 @@ def main():
     print("="*80)
 
     # Try to load VTK data, fallback to synthetic field
-    field = create_or_load_velocity_field()
+    field = create_or_load_velocity_field(
+        data_pattern=cfg['data_pattern'],
+        max_timesteps=cfg['max_timesteps_to_load'],
+        max_elements_per_leaf=cfg['max_elements_per_leaf'],
+        max_octree_depth=cfg['max_octree_depth']
+    )
 
     # 4. Particle seeding and tracking
     print("\n" + "="*80)
     print("4. PARTICLE TRACKING")
     print("="*80)
 
-    # Custom particle concentrations (particles per unit length)
-    custom_concentrations = {
-        'x': 60,  # High concentration in flow direction
-        'y': 50,  # Medium concentration across width
-        'z': 15    # Lower concentration in height
-    }
-
-    trajectory, strategy_info = execute_particle_tracking(field, custom_concentrations)
+    trajectory, strategy_info = execute_particle_tracking(
+        field=field,
+        concentrations=cfg['particle_concentrations'],
+        particle_distribution=cfg['particle_distribution'],
+        gaussian_std=cfg['gaussian_std'],
+        particle_bounds=cfg['particle_bounds'],
+        particle_bounds_fraction=cfg['particle_bounds_fraction'],
+        n_timesteps=cfg['n_timesteps'],
+        dt=cfg['dt'],
+        time_span=cfg['time_span'],
+        batch_size=cfg['batch_size'],
+        integrator=cfg['integrator'],
+        flow_axis=cfg['flow_axis'],
+        boundary_inlet=cfg['boundary_inlet'],
+        boundary_outlet=cfg['boundary_outlet'],
+        inlet_distribution=cfg['inlet_distribution']
+    )
 
     # 5. Trajectory analysis
     print("\n" + "="*80)
@@ -139,17 +307,14 @@ def main():
     print("7. VISUALIZATION")
     print("="*80)
 
-    # YZ slice density parameters (user configurable)
-    # These parameters control the new YZ density slice visualization
-    slice_x0 = None       # X position for slice plane (default: 0.7 * x_max)
-                         # Examples: 0.5, 1.2, bounds_max[0]*0.8
-    slice_levels = 20     # Number of contour levels or array of specific levels
-                         # Examples: 15, 25, [0.1, 0.5, 1.0, 2.0, 5.0]
-    slice_cutoff = 95     # Percentile cutoff for intensity (removes extreme outliers)
-                         # Examples: 90, 99, 100 (no cutoff)
-
-    create_visualizations(trajectory, density_results,
-                         slice_x0=slice_x0, slice_levels=slice_levels, slice_cutoff=slice_cutoff)
+    create_visualizations(
+        trajectory,
+        density_results,
+        slice_x0=cfg['slice_x0'],
+        slice_levels=cfg['slice_levels'],
+        slice_cutoff_min=cfg['slice_cutoff_min'],
+        slice_cutoff_max=cfg['slice_cutoff_max']
+    )
 
     # 8. Export results
     print("\n" + "="*80)
@@ -170,11 +335,15 @@ def main():
     print("="*80)
 
 
-def create_or_load_velocity_field():
+def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
+                                   max_elements_per_leaf=32, max_octree_depth=12):
     """Load VTK data with octree FEM or create synthetic field."""
 
     # Try to load VTK data with connectivity for octree FEM
-    vtk_pattern = "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu"
+    if data_pattern is None:
+        data_pattern = "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu"
+
+    vtk_pattern = data_pattern
 
     try:
         print(f"🔍 Loading VTK data with connectivity for octree FEM...")
@@ -188,8 +357,7 @@ def create_or_load_velocity_field():
 
         print(f"   Found {len(files)} files")
 
-        # Load subset of timesteps (40 as in original)
-        max_timesteps = 40
+        # Load subset of timesteps
         stride = max(1, len(files) // max_timesteps)
         files_to_load = files[::stride][:max_timesteps]
 
@@ -275,8 +443,8 @@ def create_or_load_velocity_field():
             connectivity=connectivity,
             interpolation="linear",
             extrapolation="constant",
-            max_elements_per_leaf=32,
-            max_depth=12
+            max_elements_per_leaf=max_elements_per_leaf,
+            max_depth=max_octree_depth
         )
 
         # Convert to JAX arrays on GPU
@@ -354,8 +522,13 @@ def create_synthetic_vortex_field():
     )
 
 
-def execute_particle_tracking(field, concentrations=None):
-    """Execute particle tracking with uniform distribution and flow-through boundaries."""
+def execute_particle_tracking(field, concentrations=None, particle_distribution='uniform',
+                              gaussian_std=None, particle_bounds=None,
+                              particle_bounds_fraction=None, n_timesteps=2000, dt=0.0025,
+                              time_span=(0.0, 4.0), batch_size=1000, integrator='rk4',
+                              flow_axis='x', boundary_inlet='continuous', boundary_outlet='absorbing',
+                              inlet_distribution='grid'):
+    """Execute particle tracking with configurable distribution and boundary conditions."""
 
     # Get field bounds
     bounds_min, bounds_max = field.get_spatial_bounds()
@@ -375,10 +548,32 @@ def execute_particle_tracking(field, concentrations=None):
     # Calculate grid resolution based on concentrations and domain size
     domain_size = bounds_max - bounds_min
     print(f"   Domain size: X={domain_size[0]:.4f}, Y={domain_size[1]:.4f}, Z={domain_size[2]:.4f}")
-    par_bounds = [bounds_min,
-                  [bounds_max[0],#bounds_min[0] + 0.2 * domain_size[0],
-                   bounds_max[1],
-                   bounds_max[2]]]
+
+    # Determine particle bounds
+    if particle_bounds is not None:
+        # User specified explicit bounds
+        par_bounds = particle_bounds
+        print(f"   Using explicit particle bounds: {par_bounds}")
+    elif particle_bounds_fraction is not None:
+        # User specified fractional bounds
+        par_bounds_min = np.zeros(3)
+        par_bounds_max = np.zeros(3)
+        for i, axis in enumerate(['x', 'y', 'z']):
+            if axis in particle_bounds_fraction:
+                min_frac, max_frac = particle_bounds_fraction[axis]
+                par_bounds_min[i] = bounds_min[i] + min_frac * domain_size[i]
+                par_bounds_max[i] = bounds_min[i] + max_frac * domain_size[i]
+            else:
+                # Default to entire domain for this axis
+                par_bounds_min[i] = bounds_min[i]
+                par_bounds_max[i] = bounds_max[i]
+        par_bounds = [par_bounds_min, par_bounds_max]
+        print(f"   Using fractional particle bounds: {particle_bounds_fraction}")
+        print(f"   Computed bounds: {par_bounds}")
+    else:
+        # Default: entire domain
+        par_bounds = [bounds_min, bounds_max]
+        print(f"   Using entire domain for particles")
 
     nx = max(1, int(concentration_x))
     ny = max(1, int(concentration_y))
@@ -393,44 +588,122 @@ def execute_particle_tracking(field, concentrations=None):
         nx, ny, nz = max(nx, 10), max(ny, 5), max(nz, 2)
         print(f"   Adjusted resolution: {nx} x {ny} x {nz} = {nx*ny*nz} particles")
 
-    # Generate uniform grid of particles across the entire domain
-    seeds = uniform_grid_seeds(
-        resolution=(nx, ny, nz),
-        bounds= par_bounds,
-        include_boundaries=True
-    )
+    # Generate particles based on distribution type
+    print(f"   Distribution type: {particle_distribution}")
 
-    print(f"✅ Generated {len(seeds)} uniform particles across domain")
+    if particle_distribution == 'uniform':
+        # Uniform grid distribution
+        seeds = uniform_grid_seeds(
+            resolution=(nx, ny, nz),
+            bounds=par_bounds,
+            include_boundaries=True
+        )
+        print(f"✅ Generated {len(seeds)} particles with uniform grid distribution")
+
+    elif particle_distribution == 'gaussian':
+        # Gaussian distribution centered in domain
+        if gaussian_std is None:
+            gaussian_std = {'x': 0.2, 'y': 0.2, 'z': 0.2}
+
+        n_particles = nx * ny * nz
+        center = (np.array(par_bounds[0]) + np.array(par_bounds[1])) / 2
+        domain_span = np.array(par_bounds[1]) - np.array(par_bounds[0])
+
+        # Generate Gaussian-distributed particles
+        seeds = []
+        for _ in range(n_particles):
+            x = np.random.normal(center[0], gaussian_std.get('x', 0.2) * domain_span[0])
+            y = np.random.normal(center[1], gaussian_std.get('y', 0.2) * domain_span[1])
+            z = np.random.normal(center[2], gaussian_std.get('z', 0.2) * domain_span[2])
+
+            # Clip to bounds
+            x = np.clip(x, par_bounds[0][0], par_bounds[1][0])
+            y = np.clip(y, par_bounds[0][1], par_bounds[1][1])
+            z = np.clip(z, par_bounds[0][2], par_bounds[1][2])
+
+            seeds.append([x, y, z])
+
+        seeds = np.array(seeds, dtype=np.float32)
+        print(f"✅ Generated {len(seeds)} particles with Gaussian distribution (std={gaussian_std})")
+
+    elif particle_distribution == 'random':
+        # Random uniform distribution
+        n_particles = nx * ny * nz
+
+        seeds = np.random.uniform(
+            low=par_bounds[0],
+            high=par_bounds[1],
+            size=(n_particles, 3)
+        ).astype(np.float32)
+
+        print(f"✅ Generated {len(seeds)} particles with random uniform distribution")
+
+    else:
+        raise ValueError(f"Unknown particle_distribution: {particle_distribution}. "
+                        f"Options: 'uniform', 'gaussian', 'random'")
 
     # Setup tracking configuration
+    boundary_desc = f"{boundary_inlet}/{boundary_outlet}"
     strategy_info = {
-        'name': 'RK4 with Flow-Through Boundaries (Inlet/Outlet)',
-        'integrator': 'rk4',
-        'n_timesteps': 2000,
-        'batch_size': min(len(seeds), 1000),
-        'boundary_type': 'flow_through',
-        'dt': 0.0025
+        'name': f'{integrator.upper()} with {boundary_desc} Boundaries',
+        'integrator': integrator,
+        'n_timesteps': n_timesteps,
+        'batch_size': min(len(seeds), batch_size),
+        'boundary_type': boundary_desc,
+        'dt': dt
     }
 
-    # Create continuous inlet boundary condition:
-    # - Particles continuously enter from x_min (yz plane inlet)
-    # - Particles exit at x_max (yz plane outlet) and are replaced with new inlet particles
-    # - Reflective boundaries on y and z directions
+    # Create boundary condition based on configuration
     full_bounds = [bounds_min, bounds_max]
-    boundary = continuous_inlet_boundary_factory(
-        bounds=full_bounds,
-        flow_axis='x',              # Flow in x direction
-        flow_direction='positive',  # From x_min to x_max
-        inlet_distribution='grid',  # Grid distribution matching initial particle pattern
-        concentrations=concentrations  # Pass user-defined concentrations
-    )
 
     print("🚪 Boundary conditions:")
-    print(f"   Inlet: YZ plane at x = {bounds_min[0]:.4f} (continuous injection)")
-    print(f"   Outlet: YZ plane at x = {bounds_max[0]:.4f} (particles absorbed & replaced)")
-    print(f"   Y boundaries: Reflective at y = [{bounds_min[1]:.4f}, {bounds_max[1]:.4f}]")
-    print(f"   Z boundaries: Reflective at z = [{bounds_min[2]:.4f}, {bounds_max[2]:.4f}]")
-    print(f"   Particle replacement: Exited particles replaced with new inlet particles")
+
+    # Determine flow axis index
+    axis_idx = {'x': 0, 'y': 1, 'z': 2}[flow_axis]
+    axis_names = ['x', 'y', 'z']
+
+    if boundary_inlet == 'continuous' and boundary_outlet == 'absorbing':
+        # Use continuous inlet with absorbing outlet (particles replaced at inlet)
+        from jaxtrace.tracking.boundary import reflective_boundary
+        boundary = continuous_inlet_boundary_factory(
+            bounds=full_bounds,
+            flow_axis=flow_axis,
+            flow_direction='positive',
+            inlet_distribution=inlet_distribution,
+            concentrations=concentrations
+        )
+        print(f"   {flow_axis.upper()}-axis: Inlet={boundary_inlet}, Outlet={boundary_outlet}")
+        print(f"   Other axes: Reflective boundaries")
+
+    elif boundary_inlet == 'none' and boundary_outlet == 'absorbing':
+        # No inlet, absorbing outlet only (particles exit but not replaced)
+        from jaxtrace.tracking.boundary import reflective_boundary
+        boundary = reflective_boundary([bounds_min, bounds_max])
+
+        # Note: True absorbing outlet requires custom boundary implementation
+        # For now, use reflective and document limitation
+        print(f"   {flow_axis.upper()}-axis: No inlet, absorbing outlet")
+        print(f"   ⚠️  Note: Currently using reflective boundary (absorbing without inlet requires custom implementation)")
+        print(f"   Other axes: Reflective boundaries")
+
+    elif boundary_inlet == 'reflective' or boundary_outlet == 'reflective':
+        # All reflective boundaries
+        from jaxtrace.tracking.boundary import reflective_boundary
+        boundary = reflective_boundary([bounds_min, bounds_max])
+        print(f"   All boundaries: Reflective")
+
+    elif boundary_inlet == 'periodic' or boundary_outlet == 'periodic':
+        # Periodic boundaries
+        from jaxtrace.tracking.boundary import periodic_boundary
+        boundary = periodic_boundary([bounds_min, bounds_max])
+        print(f"   All boundaries: Periodic")
+
+    else:
+        # Default to reflective
+        from jaxtrace.tracking.boundary import reflective_boundary
+        boundary = reflective_boundary([bounds_min, bounds_max])
+        print(f"   All boundaries: Reflective (default)")
+        print(f"   ⚠️  Boundary config ({boundary_inlet}/{boundary_outlet}) not fully implemented")
 
     # Create progress callback function
     def progress_callback(progress):
@@ -454,10 +727,8 @@ def execute_particle_tracking(field, concentrations=None):
 
     # Create tracker
     print("🚀 Setting up particle tracker...")
-    # Note: JAX compilation warnings are expected for complex field interpolation
-    # The tracker will fall back to step-by-step execution, which works correctly
     tracker = create_tracker(
-        integrator_name='rk4',
+        integrator_name=integrator,
         field=field,
         boundary_condition=boundary,
         batch_size=strategy_info['batch_size'],
@@ -467,15 +738,15 @@ def execute_particle_tracking(field, concentrations=None):
 
     # Run tracking
     print("🏃 Running particle tracking...")
-    print(f"   Tracking {len(seeds)} particles for {strategy_info['n_timesteps']} timesteps")
+    print(f"   Tracking {len(seeds)} particles for {n_timesteps} timesteps")
+    print(f"   Time span: {time_span}, dt={dt}")
     start_time = time.time()
 
-    time_span = (0.0, 4.0)
     trajectory = tracker.track_particles(
         initial_positions=seeds,
         time_span=time_span,
-        n_timesteps=strategy_info['n_timesteps'],
-        dt=strategy_info['dt']
+        n_timesteps=n_timesteps,
+        dt=dt
     )
 
     tracking_time = time.time() - start_time
@@ -554,7 +825,7 @@ def perform_density_analysis(trajectory):
         return None
 
 
-def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff_percentile=95):
+def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff_percentile_min=0, cutoff_percentile_max=95):
     """
     Create a density contour plot at a YZ slice.
 
@@ -568,8 +839,10 @@ def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff
         X position for the slice. Default is 0.7 * x_max
     levels : int or array-like, optional
         Contour levels. Default is 15 levels
-    cutoff_percentile : float, optional
-        Percentile cutoff for contour levels (default 95%)
+    cutoff_percentile_min : float, optional
+        Lower percentile cutoff for contour levels (default 0%, range: 0-100)
+    cutoff_percentile_max : float, optional
+        Upper percentile cutoff for contour levels (default 95%, range: 0-100)
     """
     try:
         from jaxtrace.density.kde import KDEEstimator
@@ -620,10 +893,14 @@ def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff
         if levels is None:
             levels = 15
 
-        # Apply cutoff if specified
-        if cutoff_percentile < 100:
-            cutoff_value = np.percentile(density_2d, cutoff_percentile)
-            density_2d = np.minimum(density_2d, cutoff_value)
+        # Apply cutoffs if specified
+        if cutoff_percentile_min > 0:
+            min_cutoff_value = np.percentile(density_2d, cutoff_percentile_min)
+            density_2d = np.maximum(density_2d, min_cutoff_value)
+
+        if cutoff_percentile_max < 100:
+            max_cutoff_value = np.percentile(density_2d, cutoff_percentile_max)
+            density_2d = np.minimum(density_2d, max_cutoff_value)
 
         # Create the plot
         _, ax = plt.subplots(figsize=(10, 8))
@@ -667,7 +944,7 @@ def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff
         print(f"   ⚠️  YZ slice creation failed: {e}")
 
 
-def create_visualizations(trajectory, density_results=None, slice_x0=None, slice_levels=None, slice_cutoff=95):
+def create_visualizations(trajectory, density_results=None, slice_x0=None, slice_levels=None, slice_cutoff_min=0, slice_cutoff_max=95):
     """Create comprehensive visualizations.
 
     Parameters
@@ -680,8 +957,10 @@ def create_visualizations(trajectory, density_results=None, slice_x0=None, slice
         X position for YZ density slice. Default is 0.7 * x_max
     slice_levels : int or array-like, optional
         Contour levels for density slice. Default is 15
-    slice_cutoff : float, optional
-        Percentile cutoff for contour levels (default 95%)
+    slice_cutoff_min : float, optional
+        Lower percentile cutoff for contour levels (default 0%, range: 0-100)
+    slice_cutoff_max : float, optional
+        Upper percentile cutoff for contour levels (default 95%, range: 0-100)
     """
 
     output_dir = Path("output")
@@ -753,7 +1032,8 @@ def create_visualizations(trajectory, density_results=None, slice_x0=None, slice
 
         # YZ slice density contour plot
         print("🎯 Creating YZ slice density contour...")
-        create_yz_density_slice(trajectory, output_dir, x0=slice_x0, levels=slice_levels, cutoff_percentile=slice_cutoff)
+        create_yz_density_slice(trajectory, output_dir, x0=slice_x0, levels=slice_levels,
+                               cutoff_percentile_min=slice_cutoff_min, cutoff_percentile_max=slice_cutoff_max)
 
         print(f"✅ All visualizations saved to {output_dir}/")
 
@@ -837,4 +1117,156 @@ def generate_reports(field, trajectory, stats, strategy_info, density_results=No
 
 
 if __name__ == "__main__":
-    main()
+    # =============================================================================
+    # USER CONFIGURATION
+    # =============================================================================
+    # Customize these parameters for your specific case
+
+    user_config = {
+        # -------------------------------------------------------------------------
+        # Data Loading
+        # -------------------------------------------------------------------------
+        'data_pattern': "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu",
+        'max_timesteps_to_load': 40,  # Number of timesteps to load from data
+
+        # -------------------------------------------------------------------------
+        # Octree FEM Configuration
+        # -------------------------------------------------------------------------
+        'max_elements_per_leaf': 32,  # Lower = finer tree, higher memory
+        'max_octree_depth': 12,       # Maximum tree depth
+
+        # -------------------------------------------------------------------------
+        # Particle Seeding
+        # -------------------------------------------------------------------------
+        'particle_concentrations': {
+            'x': 60,  # Particles per unit length in X
+            'y': 50,  # Particles per unit length in Y
+            'z': 15   # Particles per unit length in Z
+        },
+
+        # Particle distribution type: 'uniform', 'gaussian', 'random'
+        'particle_distribution': 'uniform',
+
+        # Gaussian distribution parameters (only used if distribution='gaussian')
+        'gaussian_std': {
+            'x': 0.2,  # Std dev as fraction of domain size in X
+            'y': 0.2,  # Std dev as fraction of domain size in Y
+            'z': 0.2   # Std dev as fraction of domain size in Z
+        },
+
+        # Option 1: Explicit bounds [min_xyz, max_xyz]
+        # 'particle_bounds': [
+        #     np.array([-0.03, -0.02, -0.008]),
+        #     np.array([0.01, 0.02, 0.0])
+        # ],
+
+        # Option 2: Fractional bounds (fraction of domain)
+        # Example: Seed particles only in first 20% of X domain
+        'particle_bounds_fraction': {
+            'x': (0.0, 1.0),  # Full X range
+            'y': (0.0, 1.0),  # Full Y range
+            'z': (0.0, 1.0)   # Full Z range
+        },
+
+        # -------------------------------------------------------------------------
+        # Tracking Parameters
+        # -------------------------------------------------------------------------
+        'n_timesteps': 2000,          # Number of tracking timesteps
+        'dt': 0.0025,                  # Time step size
+        'time_span': (0.0, 4.0),      # Simulation time range (t_start, t_end)
+        'batch_size': 1000,            # Particles per batch
+        'integrator': 'rk4',           # Integration method: 'rk4', 'euler', etc.
+
+        # -------------------------------------------------------------------------
+        # Boundary Conditions
+        # -------------------------------------------------------------------------
+        'flow_axis': 'x',  # Flow direction: 'x', 'y', or 'z'
+
+        # Inlet boundary (first wall along flow axis)
+        # Options: 'continuous' (inject particles), 'none' (no injection),
+        #          'reflective', 'periodic'
+        'boundary_inlet': 'continuous',
+
+        # Outlet boundary (last wall along flow axis)
+        # Options: 'absorbing' (particles exit), 'reflective', 'periodic'
+        'boundary_outlet': 'absorbing',
+
+        # Inlet particle distribution (only for continuous inlet)
+        'inlet_distribution': 'grid',  # 'grid' or 'random'
+
+        # -------------------------------------------------------------------------
+        # Visualization
+        # -------------------------------------------------------------------------
+        'slice_x0': None,              # X position for YZ slice (None = auto)
+        'slice_levels': 20,            # Number of density contour levels
+        'slice_cutoff_min': 0,         # Lower percentile cutoff (0% = no lower limit)
+        'slice_cutoff_max': 95,        # Upper percentile cutoff (95% = clip high outliers)
+
+        # -------------------------------------------------------------------------
+        # GPU Configuration
+        # -------------------------------------------------------------------------
+        'device': 'gpu',               # 'gpu' or 'cpu'
+        'memory_limit_gb': 3.0,        # GPU memory limit in GB
+    }
+
+    # =============================================================================
+    # QUICK CONFIGURATION EXAMPLES
+    # =============================================================================
+
+    # Example 1: Test run with fewer particles and timesteps
+    # user_config.update({
+    #     'particle_concentrations': {'x': 20, 'y': 10, 'z': 5},
+    #     'n_timesteps': 500,
+    #     'max_timesteps_to_load': 10
+    # })
+
+    # Example 2: High-resolution run
+    # user_config.update({
+    #     'particle_concentrations': {'x': 100, 'y': 80, 'z': 20},
+    #     'n_timesteps': 5000,
+    #     'dt': 0.001,
+    #     'batch_size': 2000
+    # })
+
+    # Example 3: Inlet region only (first 20% of X domain)
+    # user_config.update({
+    #     'particle_bounds_fraction': {
+    #         'x': (0.0, 0.2),
+    #         'y': (0.0, 1.0),
+    #         'z': (0.0, 1.0)
+    #     }
+    # })
+
+    # Example 4: Gaussian particle distribution (concentrated in center)
+    # user_config.update({
+    #     'particle_distribution': 'gaussian',
+    #     'gaussian_std': {'x': 0.1, 'y': 0.1, 'z': 0.15}
+    # })
+
+    # Example 5: Random particle distribution
+    # user_config.update({
+    #     'particle_distribution': 'random'
+    # })
+
+    # Example 6: No inlet, outlet only (particles decay/exit)
+    # user_config.update({
+    #     'boundary_inlet': 'none',
+    #     'boundary_outlet': 'absorbing'
+    # })
+
+    # Example 7: All reflective boundaries (closed domain)
+    # user_config.update({
+    #     'boundary_inlet': 'reflective',
+    #     'boundary_outlet': 'reflective'
+    # })
+
+    # Example 8: Periodic boundaries
+    # user_config.update({
+    #     'boundary_inlet': 'periodic',
+    #     'boundary_outlet': 'periodic'
+    # })
+
+    # =============================================================================
+    # RUN WORKFLOW
+    # =============================================================================
+    main(config=user_config)
