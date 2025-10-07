@@ -126,6 +126,45 @@ config = {
 }
 ```
 
+#### Adaptive Mesh Refinement (AMR) Data
+```python
+config = {
+    'use_stable_mesh_only': True,   # Auto-detect stable mesh size
+    'skip_initial_timesteps': 0,    # Or manually skip first N timesteps
+}
+```
+
+#### Use Time Interval from VTK Files
+```python
+config = {
+    'use_data_dt': True,  # Override dt with timestamps from VTK files
+    'dt': 0.0025,         # Fallback value if data dt cannot be determined
+}
+```
+
+#### Custom Density Estimation
+```python
+# KDE only with custom bandwidth
+config = {
+    'density_methods': ['kde'],
+    'kde_bandwidth': 0.15,
+    'kde_bandwidth_rule': 'silverman'
+}
+
+# Adaptive SPH
+config = {
+    'density_methods': ['sph'],
+    'sph_adaptive': True,
+    'sph_n_neighbors': 50,
+    'sph_kernel_type': 'wendland'
+}
+
+# Skip density analysis for faster runs
+config = {
+    'perform_density_analysis': False
+}
+```
+
 ### All Available Parameters
 
 See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for complete parameter reference.

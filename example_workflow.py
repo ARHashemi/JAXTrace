@@ -156,6 +156,28 @@ def main(config=None):
         - 'slice_cutoff_max' : float
             Upper percentile cutoff for density (default: 95, range: 0-100)
 
+        **Density Estimation:**
+        - 'perform_density_analysis' : bool
+            Enable/disable density analysis (default: True)
+        - 'density_methods' : list
+            Methods to use: ['kde'], ['sph'], or ['kde', 'sph'] (default: ['kde', 'sph'])
+        - 'kde_bandwidth' : float, optional
+            KDE bandwidth (None = auto-calculate using bandwidth_rule, default: None)
+        - 'kde_bandwidth_rule' : str
+            Bandwidth selection rule: 'scott' or 'silverman' (default: 'scott')
+        - 'kde_normalize' : bool
+            Normalize KDE density values (default: True)
+        - 'sph_smoothing_length' : float
+            SPH smoothing length h (default: 0.1)
+        - 'sph_adaptive' : bool
+            Use adaptive smoothing length (slower but more accurate, default: False)
+        - 'sph_n_neighbors' : int
+            Number of neighbors for adaptive smoothing (default: 32)
+        - 'sph_kernel_type' : str
+            SPH kernel: 'cubic_spline', 'gaussian', or 'wendland' (default: 'cubic_spline')
+        - 'sph_normalize' : bool
+            Normalize SPH density values (default: True)
+
         **GPU:**
         - 'device' : str
             Device to use: 'gpu' or 'cpu' (default: 'gpu')
@@ -172,6 +194,8 @@ def main(config=None):
         # Data loading
         'data_pattern': "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu",
         'max_timesteps_to_load': 40,
+        'skip_initial_timesteps': 0,  # Skip first N timesteps (for AMR data)
+        'use_stable_mesh_only': True,  # Auto-detect and use only stable mesh timesteps
 
         # Octree FEM
         'max_elements_per_leaf': 32,
@@ -190,12 +214,29 @@ def main(config=None):
         'time_span': (0.0, 4.0),
         'batch_size': 1000,
         'integrator': 'rk4',
+        'use_data_dt': False,  # If True, use time interval from VTK data (overrides 'dt')
 
         # Boundary conditions
         'flow_axis': 'x',
         'boundary_inlet': 'continuous',  # 'continuous', 'none', 'reflective', 'periodic'
         'boundary_outlet': 'absorbing',  # 'absorbing', 'reflective', 'periodic'
         'inlet_distribution': 'grid',
+
+        # Density Estimation
+        'perform_density_analysis': True,  # Whether to perform density analysis
+        'density_methods': ['kde', 'sph'],  # Methods to use: 'kde', 'sph', or both
+
+        # KDE (Kernel Density Estimation) parameters
+        'kde_bandwidth': None,          # Bandwidth (None = auto-calculate)
+        'kde_bandwidth_rule': 'scott',  # Rule: 'scott' or 'silverman'
+        'kde_normalize': True,          # Normalize density
+
+        # SPH (Smoothed Particle Hydrodynamics) parameters
+        'sph_smoothing_length': 0.1,   # Smoothing length h
+        'sph_adaptive': False,          # Use adaptive smoothing length
+        'sph_n_neighbors': 32,          # Number of neighbors for adaptive h
+        'sph_kernel_type': 'cubic_spline',  # Kernel: 'cubic_spline', 'gaussian', 'wendland'
+        'sph_normalize': True,          # Normalize density
 
         # Visualization
         'slice_x0': None,
@@ -216,13 +257,20 @@ def main(config=None):
     print("="*80)
     print(f"📁 Data pattern: {cfg['data_pattern']}")
     print(f"⏱  Timesteps to load: {cfg['max_timesteps_to_load']}")
+    if cfg['use_stable_mesh_only']:
+        print(f"🔍 Auto-detect stable mesh: enabled")
+    if cfg['skip_initial_timesteps'] > 0:
+        print(f"⏭️  Skip initial timesteps: {cfg['skip_initial_timesteps']}")
     print(f"🌲 Octree: max_elements={cfg['max_elements_per_leaf']}, max_depth={cfg['max_octree_depth']}")
     print(f"🎯 Particles: {cfg['particle_concentrations']}, distribution={cfg['particle_distribution']}")
     if cfg['particle_distribution'] == 'gaussian':
         print(f"   Gaussian std: {cfg['gaussian_std']}")
     if cfg['particle_bounds_fraction']:
         print(f"📦 Particle region: {cfg['particle_bounds_fraction']}")
-    print(f"🏃 Tracking: {cfg['n_timesteps']} steps, dt={cfg['dt']}, integrator={cfg['integrator']}")
+    dt_info = f"dt={cfg['dt']}"
+    if cfg['use_data_dt']:
+        dt_info += " (will use data dt if available)"
+    print(f"🏃 Tracking: {cfg['n_timesteps']} steps, {dt_info}, integrator={cfg['integrator']}")
     print(f"🚪 Boundary: {cfg['flow_axis']}-axis, inlet={cfg['boundary_inlet']}, outlet={cfg['boundary_outlet']}")
     print(f"💻 Device: {cfg['device']}, memory={cfg['memory_limit_gb']} GB")
     print("="*80)
@@ -262,7 +310,9 @@ def main(config=None):
         data_pattern=cfg['data_pattern'],
         max_timesteps=cfg['max_timesteps_to_load'],
         max_elements_per_leaf=cfg['max_elements_per_leaf'],
-        max_octree_depth=cfg['max_octree_depth']
+        max_octree_depth=cfg['max_octree_depth'],
+        skip_initial_timesteps=cfg['skip_initial_timesteps'],
+        use_stable_mesh_only=cfg['use_stable_mesh_only']
     )
 
     # 4. Particle seeding and tracking
@@ -270,7 +320,18 @@ def main(config=None):
     print("4. PARTICLE TRACKING")
     print("="*80)
 
-    trajectory, strategy_info = execute_particle_tracking(
+    # Determine dt to use
+    dt_to_use = cfg['dt']
+    if cfg['use_data_dt'] and hasattr(field, '_data_time_interval') and field._data_time_interval is not None:
+        dt_to_use = field._data_time_interval
+        print(f"🔄 Using time interval from VTK data: dt = {dt_to_use:.6f} (overriding user config)")
+        print(f"   User configured dt: {cfg['dt']:.6f}")
+        print()
+    elif cfg['use_data_dt']:
+        print(f"⚠️  use_data_dt=True but no data time interval available, using user dt = {cfg['dt']}")
+        print()
+
+    trajectory, strategy_info, initial_positions = execute_particle_tracking(
         field=field,
         concentrations=cfg['particle_concentrations'],
         particle_distribution=cfg['particle_distribution'],
@@ -278,7 +339,7 @@ def main(config=None):
         particle_bounds=cfg['particle_bounds'],
         particle_bounds_fraction=cfg['particle_bounds_fraction'],
         n_timesteps=cfg['n_timesteps'],
-        dt=cfg['dt'],
+        dt=dt_to_use,
         time_span=cfg['time_span'],
         batch_size=cfg['batch_size'],
         integrator=cfg['integrator'],
@@ -288,23 +349,45 @@ def main(config=None):
         inlet_distribution=cfg['inlet_distribution']
     )
 
-    # 5. Trajectory analysis
+    # 5. Export trajectories (before memory-intensive operations)
     print("\n" + "="*80)
-    print("5. TRAJECTORY ANALYSIS")
+    print("5. EXPORT TRAJECTORIES")
+    print("="*80)
+
+    export_results(trajectory, field, initial_positions)
+
+    # 6. Trajectory analysis
+    print("\n" + "="*80)
+    print("6. TRAJECTORY ANALYSIS")
     print("="*80)
 
     stats, _ = analyze_trajectory_results(trajectory, strategy_info)
 
-    # 6. Density estimation
+    # 7. Density estimation
     print("\n" + "="*80)
-    print("6. DENSITY ESTIMATION")
+    print("7. DENSITY ESTIMATION")
     print("="*80)
 
-    density_results = perform_density_analysis(trajectory)
+    if cfg['perform_density_analysis']:
+        density_results = perform_density_analysis(
+            trajectory,
+            methods=cfg['density_methods'],
+            kde_bandwidth=cfg['kde_bandwidth'],
+            kde_bandwidth_rule=cfg['kde_bandwidth_rule'],
+            kde_normalize=cfg['kde_normalize'],
+            sph_smoothing_length=cfg['sph_smoothing_length'],
+            sph_adaptive=cfg['sph_adaptive'],
+            sph_n_neighbors=cfg['sph_n_neighbors'],
+            sph_kernel_type=cfg['sph_kernel_type'],
+            sph_normalize=cfg['sph_normalize']
+        )
+    else:
+        print("⏭️  Density analysis skipped (perform_density_analysis=False)")
+        density_results = None
 
-    # 7. Visualization
+    # 8. Visualization
     print("\n" + "="*80)
-    print("7. VISUALIZATION")
+    print("8. VISUALIZATION")
     print("="*80)
 
     create_visualizations(
@@ -315,13 +398,6 @@ def main(config=None):
         slice_cutoff_min=cfg['slice_cutoff_min'],
         slice_cutoff_max=cfg['slice_cutoff_max']
     )
-
-    # 8. Export results
-    print("\n" + "="*80)
-    print("8. EXPORT RESULTS")
-    print("="*80)
-
-    export_results(trajectory, field)
 
     # 9. Generate reports
     print("\n" + "="*80)
@@ -336,8 +412,26 @@ def main(config=None):
 
 
 def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
-                                   max_elements_per_leaf=32, max_octree_depth=12):
-    """Load VTK data with octree FEM or create synthetic field."""
+                                   max_elements_per_leaf=32, max_octree_depth=12,
+                                   skip_initial_timesteps=0, use_stable_mesh_only=True):
+    """
+    Load VTK data with octree FEM or create synthetic field.
+
+    Parameters
+    ----------
+    data_pattern : str
+        Path pattern to VTK files
+    max_timesteps : int
+        Maximum number of timesteps to load
+    max_elements_per_leaf : int
+        Octree parameter
+    max_octree_depth : int
+        Octree parameter
+    skip_initial_timesteps : int
+        Number of initial timesteps to skip (useful for AMR data)
+    use_stable_mesh_only : bool
+        If True, automatically detect and use only timesteps with consistent mesh size
+    """
 
     # Try to load VTK data with connectivity for octree FEM
     if data_pattern is None:
@@ -356,6 +450,57 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
             raise FileNotFoundError(f"No files found: {vtk_pattern}")
 
         print(f"   Found {len(files)} files")
+
+        # Skip initial timesteps if requested
+        if skip_initial_timesteps > 0:
+            print(f"   Skipping first {skip_initial_timesteps} timesteps...")
+            files = files[skip_initial_timesteps:]
+
+        # Auto-detect stable mesh if enabled
+        if use_stable_mesh_only and len(files) > 10:
+            print(f"   Detecting stable mesh size (sampling first 10 files)...")
+
+            # Sample first 10 files to find where mesh stabilizes
+            sample_size = min(10, len(files))
+            sample_sizes = []
+
+            for i in range(sample_size):
+                try:
+                    reader = vtk.vtkXMLPUnstructuredGridReader()
+                    reader.SetFileName(files[i])
+                    reader.Update()
+                    mesh = reader.GetOutput()
+                    n_points = mesh.GetNumberOfPoints()
+                    sample_sizes.append(n_points)
+
+                    # Early progress indicator
+                    if i == 0:
+                        print(f"      Timestep 0: {n_points} points")
+                except Exception as e:
+                    print(f"      Warning: Failed to read file {i}: {e}")
+                    continue
+
+            if len(sample_sizes) < 2:
+                print(f"   Could not detect mesh stability (too few readable files)")
+            else:
+                # Find the most common mesh size
+                from collections import Counter
+                size_counts = Counter(sample_sizes)
+                most_common_size = size_counts.most_common(1)[0][0]
+
+                # Find first occurrence of stable size
+                stable_start = None
+                for i, size in enumerate(sample_sizes):
+                    if size == most_common_size:
+                        stable_start = i
+                        break
+
+                if stable_start is not None and stable_start > 0:
+                    print(f"   Mesh stabilizes at timestep {stable_start} with {most_common_size} points")
+                    print(f"   Skipping first {stable_start} timesteps (adaptive refinement phase)")
+                    files = files[stable_start:]
+                else:
+                    print(f"   Mesh appears stable from the start ({most_common_size} points)")
 
         # Load subset of timesteps
         stride = max(1, len(files) // max_timesteps)
@@ -390,6 +535,7 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         # Load velocity data for all timesteps
         velocity_data = []
         times = []
+        mesh_sizes = []  # Track mesh size per timestep
 
         for idx, filename in enumerate(files_to_load):
             reader = vtk.vtkXMLPUnstructuredGridReader()
@@ -416,6 +562,7 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 velocity = np.column_stack([velocity, np.zeros(velocity.shape[0])])
 
             velocity_data.append(velocity)
+            mesh_sizes.append(velocity.shape[0])
 
             # Extract time from filename
             import re
@@ -428,10 +575,56 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
             if (idx + 1) % 10 == 0:
                 print(f"   Loaded {idx + 1}/{len(files_to_load)} timesteps...")
 
+        # Check if all timesteps have the same mesh size
+        unique_sizes = set(mesh_sizes)
+        if len(unique_sizes) > 1:
+            size_counts = {}
+            for size in mesh_sizes:
+                size_counts[size] = size_counts.get(size, 0) + 1
+
+            print(f"   ❌ ERROR: Mesh size changes across timesteps!")
+            print(f"   Different mesh sizes found:")
+            for size, count in sorted(size_counts.items()):
+                print(f"      - {size} points: {count} timesteps")
+            print(f"   This is adaptive mesh refinement (AMR) or remeshing data")
+            print(f"   ")
+            print(f"   💡 SOLUTIONS:")
+            print(f"   1. Use only timesteps with consistent mesh (e.g., skip initial refinement)")
+            print(f"   2. Use a different interpolation method (RBF, structured grid)")
+            print(f"   3. Manually interpolate AMR data onto a fixed grid using ParaView/VTK")
+            print(f"   ")
+            print(f"   Current JAXTrace octree FEM requires fixed mesh topology.")
+            raise ValueError(
+                f"Inconsistent mesh sizes: {len(unique_sizes)} different sizes found {sorted(unique_sizes)}. "
+                f"JAXTrace octree FEM requires fixed mesh topology. "
+                f"Use --skip-timesteps or prepare data with constant mesh."
+            )
+
         velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
         times = np.array(times, dtype=np.float32)
 
         print(f"✅ Loaded velocity data: {velocity_data.shape}")
+
+        # Calculate time interval from data
+        data_time_interval = None
+        if len(times) >= 2:
+            time_intervals = np.diff(times)
+            mean_dt = np.mean(time_intervals)
+            std_dt = np.std(time_intervals)
+            min_dt = np.min(time_intervals)
+            max_dt = np.max(time_intervals)
+
+            print(f"📊 Data time information:")
+            print(f"   Time range: {times[0]:.3f} to {times[-1]:.3f}")
+            print(f"   Mean time interval (dt): {mean_dt:.6f}")
+
+            if std_dt > 1e-6:  # Non-uniform time steps
+                print(f"   ⚠️  Non-uniform time steps detected:")
+                print(f"      Min dt: {min_dt:.6f}, Max dt: {max_dt:.6f}, Std: {std_dt:.6f}")
+                print(f"   💡 Recommendation: Use manual dt value for tracking")
+            else:
+                print(f"   ✅ Uniform time steps: dt = {mean_dt:.6f}")
+                data_time_interval = mean_dt
 
         # Create OPTIMIZED octree FEM field
         print(f"🌲 Creating OPTIMIZED octree FEM field...")
@@ -459,6 +652,9 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         data_mb = field.data.nbytes / 1024 / 1024
         print(f"✅ Field on GPU: {data_mb:.1f} MB")
 
+        # Store data time interval in field object
+        field._data_time_interval = data_time_interval
+
         print(f"✅ Loaded octree FEM field: {field}")
         return field
 
@@ -471,6 +667,10 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         print("📝 Creating synthetic time-dependent vortex field...")
         field = create_synthetic_vortex_field()
         print(f"✅ Created synthetic field: {field}")
+
+        # Synthetic field doesn't have data time interval
+        field._data_time_interval = None
+
         return field
 
 
@@ -753,25 +953,64 @@ def execute_particle_tracking(field, concentrations=None, particle_distribution=
     print(f"✅ Tracking completed in {tracking_time:.2f} seconds")
     print(f"   Trajectory: {trajectory}")
 
-    return trajectory, strategy_info
+    return trajectory, strategy_info, seeds
 
 
-def perform_density_analysis(trajectory):
-    """Perform KDE and SPH density estimation."""
+def perform_density_analysis(trajectory, methods=['kde', 'sph'],
+                            kde_bandwidth=None, kde_bandwidth_rule='scott', kde_normalize=True,
+                            sph_smoothing_length=0.1, sph_adaptive=False, sph_n_neighbors=32,
+                            sph_kernel_type='cubic_spline', sph_normalize=True):
+    """
+    Perform density estimation using specified methods.
+
+    Parameters
+    ----------
+    trajectory : Trajectory
+        JAXTrace trajectory object
+    methods : list of str
+        Methods to use: 'kde', 'sph', or both
+    kde_bandwidth : float, optional
+        KDE bandwidth (None = auto-calculate using bandwidth_rule)
+    kde_bandwidth_rule : str
+        Bandwidth selection rule: 'scott' or 'silverman'
+    kde_normalize : bool
+        Whether to normalize KDE density
+    sph_smoothing_length : float
+        SPH smoothing length h
+    sph_adaptive : bool
+        Use adaptive smoothing length
+    sph_n_neighbors : int
+        Number of neighbors for adaptive smoothing length
+    sph_kernel_type : str
+        SPH kernel: 'cubic_spline', 'gaussian', 'wendland'
+    sph_normalize : bool
+        Whether to normalize SPH density
+
+    Returns
+    -------
+    dict or None
+        Dictionary containing density results for requested methods
+    """
 
     try:
         # Get final particle positions
         final_positions = trajectory.positions[-1]  # (N, 3)
         print(f"📊 Analyzing density with {final_positions.shape[0]} particles...")
+        print(f"   Methods: {', '.join(methods)}")
 
         density_results = {}
 
         # KDE Analysis
-        print("📈 Performing KDE analysis...")
-        kde_estimator = KDEEstimator(
-            positions=final_positions,
-            bandwidth_rule='scott'
-        )
+        if 'kde' in methods:
+            print("📈 Performing KDE analysis...")
+            print(f"   Bandwidth: {'auto (' + kde_bandwidth_rule + ')' if kde_bandwidth is None else f'{kde_bandwidth:.6f}'}")
+
+            kde_estimator = KDEEstimator(
+                positions=final_positions,
+                bandwidth=kde_bandwidth,
+                bandwidth_rule=kde_bandwidth_rule,
+                normalize=kde_normalize
+            )
 
         # Create evaluation grid for 2D slice
         x_range = np.linspace(-1.5, 1.5, 50)
@@ -786,37 +1025,62 @@ def perform_density_analysis(trajectory):
         kde_density = kde_estimator.evaluate(eval_points)
         kde_density = kde_density.reshape(X_eval.shape)
 
+        # Get bandwidth (stored as 'h' attribute in KDE estimator)
+        bandwidth = getattr(kde_estimator, 'h', None)
+        if bandwidth is None:
+            bandwidth = getattr(kde_estimator, 'bandwidth', None)
+
         density_results['kde'] = {
             'estimator': kde_estimator,
             'density_2d': kde_density,
             'grid_x': X_eval,
             'grid_y': Y_eval,
-            'bandwidth': getattr(kde_estimator, 'bandwidth', 'auto')
+            'bandwidth': bandwidth
         }
 
-        print(f"   ✅ KDE bandwidth: {getattr(kde_estimator, 'bandwidth', 'auto')}")
+        if bandwidth is not None:
+            print(f"   ✅ KDE bandwidth: {bandwidth:.6f}")
+        else:
+            print(f"   ✅ KDE bandwidth: auto")
 
         # SPH Analysis
-        print("🔬 Performing SPH analysis...")
-        try:
-            if len(final_positions) < 2:
-                raise ValueError("At least 2 particles required for SPH analysis")
-            sph_estimator = SPHDensityEstimator(positions=final_positions, smoothing_length=0.1)
-            sph_density = sph_estimator.compute_density()
-        except Exception as e:
-            print(f"   ⚠️  SPH analysis failed: {e}")
-            sph_estimator = None
-            sph_density = None
+        if 'sph' in methods:
+            print("🔬 Performing SPH analysis...")
+            print(f"   Smoothing length: {sph_smoothing_length}")
+            print(f"   Adaptive: {sph_adaptive}")
+            if sph_adaptive:
+                print(f"   N neighbors: {sph_n_neighbors}")
+            print(f"   Kernel: {sph_kernel_type}")
 
-        if sph_estimator is not None and sph_density is not None:
-            density_results['sph'] = {
-                'estimator': sph_estimator,
-                'densities': sph_density,
-                'smoothing_length': sph_estimator.smoothing_length
-            }
-            print(f"   ✅ SPH density range: [{np.min(sph_density):.3e}, {np.max(sph_density):.3e}]")
-        else:
-            print("   ⚠️  SPH analysis skipped due to errors")
+            try:
+                if len(final_positions) < 2:
+                    raise ValueError("At least 2 particles required for SPH analysis")
+
+                sph_estimator = SPHDensityEstimator(
+                    positions=final_positions,
+                    smoothing_length=sph_smoothing_length if not sph_adaptive else None,
+                    adaptive=sph_adaptive,
+                    n_neighbors=sph_n_neighbors,
+                    kernel_type=sph_kernel_type,
+                    normalize=sph_normalize
+                )
+                sph_density = sph_estimator.evaluate(final_positions)
+            except Exception as e:
+                print(f"   ⚠️  SPH analysis failed: {e}")
+                sph_estimator = None
+                sph_density = None
+
+            if sph_estimator is not None and sph_density is not None:
+                density_results['sph'] = {
+                    'estimator': sph_estimator,
+                    'densities': sph_density,
+                    'smoothing_length': sph_estimator.smoothing_length,
+                    'adaptive': sph_adaptive,
+                    'kernel_type': sph_kernel_type
+                }
+                print(f"   ✅ SPH density range: [{np.min(sph_density):.3e}, {np.max(sph_density):.3e}]")
+            else:
+                print("   ⚠️  SPH analysis skipped due to errors")
 
         return density_results
 
@@ -974,25 +1238,41 @@ def create_visualizations(trajectory, density_results=None, slice_x0=None, slice
         plot_particles_2d(
             positions=trajectory.positions[-1],  # Final positions
             ax=ax,
-            title="Final Particle Positions"
+            title="Final Particle Positions",
+            show=False
         )
 
         plt.savefig(output_dir / "particles_final.png", dpi=150, bbox_inches='tight')
         plt.close()
         print("   ✅ Saved particles_final.png")
 
-        # 2D trajectory plot
+        # 2D trajectory plot (plot lines connecting positions over time)
         print("📈 Creating trajectory visualization...")
-        _, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(12, 8))
 
-        plot_trajectory_2d(
-            positions_over_time=trajectory.positions,
-            ax=ax,
-            max_particles=50,  # Limit for readability
-            title="Particle Trajectories",
-            alpha=0.7
-        )
+        # Plot trajectory lines for a subset of particles
+        max_particles = min(50, trajectory.N)  # Limit for readability
+        positions = trajectory.positions  # (T, N, 3)
 
+        for i in range(max_particles):
+            x_traj = positions[:, i, 0]
+            y_traj = positions[:, i, 1]
+            ax.plot(x_traj, y_traj, alpha=0.7, linewidth=0.5)
+
+        # Mark start and end points
+        ax.scatter(positions[0, :max_particles, 0], positions[0, :max_particles, 1],
+                  c='green', s=20, alpha=0.8, label='Start', zorder=5)
+        ax.scatter(positions[-1, :max_particles, 0], positions[-1, :max_particles, 1],
+                  c='red', s=20, alpha=0.8, label='End', zorder=5)
+
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_title('Particle Trajectories')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal', adjustable='datalim')
+
+        plt.tight_layout()
         plt.savefig(output_dir / "trajectories_2d.png", dpi=150, bbox_inches='tight')
         plt.close()
         print("   ✅ Saved trajectories_2d.png")
@@ -1008,7 +1288,14 @@ def create_visualizations(trajectory, density_results=None, slice_x0=None, slice
                                  levels=20, cmap='viridis')
             ax1.scatter(trajectory.positions[-1, :, 0], trajectory.positions[-1, :, 1],
                        c='red', s=10, alpha=0.6, label='Particles')
-            ax1.set_title(f"KDE Density (bandwidth={kde['bandwidth']:.4f})")
+
+            # Format bandwidth for title
+            if kde['bandwidth'] is not None:
+                bw_str = f"{kde['bandwidth']:.4f}"
+            else:
+                bw_str = "auto"
+            ax1.set_title(f"KDE Density (bandwidth={bw_str})")
+
             ax1.set_xlabel("X")
             ax1.set_ylabel("Y")
             ax1.legend()
@@ -1041,7 +1328,7 @@ def create_visualizations(trajectory, density_results=None, slice_x0=None, slice
         print(f"⚠️  Visualization failed: {e}")
 
 
-def export_results(trajectory, field=None):
+def export_results(trajectory, field=None, initial_positions=None):
     """Export trajectory and field data to VTK."""
     # Note: field parameter available for future extensions
     _ = field  # Acknowledge parameter to avoid linting warning
@@ -1050,6 +1337,10 @@ def export_results(trajectory, field=None):
     output_dir.mkdir(exist_ok=True)
 
     try:
+        # Get initial positions from trajectory if not provided
+        if initial_positions is None:
+            initial_positions = trajectory.positions[0]  # First timestep positions
+
         # Export trajectory as single file
         print("💾 Exporting trajectory to VTK...")
         trajectory_file = output_dir / "trajectory.vtp"
@@ -1059,7 +1350,8 @@ def export_results(trajectory, field=None):
             filename=str(trajectory_file),
             include_velocities=True,
             include_metadata=True,
-            time_series=False
+            time_series=False,
+            initial_positions=initial_positions
         )
         print(f"   ✅ Exported trajectory: {trajectory_file}")
 
@@ -1069,7 +1361,8 @@ def export_results(trajectory, field=None):
             trajectory=trajectory,
             filename=str(output_dir / "trajectory_series.vtp"),
             include_velocities=True,
-            time_series=True
+            time_series=True,
+            initial_positions=initial_positions
         )
         print(f"   ✅ Exported trajectory time series")
 
@@ -1129,6 +1422,10 @@ if __name__ == "__main__":
         'data_pattern': "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu",
         'max_timesteps_to_load': 40,  # Number of timesteps to load from data
 
+        # For adaptive mesh refinement (AMR) data:
+        'use_stable_mesh_only': True,  # Auto-detect and skip initial refinement
+        'skip_initial_timesteps': 20,   # Manually skip first N timesteps (if needed)
+
         # -------------------------------------------------------------------------
         # Octree FEM Configuration
         # -------------------------------------------------------------------------
@@ -1140,8 +1437,8 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         'particle_concentrations': {
             'x': 60,  # Particles per unit length in X
-            'y': 50,  # Particles per unit length in Y
-            'z': 15   # Particles per unit length in Z
+            'y': 100,  # Particles per unit length in Y
+            'z': 30   # Particles per unit length in Z
         },
 
         # Particle distribution type: 'uniform', 'gaussian', 'random'
@@ -1163,7 +1460,7 @@ if __name__ == "__main__":
         # Option 2: Fractional bounds (fraction of domain)
         # Example: Seed particles only in first 20% of X domain
         'particle_bounds_fraction': {
-            'x': (0.0, 1.0),  # Full X range
+            'x': (0.1, 0.3),  # Full X range
             'y': (0.0, 1.0),  # Full Y range
             'z': (0.0, 1.0)   # Full Z range
         },
@@ -1171,10 +1468,11 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         # Tracking Parameters
         # -------------------------------------------------------------------------
-        'n_timesteps': 2000,          # Number of tracking timesteps
-        'dt': 0.0025,                  # Time step size
-        'time_span': (0.0, 4.0),      # Simulation time range (t_start, t_end)
-        'batch_size': 1000,            # Particles per batch
+        'n_timesteps': 2500,          # Number of tracking timesteps
+        'dt': 0.0025,                  # Time step size (ignored if use_data_dt=True)
+        'use_data_dt': False,          # Use time interval from VTK files (overrides dt)
+        'time_span': (0.0, 6.25),      # Simulation time range (t_start, t_end)
+        'batch_size': 10000,            # Particles per batch
         'integrator': 'rk4',           # Integration method: 'rk4', 'euler', etc.
 
         # -------------------------------------------------------------------------
@@ -1197,10 +1495,28 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         # Visualization
         # -------------------------------------------------------------------------
-        'slice_x0': None,              # X position for YZ slice (None = auto)
+        'slice_x0': 0.015,              # X position for YZ slice (None = auto)
         'slice_levels': 20,            # Number of density contour levels
         'slice_cutoff_min': 0,         # Lower percentile cutoff (0% = no lower limit)
-        'slice_cutoff_max': 95,        # Upper percentile cutoff (95% = clip high outliers)
+        'slice_cutoff_max': 100,        # Upper percentile cutoff (95% = clip high outliers)
+
+        # -------------------------------------------------------------------------
+        # Density Estimation
+        # -------------------------------------------------------------------------
+        'perform_density_analysis': True,  # Enable/disable density analysis
+        'density_methods': ['kde', 'sph'], # Methods: 'kde', 'sph', or both
+
+        # KDE (Kernel Density Estimation) parameters
+        'kde_bandwidth': None,             # Bandwidth (None = auto-calculate)
+        'kde_bandwidth_rule': 'scott',     # Rule: 'scott' or 'silverman'
+        'kde_normalize': True,             # Normalize density values
+
+        # SPH (Smoothed Particle Hydrodynamics) parameters
+        'sph_smoothing_length': 0.01,       # Smoothing length h
+        'sph_adaptive': False,             # Use adaptive smoothing (slower but more accurate)
+        'sph_n_neighbors': 32,             # Number of neighbors for adaptive h
+        'sph_kernel_type': 'cubic_spline', # Kernel: 'cubic_spline', 'gaussian', 'wendland'
+        'sph_normalize': True,             # Normalize density values
 
         # -------------------------------------------------------------------------
         # GPU Configuration
@@ -1264,6 +1580,47 @@ if __name__ == "__main__":
     # user_config.update({
     #     'boundary_inlet': 'periodic',
     #     'boundary_outlet': 'periodic'
+    # })
+
+    # Example 9: Adaptive mesh refinement (AMR) data
+    # user_config.update({
+    #     'data_pattern': "/path/to/amr_data_*.pvtu",
+    #     'use_stable_mesh_only': True,   # Auto-detect stable mesh
+    #     'skip_initial_timesteps': 0,    # Or manually skip first N timesteps
+    # })
+
+    # Example 10: Use time interval from VTK data files
+    # user_config.update({
+    #     'use_data_dt': True,  # Automatically use dt from VTK file timestamps
+    #     'dt': 0.001,          # Fallback value if data dt cannot be determined
+    # })
+
+    # Example 11: KDE-only density estimation with custom bandwidth
+    # user_config.update({
+    #     'density_methods': ['kde'],
+    #     'kde_bandwidth': 0.15,
+    #     'kde_bandwidth_rule': 'silverman'
+    # })
+
+    # Example 12: Adaptive SPH density estimation
+    # user_config.update({
+    #     'density_methods': ['sph'],
+    #     'sph_adaptive': True,
+    #     'sph_n_neighbors': 50,
+    #     'sph_kernel_type': 'wendland'
+    # })
+
+    # Example 13: Skip density analysis for faster runs
+    # user_config.update({
+    #     'perform_density_analysis': False
+    # })
+
+    # Example 14: Both KDE and SPH with custom parameters
+    # user_config.update({
+    #     'density_methods': ['kde', 'sph'],
+    #     'kde_bandwidth': 0.2,
+    #     'sph_smoothing_length': 0.05,
+    #     'sph_kernel_type': 'gaussian'
     # })
 
     # =============================================================================

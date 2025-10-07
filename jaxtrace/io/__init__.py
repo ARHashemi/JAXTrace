@@ -80,81 +80,104 @@ if VTK_IO_AVAILABLE:
                 self.format = 'xml'  
                 self.compression = True  
             
-            def write_trajectory(self, trajectory, filename, include_velocities=True,   
-                               include_particle_ids=True, include_timestep_data=True, format='xml'):  
-                """  
-                Write trajectory to VTK polydata format.  
+            def write_trajectory(self, trajectory, filename, include_velocities=True,
+                               include_particle_ids=True, include_timestep_data=True, format='xml',
+                               initial_positions=None):
+                """
+                Write trajectory to VTK polydata format.
+
+                Args:
+                    trajectory: JAXTrace trajectory object
+                    filename: Output filename
+                    include_velocities: Include velocity data if available
+                    include_particle_ids: Include particle IDs
+                    include_timestep_data: Include timestep information
+                    format: 'xml' or 'binary'
+                    initial_positions: Initial positions (N, 3) to add as labels
+                """
+                print(f"Writing trajectory to {filename}...")
+
+                # Create polydata for trajectory lines
+                polydata = vtk.vtkPolyData()
+                points = vtk.vtkPoints()
+                lines = vtk.vtkCellArray()
+
+                # Point and cell data arrays
+                if include_particle_ids:
+                    particle_id_array = vtk.vtkIntArray()
+                    particle_id_array.SetName("ParticleID")
+
+                if include_timestep_data:
+                    timestep_array = vtk.vtkFloatArray()
+                    timestep_array.SetName("TimeStep")
+
+                if include_velocities and trajectory.velocities is not None:
+                    velocity_array = vtk.vtkFloatArray()
+                    velocity_array.SetNumberOfComponents(3)
+                    velocity_array.SetName("Velocity")
+
+                # Initial position labels
+                if initial_positions is not None:
+                    init_x_array = vtk.vtkFloatArray()
+                    init_x_array.SetName("InitialX")
+                    init_y_array = vtk.vtkFloatArray()
+                    init_y_array.SetName("InitialY")
+                    init_z_array = vtk.vtkFloatArray()
+                    init_z_array.SetName("InitialZ")  
                 
-                Args:  
-                    trajectory: JAXTrace trajectory object  
-                    filename: Output filename  
-                    include_velocities: Include velocity data if available  
-                    include_particle_ids: Include particle IDs  
-                    include_timestep_data: Include timestep information  
-                    format: 'xml' or 'binary'  
-                """  
-                print(f"Writing trajectory to {filename}...")  
-                
-                # Create polydata for trajectory lines  
-                polydata = vtk.vtkPolyData()  
-                points = vtk.vtkPoints()  
-                lines = vtk.vtkCellArray()  
-                
-                # Point and cell data arrays  
-                if include_particle_ids:  
-                    particle_id_array = vtk.vtkIntArray()  
-                    particle_id_array.SetName("ParticleID")  
-                
-                if include_timestep_data:  
-                    timestep_array = vtk.vtkFloatArray()  
-                    timestep_array.SetName("TimeStep")  
-                
-                if include_velocities and trajectory.velocities is not None:  
-                    velocity_array = vtk.vtkFloatArray()  
-                    velocity_array.SetNumberOfComponents(3)  
-                    velocity_array.SetName("Velocity")  
-                
-                point_id = 0  
-                
-                # Add trajectory data for each particle  
-                for particle_idx in range(trajectory.N):  
-                    # Create line for this particle's trajectory  
-                    line = vtk.vtkPolyLine()  
-                    line.GetPointIds().SetNumberOfIds(trajectory.T)  
-                    
-                    for time_idx in range(trajectory.T):  
-                        pos = trajectory.positions[time_idx, particle_idx]  
-                        points.InsertNextPoint(pos[0], pos[1], pos[2])  
-                        
-                        # Add point data  
-                        if include_particle_ids:  
-                            particle_id_array.InsertNextValue(particle_idx)  
-                        
-                        if include_timestep_data:  
-                            timestep_array.InsertNextValue(time_idx)  
-                        
-                        if include_velocities and trajectory.velocities is not None:  
-                            vel = trajectory.velocities[time_idx, particle_idx]  
-                            velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])  
-                        
-                        line.GetPointIds().SetId(time_idx, point_id)  
-                        point_id += 1  
-                    
+                point_id = 0
+
+                # Add trajectory data for each particle
+                for particle_idx in range(trajectory.N):
+                    # Create line for this particle's trajectory
+                    line = vtk.vtkPolyLine()
+                    line.GetPointIds().SetNumberOfIds(trajectory.T)
+
+                    for time_idx in range(trajectory.T):
+                        pos = trajectory.positions[time_idx, particle_idx]
+                        points.InsertNextPoint(pos[0], pos[1], pos[2])
+
+                        # Add point data
+                        if include_particle_ids:
+                            particle_id_array.InsertNextValue(particle_idx)
+
+                        if include_timestep_data:
+                            timestep_array.InsertNextValue(time_idx)
+
+                        if include_velocities and trajectory.velocities is not None:
+                            vel = trajectory.velocities[time_idx, particle_idx]
+                            velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])
+
+                        # Add initial position labels
+                        if initial_positions is not None:
+                            init_x_array.InsertNextValue(float(initial_positions[particle_idx, 0]))
+                            init_y_array.InsertNextValue(float(initial_positions[particle_idx, 1]))
+                            init_z_array.InsertNextValue(float(initial_positions[particle_idx, 2]))
+
+                        line.GetPointIds().SetId(time_idx, point_id)
+                        point_id += 1
+
                     lines.InsertNextCell(line)  
                 
-                # Set up polydata  
-                polydata.SetPoints(points)  
-                polydata.SetLines(lines)  
-                
-                # Add point data  
-                if include_particle_ids:  
-                    polydata.GetPointData().AddArray(particle_id_array)  
-                
-                if include_timestep_data:  
-                    polydata.GetPointData().AddArray(timestep_array)  
-                
-                if include_velocities and trajectory.velocities is not None:  
-                    polydata.GetPointData().SetVectors(velocity_array)  
+                # Set up polydata
+                polydata.SetPoints(points)
+                polydata.SetLines(lines)
+
+                # Add point data
+                if include_particle_ids:
+                    polydata.GetPointData().AddArray(particle_id_array)
+
+                if include_timestep_data:
+                    polydata.GetPointData().AddArray(timestep_array)
+
+                if include_velocities and trajectory.velocities is not None:
+                    polydata.GetPointData().SetVectors(velocity_array)
+
+                # Add initial position arrays
+                if initial_positions is not None:
+                    polydata.GetPointData().AddArray(init_x_array)
+                    polydata.GetPointData().AddArray(init_y_array)
+                    polydata.GetPointData().AddArray(init_z_array)  
                 
                 # Write to file  
                 if format == 'xml':  
@@ -171,17 +194,18 @@ if VTK_IO_AVAILABLE:
                 writer.Write()  
                 print(f"Trajectory written successfully to {filename}")  
             
-            def write_time_series(self, trajectory, output_directory, filename_pattern="trajectory_{:04d}.vtu",  
-                                include_velocities=True, format='xml'):  
-                """  
-                Write trajectory as time series of particle positions.  
-                
-                Args:  
-                    trajectory: JAXTrace trajectory object  
-                    output_directory: Output directory path  
-                    filename_pattern: Filename pattern with time index  
-                    include_velocities: Include velocity data if available  
-                    format: 'xml' or 'binary'  
+            def write_time_series(self, trajectory, output_directory, filename_pattern="trajectory_{:04d}.vtu",
+                                include_velocities=True, format='xml', initial_positions=None):
+                """
+                Write trajectory as time series of particle positions.
+
+                Args:
+                    trajectory: JAXTrace trajectory object
+                    output_directory: Output directory path
+                    filename_pattern: Filename pattern with time index
+                    include_velocities: Include velocity data if available
+                    format: 'xml' or 'binary'
+                    initial_positions: Initial positions (N, 3) to add as labels
                 """  
                 output_path = Path(output_directory)  
                 output_path.mkdir(exist_ok=True)  
@@ -209,18 +233,36 @@ if VTK_IO_AVAILABLE:
                         particle_id_array.InsertNextValue(particle_idx)  
                     ugrid.GetPointData().AddArray(particle_id_array)  
                     
-                    # Add velocities if available  
-                    if include_velocities and trajectory.velocities is not None:  
-                        velocity_array = vtk.vtkFloatArray()  
-                        velocity_array.SetNumberOfComponents(3)  
-                        velocity_array.SetName("Velocity")  
-                        
-                        for particle_idx in range(trajectory.N):  
-                            vel = trajectory.velocities[time_idx, particle_idx]  
-                            velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])  
-                        
-                        ugrid.GetPointData().SetVectors(velocity_array)  
-                    
+                    # Add velocities if available
+                    if include_velocities and trajectory.velocities is not None:
+                        velocity_array = vtk.vtkFloatArray()
+                        velocity_array.SetNumberOfComponents(3)
+                        velocity_array.SetName("Velocity")
+
+                        for particle_idx in range(trajectory.N):
+                            vel = trajectory.velocities[time_idx, particle_idx]
+                            velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])
+
+                        ugrid.GetPointData().SetVectors(velocity_array)
+
+                    # Add initial position labels if available
+                    if initial_positions is not None:
+                        init_x_array = vtk.vtkFloatArray()
+                        init_x_array.SetName("InitialX")
+                        init_y_array = vtk.vtkFloatArray()
+                        init_y_array.SetName("InitialY")
+                        init_z_array = vtk.vtkFloatArray()
+                        init_z_array.SetName("InitialZ")
+
+                        for particle_idx in range(trajectory.N):
+                            init_x_array.InsertNextValue(float(initial_positions[particle_idx, 0]))
+                            init_y_array.InsertNextValue(float(initial_positions[particle_idx, 1]))
+                            init_z_array.InsertNextValue(float(initial_positions[particle_idx, 2]))
+
+                        ugrid.GetPointData().AddArray(init_x_array)
+                        ugrid.GetPointData().AddArray(init_y_array)
+                        ugrid.GetPointData().AddArray(init_z_array)
+
                     # Create vertex cells for visualization  
                     for particle_idx in range(trajectory.N):  
                         vertex = vtk.vtkVertex()  
@@ -569,10 +611,28 @@ else:
 #             format=format
 #         )
 #         print(f"Trajectory exported to {filename}")
-def export_trajectory_to_vtk(trajectory, filename, include_velocities=True, 
-                           include_metadata=True, time_series=False, format='xml'):
+def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
+                           include_metadata=True, time_series=False, format='xml',
+                           initial_positions=None):
     """
     Export trajectory to VTK format (main export function).
+
+    Parameters
+    ----------
+    trajectory : Trajectory
+        JAXTrace trajectory object
+    filename : str
+        Output filename
+    include_velocities : bool
+        Include velocity data if available
+    include_metadata : bool
+        Include metadata (particle IDs, timesteps)
+    time_series : bool
+        Export as time series if True, single file if False
+    format : str
+        'xml' or 'binary'
+    initial_positions : np.ndarray, optional
+        Initial positions (N, 3) to add as labels (InitialX, InitialY, InitialZ)
 
     Returns
     -------
@@ -584,16 +644,17 @@ def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
     """
     if not VTK_IO_AVAILABLE:
         raise ImportError("VTK not available - cannot export trajectory")
-    
+
     writer = VTKTrajectoryWriter()
-    
+
     if time_series:
         output_dir = Path(filename).parent / (Path(filename).stem + "_series")
         writer.write_time_series(
             trajectory=trajectory,
             output_directory=str(output_dir),
             include_velocities=include_velocities,
-            format=format
+            format=format,
+            initial_positions=initial_positions
         )
         print(f"Trajectory exported as time series to {output_dir}")
         return {'mode': 'series', 'directory': str(output_dir), 'count': int(trajectory.T)}
@@ -604,7 +665,8 @@ def export_trajectory_to_vtk(trajectory, filename, include_velocities=True,
             include_velocities=include_velocities,
             include_particle_ids=include_metadata,
             include_timestep_data=include_metadata,
-            format=format
+            format=format,
+            initial_positions=initial_positions
         )
         print(f"Trajectory exported to {filename}")
         return {'mode': 'single', 'file': str(filename)}

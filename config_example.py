@@ -19,6 +19,10 @@ config = {
     'data_pattern': "/path/to/your/data_*.pvtu",  # REQUIRED: Path to VTK files
     'max_timesteps_to_load': 40,                  # Number of timesteps to load
 
+    # Adaptive mesh refinement (AMR) data handling
+    'use_stable_mesh_only': True,                 # Auto-detect stable mesh size
+    'skip_initial_timesteps': 0,                  # Manually skip first N timesteps
+
     # -------------------------------------------------------------------------
     # Octree FEM Configuration
     # -------------------------------------------------------------------------
@@ -59,7 +63,8 @@ config = {
     # Tracking Parameters
     # -------------------------------------------------------------------------
     'n_timesteps': 2000,              # Number of tracking timesteps
-    'dt': 0.0025,                     # Time step size
+    'dt': 0.0025,                     # Time step size (ignored if use_data_dt=True)
+    'use_data_dt': False,             # Use time interval from VTK files
     'time_span': (0.0, 4.0),         # Simulation time range (t_start, t_end)
     'batch_size': 1000,               # Particles per batch
     'integrator': 'rk4',              # Integration method: 'rk4', 'euler'
@@ -87,6 +92,24 @@ config = {
     'slice_levels': 20,            # Number of density contour levels
     'slice_cutoff_min': 0,         # Lower percentile cutoff for density
     'slice_cutoff_max': 95,        # Upper percentile cutoff for density
+
+    # -------------------------------------------------------------------------
+    # Density Estimation
+    # -------------------------------------------------------------------------
+    'perform_density_analysis': True,  # Enable/disable density analysis
+    'density_methods': ['kde', 'sph'], # Methods: 'kde', 'sph', or both
+
+    # KDE (Kernel Density Estimation) parameters
+    'kde_bandwidth': None,             # Bandwidth (None = auto-calculate)
+    'kde_bandwidth_rule': 'scott',     # Rule: 'scott' or 'silverman'
+    'kde_normalize': True,             # Normalize density values
+
+    # SPH (Smoothed Particle Hydrodynamics) parameters
+    'sph_smoothing_length': 0.1,       # Smoothing length h
+    'sph_adaptive': False,             # Use adaptive smoothing (slower)
+    'sph_n_neighbors': 32,             # Number of neighbors for adaptive h
+    'sph_kernel_type': 'cubic_spline', # Kernel: 'cubic_spline', 'gaussian', 'wendland'
+    'sph_normalize': True,             # Normalize density values
 
     # -------------------------------------------------------------------------
     # GPU Configuration
@@ -168,6 +191,47 @@ config = {
 # config.update({
 #     'boundary_inlet': 'periodic',
 #     'boundary_outlet': 'periodic',
+# })
+
+# -----------------------------------------------------------------------------
+# AMR Data (Adaptive Mesh Refinement)
+# -----------------------------------------------------------------------------
+# config.update({
+#     'use_stable_mesh_only': True,   # Auto-detect stable mesh
+#     'skip_initial_timesteps': 0,    # Or manually skip first N timesteps
+# })
+
+# -----------------------------------------------------------------------------
+# Use Time Interval from VTK Files
+# -----------------------------------------------------------------------------
+# config.update({
+#     'use_data_dt': True,  # Override dt with VTK file timestamps
+# })
+
+# -----------------------------------------------------------------------------
+# KDE-only Density Estimation
+# -----------------------------------------------------------------------------
+# config.update({
+#     'density_methods': ['kde'],
+#     'kde_bandwidth': 0.15,
+#     'kde_bandwidth_rule': 'silverman'
+# })
+
+# -----------------------------------------------------------------------------
+# Adaptive SPH Density Estimation
+# -----------------------------------------------------------------------------
+# config.update({
+#     'density_methods': ['sph'],
+#     'sph_adaptive': True,
+#     'sph_n_neighbors': 50,
+#     'sph_kernel_type': 'wendland'
+# })
+
+# -----------------------------------------------------------------------------
+# Skip Density Analysis (Faster Runs)
+# -----------------------------------------------------------------------------
+# config.update({
+#     'perform_density_analysis': False
 # })
 
 # =============================================================================
