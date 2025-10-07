@@ -195,6 +195,25 @@ class ParticleTracker:
             self._compiled_simulate = None
             return
 
+        # Check if boundary function is JAX-compatible by checking for markers
+        boundary_is_jax_compatible = False
+        if hasattr(self.boundary_fn, '__name__'):
+            # Check if it's one of the JIT-compiled boundaries
+            func_name = self.boundary_fn.__name__
+            if func_name in ['_reflective_bc', '_periodic_bc', '_clamping_bc']:
+                boundary_is_jax_compatible = True
+            elif 'continuous_inlet' in func_name or '_continuous_inlet_bc' in func_name:
+                warnings.warn(
+                    "⚠️  Continuous inlet boundary detected - disabling JIT compilation.\n"
+                    "   This boundary condition uses numpy operations that are not JAX-compatible.\n"
+                    "   Performance will be slower but results remain accurate.\n"
+                    "   For best performance, use 'reflective' or 'periodic' boundaries.",
+                    UserWarning
+                )
+                self._compiled_step = None
+                self._compiled_simulate = None
+                return
+
         try:
             # Compiled single step (optional, used in fallback step-by-step path)
             if self.options.static_compilation:

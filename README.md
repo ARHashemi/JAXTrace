@@ -97,6 +97,31 @@ python tests/smoke_test.py      # Quick functionality test
 python tests/structure_test.py  # Package structure validation
 ```
 
+### 4. Updating JAXTrace
+
+To update your installation to the latest version from GitHub:
+
+```bash
+# If you did a development installation (pip install -e .)
+cd /path/to/JAXTrace
+git pull origin main
+pip install -e . --upgrade
+
+# If you did a standard installation (pip install .)
+cd /path/to/JAXTrace
+git pull origin main
+pip install . --upgrade --force-reinstall
+```
+
+**Or update from a specific branch:**
+```bash
+cd /path/to/JAXTrace
+git fetch origin
+git checkout branch-name
+git pull origin branch-name
+pip install -e . --upgrade
+```
+
 ## 🚀 Quick Start
 
 ### Running JAXTrace
