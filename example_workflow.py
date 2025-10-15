@@ -262,6 +262,8 @@ def main(config=None):
     if cfg['skip_initial_timesteps'] > 0:
         print(f"⏭️  Skip initial timesteps: {cfg['skip_initial_timesteps']}")
     print(f"🌲 Octree: max_elements={cfg['max_elements_per_leaf']}, max_depth={cfg['max_octree_depth']}")
+    if cfg.get('use_shared_coarse_octree', False):
+        print(f"   💡 Shared coarse octree: ENABLED (AMR optimized, {cfg.get('revolution_timesteps', 40)} timesteps)")
     print(f"🎯 Particles: {cfg['particle_concentrations']}, distribution={cfg['particle_distribution']}")
     if cfg['particle_distribution'] == 'gaussian':
         print(f"   Gaussian std: {cfg['gaussian_std']}")
@@ -312,7 +314,9 @@ def main(config=None):
         max_elements_per_leaf=cfg['max_elements_per_leaf'],
         max_octree_depth=cfg['max_octree_depth'],
         skip_initial_timesteps=cfg['skip_initial_timesteps'],
-        use_stable_mesh_only=cfg['use_stable_mesh_only']
+        use_stable_mesh_only=cfg['use_stable_mesh_only'],
+        use_advanced_element_search=cfg.get('use_advanced_element_search', False),
+        config=cfg  # Pass full config for shared octree
     )
 
     # 4. Particle seeding and tracking
@@ -413,7 +417,8 @@ def main(config=None):
 
 def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                                    max_elements_per_leaf=32, max_octree_depth=12,
-                                   skip_initial_timesteps=0, use_stable_mesh_only=True):
+                                   skip_initial_timesteps=0, use_stable_mesh_only=True,
+                                   use_advanced_element_search=False, config=None):
     """
     Load VTK data with octree FEM or create synthetic field.
 
@@ -431,7 +436,15 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         Number of initial timesteps to skip (useful for AMR data)
     use_stable_mesh_only : bool
         If True, automatically detect and use only timesteps with consistent mesh size
+    use_advanced_element_search : bool
+        Use advanced element search for more accurate interpolation
+    config : dict, optional
+        Full configuration dictionary (for shared octree settings)
     """
+
+    # Use config if provided (for shared octree parameters)
+    if config is None:
+        config = {}
 
     # Try to load VTK data with connectivity for octree FEM
     if data_pattern is None:
@@ -451,23 +464,42 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
 
         print(f"   Found {len(files)} files")
 
-        # Skip initial timesteps if requested
-        if skip_initial_timesteps > 0:
-            print(f"   Skipping first {skip_initial_timesteps} timesteps...")
-            files = files[skip_initial_timesteps:]
+        # Store ALL files for shared octree factory (needs access to refinement steps)
+        all_files = files
 
-        # Auto-detect stable mesh if enabled
-        if use_stable_mesh_only and len(files) > 10:
+        # Determine which timesteps to load based on strategy
+        use_shared_octree = config.get('use_shared_coarse_octree', False)
+        load_last_n = config.get('load_last_n_timesteps', True)
+
+        if use_shared_octree and load_last_n:
+            # NEW STRATEGY: Load LAST N timesteps for revolution cycle
+            # The shared octree factory will handle refinement steps separately
+            print(f"   🔧 Shared octree strategy: loading LAST {max_timesteps} timesteps (revolution cycle)")
+            if len(files) >= max_timesteps:
+                files_to_use = files[-max_timesteps:]  # Last N files
+                print(f"   Selected timesteps: {len(files) - max_timesteps} to {len(files) - 1}")
+            else:
+                files_to_use = files
+                print(f"   ⚠️  Only {len(files)} files available (requested {max_timesteps})")
+        else:
+            # OLD STRATEGY: Skip initial and filter stable mesh
+            if skip_initial_timesteps > 0:
+                print(f"   Skipping first {skip_initial_timesteps} timesteps...")
+                files = files[skip_initial_timesteps:]
+            files_to_use = files
+
+        # Auto-detect stable mesh if enabled (OLD STRATEGY ONLY)
+        if use_stable_mesh_only and not use_shared_octree and len(files_to_use) > 10:
             print(f"   Detecting stable mesh size (sampling first 10 files)...")
 
             # Sample first 10 files to find where mesh stabilizes
-            sample_size = min(10, len(files))
+            sample_size = min(10, len(files_to_use))
             sample_sizes = []
 
             for i in range(sample_size):
                 try:
                     reader = vtk.vtkXMLPUnstructuredGridReader()
-                    reader.SetFileName(files[i])
+                    reader.SetFileName(files_to_use[i])
                     reader.Update()
                     mesh = reader.GetOutput()
                     n_points = mesh.GetNumberOfPoints()
@@ -498,13 +530,19 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 if stable_start is not None and stable_start > 0:
                     print(f"   Mesh stabilizes at timestep {stable_start} with {most_common_size} points")
                     print(f"   Skipping first {stable_start} timesteps (adaptive refinement phase)")
-                    files = files[stable_start:]
+                    files_to_use = files_to_use[stable_start:]
                 else:
                     print(f"   Mesh appears stable from the start ({most_common_size} points)")
 
-        # Load subset of timesteps
-        stride = max(1, len(files) // max_timesteps)
-        files_to_load = files[::stride][:max_timesteps]
+        # Select final files to load
+        if use_shared_octree:
+            # Shared octree: use ALL selected files (already filtered to last N)
+            files_to_load = files_to_use
+            print(f"   Loading all {len(files_to_load)} selected timesteps (no stride)")
+        else:
+            # Old strategy: stride through files
+            stride = max(1, len(files_to_use) // max_timesteps)
+            files_to_load = files_to_use[::stride][:max_timesteps]
 
         print(f"   Loading {len(files_to_load)} timesteps...")
 
@@ -626,19 +664,34 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 print(f"   ✅ Uniform time steps: dt = {mean_dt:.6f}")
                 data_time_interval = mean_dt
 
-        # Create OPTIMIZED octree FEM field
-        print(f"🌲 Creating OPTIMIZED octree FEM field...")
+        # Create octree FEM field (with optional shared coarse octree)
+        use_shared_octree = config.get('use_shared_coarse_octree', False)
 
-        field = OctreeFEMTimeSeriesFieldOptimized(
-            data=velocity_data,
-            times=times,
-            positions=points,
-            connectivity=connectivity,
-            interpolation="linear",
-            extrapolation="constant",
-            max_elements_per_leaf=max_elements_per_leaf,
-            max_depth=max_octree_depth
-        )
+        if use_shared_octree:
+            print(f"🌲 Using SHARED COARSE OCTREE strategy (AMR optimized)")
+            from jaxtrace.fields.shared_octree_fem_field import create_shared_octree_fem_field
+
+            # Pass ALL files so factory can access refinement steps
+            field = create_shared_octree_fem_field(
+                data=velocity_data,
+                times=times,
+                positions=points,
+                connectivity=connectivity,
+                mesh_files=all_files,  # ALL files including refinement steps!
+                user_config=config
+            )
+        else:
+            print(f"🌲 Creating OPTIMIZED octree FEM field...")
+            field = OctreeFEMTimeSeriesFieldOptimized(
+                data=velocity_data,
+                times=times,
+                positions=points,
+                connectivity=connectivity,
+                interpolation="linear",
+                extrapolation="constant",
+                max_elements_per_leaf=max_elements_per_leaf,
+                max_depth=max_octree_depth
+            )
 
         # Convert to JAX arrays on GPU
         print(f"🔄 Converting to GPU...")
@@ -1419,18 +1472,29 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         # Data Loading
         # -------------------------------------------------------------------------
-        'data_pattern': "/home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu",
-        'max_timesteps_to_load': 40,  # Number of timesteps to load from data
+        'data_pattern': "/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu",
+        'max_timesteps_to_load': 40,  # Number of LAST timesteps to load for revolution cycle tracking
 
         # For adaptive mesh refinement (AMR) data:
-        'use_stable_mesh_only': True,  # Auto-detect and skip initial refinement
-        'skip_initial_timesteps': 20,   # Manually skip first N timesteps (if needed)
+        'use_stable_mesh_only': False,  # DISABLED - use shared octree strategy instead
+        'skip_initial_timesteps': 0,    # MUST be 0 - refinement steps needed for octree hierarchy!
+        'load_last_n_timesteps': True,  # Load LAST N timesteps (revolution cycle), not first N
 
         # -------------------------------------------------------------------------
         # Octree FEM Configuration
         # -------------------------------------------------------------------------
         'max_elements_per_leaf': 32,  # Lower = finer tree, higher memory
         'max_octree_depth': 12,       # Maximum tree depth
+        'use_advanced_element_search': True,  # Check all elements, select best (more accurate)
+
+        # -------------------------------------------------------------------------
+        # Shared Coarse Octree (for AMR data with variable mesh)
+        # -------------------------------------------------------------------------
+        'use_shared_coarse_octree': True,  # Enable shared coarse octree strategy
+        'n_refinement_steps': None,         # Number of refinement steps (None = auto-detect)
+        'n_coarse_levels': 6,               # Depth of shared coarse structure (levels 0-6 are static)
+        'enable_fine_structure_reuse': True,  # Enable 92.5% memory savings through reuse
+        'revolution_timesteps': 40,         # Number of revolution cycle timesteps to use (last N)
 
         # -------------------------------------------------------------------------
         # Particle Seeding
