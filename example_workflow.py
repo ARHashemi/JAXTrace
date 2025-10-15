@@ -615,33 +615,76 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
 
         # Check if all timesteps have the same mesh size
         unique_sizes = set(mesh_sizes)
+        use_shared_octree = config.get('use_shared_coarse_octree', False)
+
         if len(unique_sizes) > 1:
             size_counts = {}
             for size in mesh_sizes:
                 size_counts[size] = size_counts.get(size, 0) + 1
 
-            print(f"   ❌ ERROR: Mesh size changes across timesteps!")
-            print(f"   Different mesh sizes found:")
-            for size, count in sorted(size_counts.items()):
-                print(f"      - {size} points: {count} timesteps")
-            print(f"   This is adaptive mesh refinement (AMR) or remeshing data")
-            print(f"   ")
-            print(f"   💡 SOLUTIONS:")
-            print(f"   1. Use only timesteps with consistent mesh (e.g., skip initial refinement)")
-            print(f"   2. Use a different interpolation method (RBF, structured grid)")
-            print(f"   3. Manually interpolate AMR data onto a fixed grid using ParaView/VTK")
-            print(f"   ")
-            print(f"   Current JAXTrace octree FEM requires fixed mesh topology.")
-            raise ValueError(
-                f"Inconsistent mesh sizes: {len(unique_sizes)} different sizes found {sorted(unique_sizes)}. "
-                f"JAXTrace octree FEM requires fixed mesh topology. "
-                f"Use --skip-timesteps or prepare data with constant mesh."
-            )
+            if use_shared_octree:
+                # AMR detected - shared octree can handle this!
+                print(f"   ⚠️  AMR detected: Mesh size changes across timesteps")
+                print(f"   Different mesh sizes found:")
+                for size, count in sorted(size_counts.items()):
+                    print(f"      - {size} points: {count} timesteps")
+                print(f"   ✅ Using SHARED COARSE OCTREE strategy - AMR is supported!")
+            else:
+                # Not using shared octree - this is an error
+                print(f"   ❌ ERROR: Mesh size changes across timesteps!")
+                print(f"   Different mesh sizes found:")
+                for size, count in sorted(size_counts.items()):
+                    print(f"      - {size} points: {count} timesteps")
+                print(f"   This is adaptive mesh refinement (AMR) or remeshing data")
+                print(f"   ")
+                print(f"   💡 SOLUTIONS:")
+                print(f"   1. Enable shared coarse octree: 'use_shared_coarse_octree': True")
+                print(f"   2. Use only timesteps with consistent mesh (e.g., skip initial refinement)")
+                print(f"   3. Use a different interpolation method (RBF, structured grid)")
+                print(f"   4. Manually interpolate AMR data onto a fixed grid using ParaView/VTK")
+                print(f"   ")
+                print(f"   Current JAXTrace octree FEM requires fixed mesh topology.")
+                raise ValueError(
+                    f"Inconsistent mesh sizes: {len(unique_sizes)} different sizes found {sorted(unique_sizes)}. "
+                    f"JAXTrace octree FEM requires fixed mesh topology. "
+                    f"Use 'use_shared_coarse_octree': True or --skip-timesteps or prepare data with constant mesh."
+                )
 
-        velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
-        times = np.array(times, dtype=np.float32)
+        # Convert times to array (before filtering)
+        times_all = np.array(times, dtype=np.float32)
 
-        print(f"✅ Loaded velocity data: {velocity_data.shape}")
+        # For shared octree with AMR, use only timesteps with the most common mesh size
+        # For regular octree, convert to uniform array
+        use_shared_octree = config.get('use_shared_coarse_octree', False)
+
+        if use_shared_octree and len(unique_sizes) > 1:
+            # AMR data - use only timesteps with most common mesh size
+            # Find most common size
+            size_counts = {}
+            for size in mesh_sizes:
+                size_counts[size] = size_counts.get(size, 0) + 1
+
+            most_common_size = max(size_counts.items(), key=lambda x: x[1])[0]
+            n_common = size_counts[most_common_size]
+
+            print(f"✅ AMR detected: using {n_common}/{len(velocity_data)} timesteps with common mesh size ({most_common_size} points)")
+
+            # Filter to keep only timesteps with most common size
+            filtered_data = []
+            filtered_times = []
+            for i, (vel, size) in enumerate(zip(velocity_data, mesh_sizes)):
+                if size == most_common_size:
+                    filtered_data.append(vel)
+                    filtered_times.append(times_all[i])
+
+            velocity_data = np.array(filtered_data, dtype=np.float32)  # (T_filtered, N, 3)
+            times = np.array(filtered_times, dtype=np.float32)
+            print(f"✅ Loaded velocity data: {velocity_data.shape} ({n_common} timesteps, mesh size {most_common_size})")
+        else:
+            # Uniform mesh - convert to single array
+            velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
+            times = times_all
+            print(f"✅ Loaded velocity data: {velocity_data.shape}")
 
         # Calculate time interval from data
         data_time_interval = None
@@ -665,8 +708,6 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 data_time_interval = mean_dt
 
         # Create octree FEM field (with optional shared coarse octree)
-        use_shared_octree = config.get('use_shared_coarse_octree', False)
-
         if use_shared_octree:
             print(f"🌲 Using SHARED COARSE OCTREE strategy (AMR optimized)")
             from jaxtrace.fields.shared_octree_fem_field import create_shared_octree_fem_field
@@ -712,19 +753,12 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         return field
 
     except Exception as e:
-        print(f"   ⚠️  Failed to load VTK with octree FEM: {e}")
-        print(f"   Falling back to synthetic field...")
-
-        # Fallback: create synthetic time-dependent vortex field (no octree)
-        from jaxtrace.fields import TimeSeriesField
-        print("📝 Creating synthetic time-dependent vortex field...")
-        field = create_synthetic_vortex_field()
-        print(f"✅ Created synthetic field: {field}")
-
-        # Synthetic field doesn't have data time interval
-        field._data_time_interval = None
-
-        return field
+        print(f"   ❌ Failed to load VTK with octree FEM: {e}")
+        print(f"   ")
+        print(f"   ERROR DETAILS:")
+        import traceback
+        traceback.print_exc()
+        raise  # Don't fallback - we need to fix the AMR handling!
 
 
 def create_synthetic_vortex_field():
@@ -1501,8 +1535,8 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         'particle_concentrations': {
             'x': 60,  # Particles per unit length in X
-            'y': 100,  # Particles per unit length in Y
-            'z': 30   # Particles per unit length in Z
+            'y': 50,  # Particles per unit length in Y
+            'z': 15   # Particles per unit length in Z
         },
 
         # Particle distribution type: 'uniform', 'gaussian', 'random'
@@ -1532,7 +1566,7 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         # Tracking Parameters
         # -------------------------------------------------------------------------
-        'n_timesteps': 2500,          # Number of tracking timesteps
+        'n_timesteps': 2000,         # Number of tracking timesteps
         'dt': 0.0025,                  # Time step size (ignored if use_data_dt=True)
         'use_data_dt': False,          # Use time interval from VTK files (overrides dt)
         'time_span': (0.0, 6.25),      # Simulation time range (t_start, t_end)

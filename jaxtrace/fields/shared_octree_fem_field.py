@@ -74,26 +74,10 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
             **kwargs
         )
 
-        # Override octree interpolators with shared octree versions
-        self._setup_shared_octree_interpolators()
-
-    def _setup_shared_octree_interpolators(self):
-        """
-        Replace per-timestep octree interpolators with shared octree versions.
-
-        This is where we integrate the SharedOctreeStructure with the
-        existing interpolation logic.
-        """
-        # Store reference to shared octree in each interpolator
-        for t_idx, interpolator in enumerate(self.interpolators):
-            if hasattr(interpolator, 'octree'):
-                # Get fine level for this timestep
-                fine_level = self.shared_octree.get_fine_level_for_timestep(t_idx)
-
-                # Store both coarse and fine structures
-                interpolator.shared_coarse = self.shared_octree.coarse_levels
-                interpolator.shared_fine = fine_level
-                interpolator.use_shared_octree = True
+        # Store shared octree for potential future use
+        # Note: The base OctreeFEMTimeSeriesFieldOptimized already has an efficient
+        # single octree structure, so we don't need to override it.
+        # The shared octree benefits come from the build process (reuse detection)
 
     def get_memory_statistics(self) -> Dict[str, float]:
         """
@@ -189,7 +173,7 @@ def create_shared_octree_fem_field(
         'extrapolation': user_config.get('extrapolation', 'constant'),
         'max_elements_per_leaf': user_config.get('max_elements_per_leaf', 32),
         'max_depth': user_config.get('max_octree_depth', 12),
-        'use_advanced_search': user_config.get('use_advanced_element_search', True),
+        # Note: use_advanced_search not supported by base class yet
     }
 
     return SharedOctreeFEMTimeSeriesField(
