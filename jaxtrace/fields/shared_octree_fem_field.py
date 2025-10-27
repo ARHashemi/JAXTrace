@@ -23,6 +23,7 @@ from .octree_fem_time_series_optimized import OctreeFEMTimeSeriesFieldOptimized
 from .shared_octree_factory import SharedOctreeFactory, SharedOctreeConfig
 from .shared_coarse_octree import SharedOctreeStructure
 from .direct_octree_interpolator_jax import create_jax_direct_interpolator
+from .element_cache import ElementCache  # Phase 1 optimization
 
 
 class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
@@ -93,6 +94,11 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         print("🌲 Building shared coarse octree...")
         self.shared_octree = factory.build_from_files(mesh_files, verbose=True)
         self.shared_octree_config = config
+
+        # Phase 1 Optimization: Initialize element ID cache
+        self.element_cache = ElementCache(threshold=0.001)  # 1mm displacement threshold
+        self.use_element_caching = True  # Feature flag to enable/disable caching
+        print("💾 Element ID caching enabled (Phase 1 optimization)")
 
         # Load reference timestep for octree mesh structure
         # Use the FIRST REVOLUTION TIMESTEP, not refinement timestep
@@ -489,15 +495,34 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
                     f"but reference mesh has {expected_n_nodes} nodes."
                 )
 
-            # Stage 1 (CPU): Find element IDs via octree search
+            # Stage 1 (CPU): Find element IDs via octree search (with caching in Phase 1)
             revolution_idx = left_idx - self.revolution_start_idx
-            element_ids = find_elements_for_particles_interface(
-                query_positions_np,
-                self.shared_octree,
-                self.reference_positions,
-                self.reference_connectivity,
-                revolution_idx
-            )
+
+            # Phase 1 Optimization: Use element cache if enabled
+            if self.use_element_caching:
+                n_particles = len(query_positions_np)
+                particle_ids = np.arange(n_particles, dtype=np.int32)
+
+                element_ids = self.element_cache.get_elements(
+                    particle_ids=particle_ids,
+                    particle_positions=query_positions_np,
+                    current_timestep=left_idx,
+                    octree_search_fn=find_elements_for_particles_interface,
+                    # Kwargs for octree search (matches find_elements_for_particles_interface signature)
+                    shared_octree=self.shared_octree,
+                    positions=self.reference_positions,
+                    connectivity=self.reference_connectivity,
+                    timestep_idx=revolution_idx
+                )
+            else:
+                # Original path (no caching)
+                element_ids = find_elements_for_particles_interface(
+                    query_positions_np,
+                    self.shared_octree,
+                    self.reference_positions,
+                    self.reference_connectivity,
+                    revolution_idx
+                )
 
             # Stage 2 (GPU): Interpolate with known element IDs
             result = self._jax_simple_interpolator(
@@ -702,6 +727,19 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         print(f"Estimated without sharing:  {stats['estimated_independent_mb']:8.2f} MB")
         print(f"Savings:                    {stats['estimated_independent_mb'] - stats['total_octree_mb']:8.2f} MB")
         print("=" * 70)
+
+    def print_cache_statistics(self):
+        """
+        Print element cache statistics (Phase 1 optimization).
+
+        Call this after tracking completes to see cache performance.
+        """
+        if hasattr(self, 'element_cache') and self.use_element_caching:
+            self.element_cache.print_stats()
+        else:
+            print("\n=== Element Cache Statistics ===")
+            print("  Element caching not enabled")
+            print("================================\n")
 
 
 def create_shared_octree_fem_field(
