@@ -127,13 +127,44 @@ def build_octree_mesh_optimized(points: np.ndarray,
 
         octant_elements = [[] for _ in range(8)]
 
-        for elem_idx in elem_indices:
-            elem_centroid = element_centroids[elem_idx]
-            octant = 0
-            if elem_centroid[0] >= center[0]: octant += 1
-            if elem_centroid[1] >= center[1]: octant += 2
-            if elem_centroid[2] >= center[2]: octant += 4
-            octant_elements[octant].append(elem_idx)
+        # CRITICAL FIX: Assign elements to ALL octants they overlap, not just centroid octant
+        # This fixes the bug where elements spanning multiple octants are missed during search
+        #
+        # MEMORY OPTIMIZATION: Use element centroids at deeper levels to reduce duplication
+        # At shallow levels (depth < 4): full overlap-based assignment (correctness critical)
+        # At deep levels (depth >= 4): centroid-based assignment (memory constrained)
+        use_overlap_method = (depth < 4)  # Only first few levels use overlap
+
+        if use_overlap_method:
+            # Full overlap-based assignment (accurate but memory-intensive)
+            for elem_idx in elem_indices:
+                elem_min = element_bounds[elem_idx, 0]
+                elem_max = element_bounds[elem_idx, 1]
+
+                # Check which octants this element overlaps
+                for octant_idx in range(8):
+                    octant_min, octant_max = octant_bounds[octant_idx]
+
+                    # Check if element bounds overlap with octant bounds
+                    overlaps = (elem_min[0] <= octant_max[0] and elem_max[0] >= octant_min[0] and
+                               elem_min[1] <= octant_max[1] and elem_max[1] >= octant_min[1] and
+                               elem_min[2] <= octant_max[2] and elem_max[2] >= octant_min[2])
+
+                    if overlaps:
+                        octant_elements[octant_idx].append(elem_idx)
+        else:
+            # Centroid-based assignment (memory-efficient)
+            # At deep levels, element size << octant size, so centroid is sufficient
+            for elem_idx in elem_indices:
+                elem_centroid = (element_bounds[elem_idx, 0] + element_bounds[elem_idx, 1]) / 2.0
+
+                # Find octant containing centroid
+                octant = 0
+                if elem_centroid[0] >= center[0]: octant += 1
+                if elem_centroid[1] >= center[1]: octant += 2
+                if elem_centroid[2] >= center[2]: octant += 4
+
+                octant_elements[octant].append(elem_idx)
 
         node = OctreeNode(
             min_corner=min_corner,

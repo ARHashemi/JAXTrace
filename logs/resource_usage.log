@@ -1,0 +1,204 @@
+=== Resource Monitoring Started at lun 20 oct 2025 10:20:21 CEST ===
+Monitoring PID: 2779202
+
+=== 2025-10-20 10:20:21 ===
+2779202  0.0  0.0  2500  12984       00:02 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:20:31 ===
+2779202  0.0  0.0  2500  12984       00:12 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:20:41 ===
+2779202  0.0  0.0  2500  12984       00:22 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:20:51 ===
+2779202  0.0  0.0  2500  12984       00:32 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:01 ===
+2779202  0.0  0.0  2500  12984       00:42 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:11 ===
+2779202  0.0  0.0  2500  12984       00:52 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:21 ===
+2779202  0.0  0.0  2500  12984       01:02 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:31 ===
+2779202  0.0  0.0  2500  12984       01:12 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:41 ===
+2779202  0.0  0.0  2500  12984       01:22 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:21:51 ===
+2779202  0.0  0.0  2500  12984       01:32 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:01 ===
+2779202  0.0  0.0  2500  12984       01:42 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:11 ===
+2779202  0.0  0.0  2500  12984       01:52 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:21 ===
+2779202  0.0  0.0  2500  12984       02:02 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:31 ===
+2779202  0.0  0.0  2500  12984       02:12 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:42 ===
+2779202  0.0  0.0  2500  12984       02:22 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:22:52 ===
+2779202  0.0  0.0  2500  12984       02:32 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:02 ===
+2779202  0.0  0.0  2500  12984       02:42 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:12 ===
+2779202  0.0  0.0  2500  12984       02:52 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:22 ===
+2779202  0.0  0.0  2500  12984       03:02 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:32 ===
+2779202  0.0  0.0  2500  12984       03:12 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:42 ===
+2779202  0.0  0.0  2500  12984       03:22 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:23:52 ===
+2779202  0.0  0.0  2500  12984       03:32 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:02 ===
+2779202  0.0  0.0  2500  12984       03:43 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:12 ===
+2779202  0.0  0.0  2500  12984       03:53 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:22 ===
+2779202  0.0  0.0  2500  12984       04:03 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:32 ===
+2779202  0.0  0.0  2500  12984       04:13 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:42 ===
+2779202  0.0  0.0  2500  12984       04:23 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:24:52 ===
+2779202  0.0  0.0  2500  12984       04:33 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:02 ===
+2779202  0.0  0.0  2500  12984       04:43 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:12 ===
+2779202  0.0  0.0  2500  12984       04:53 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:22 ===
+2779202  0.0  0.0  2500  12984       05:03 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:32 ===
+2779202  0.0  0.0  2500  12984       05:13 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:42 ===
+2779202  0.0  0.0  2500  12984       05:23 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:25:53 ===
+2779202  0.0  0.0  2500  12984       05:33 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:03 ===
+2779202  0.0  0.0  2500  12984       05:43 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:13 ===
+2779202  0.0  0.0  2500  12984       05:53 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:23 ===
+2779202  0.0  0.0  2500  12984       06:03 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:33 ===
+2779202  0.0  0.0  2500  12984       06:13 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:43 ===
+2779202  0.0  0.0  2500  12984       06:23 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== 2025-10-20 10:26:53 ===
+2779202  0.0  0.0  2500  12984       06:33 /bin/bash -c -l source /home/arhashemi/.claude/shell-snapshots/snapshot-bash-1760947931349-tbpl2f.sh && eval 'source .venv/bin/activate && python -u example_workflow.py > logs/optimized_verification_test.log 2>&1 & TEST_PID=$! echo $TEST_PID > logs/test_pid.txt echo "Optimized test started with PID: $TEST_PID" sleep 2 ./logs/monitor_resources.sh $TEST_PID > /dev/null 2>&1 & MONITOR_PID=$! echo $MONITOR_PID > logs/monitor_pid.txt echo "Monitoring started with PID: $MONITOR_PID" ' < /dev/null && pwd -P >| /tmp/claude-38b7-cwd
+--- GPU Status ---
+0, NVIDIA T1000, 0, 0, 10, 4096, 36
+
+=== Process 2779202 completed at lun 20 oct 2025 10:27:03 CEST ===

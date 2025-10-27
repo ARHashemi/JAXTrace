@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "total_time_sec": 278.0390944480896,
+  "num_particles": 500,
+  "initial_resources": {
+    "ram_gb": 12.263565063476562,
+    "gpu_mem_mb": 73,
+    "gpu_util_pct": 0,
+    "timestamp": 1761126201.5826485
+  },
+  "final_resources": {
+    "ram_gb": 13.107524871826172,
+    "gpu_mem_mb": 149,
+    "gpu_util_pct": 0,
+    "timestamp": 1761126479.6431174
+  }
+}

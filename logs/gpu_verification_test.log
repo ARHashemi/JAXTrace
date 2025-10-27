@@ -1,0 +1,177 @@
+WARNING:2025-10-18 15:14:39,063:jax._src.xla_bridge:850: An NVIDIA GPU may be present on this machine, but a CUDA-enabled jaxlib is not installed. Falling back to cpu.
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 40
+🌲 Octree: max_elements=32, max_depth=12
+   💡 Shared coarse octree: ENABLED (AMR optimized, 40 timesteps)
+🎯 Particles: {'x': 60, 'y': 50, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 2000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=none, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/utils/config.py:129: UserWarning: Device 'gpu' not available, using 'cpu'
+  warnings.warn(f"Device '{self.device}' not available, using 'cpu'")
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='cpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}])
+✅ JAX device: [CpuDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   🔧 Shared octree strategy: loading LAST 40 timesteps (revolution cycle)
+   Selected timesteps: 120 to 159
+   Loading all 40 selected timesteps (no stride)
+   Loading 40 timesteps...
+   Mesh: 780922 points
+   Elements: 3048900 tetrahedra
+🚀 Phase B: Using per-timestep loading (no pre-loading)
+✅ Prepared 160 timesteps for on-demand loading (including refinement steps)
+🌲 Using SHARED COARSE OCTREE strategy (Phase B: per-timestep loading)
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 40
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 9 refinement steps
+  Refinement phase: 9 steps
+  Revolution cycle: 40 steps (timesteps 120 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 9 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_8.pvtu
+Mesh: 781466 points, 3050881 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 3105 nodes, 0.54 MB
+  Time: 6.6s
+  Memory: 0.54 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 40 timesteps...
+  Timestep 120: NEW structure (0.00 MB, 1 nodes)
+  Timestep 121: REUSED from timestep 120
+  Timestep 122: REUSED from timestep 120
+  Timestep 123: REUSED from timestep 120
+  Timestep 124: REUSED from timestep 120
+  Timestep 125: REUSED from timestep 120
+  Timestep 126: REUSED from timestep 120
+  Timestep 127: REUSED from timestep 120
+  Timestep 128: REUSED from timestep 120
+  Timestep 129: REUSED from timestep 120
+  Timestep 130: REUSED from timestep 120
+  Timestep 131: REUSED from timestep 120
+  Timestep 132: REUSED from timestep 120
+  Timestep 133: REUSED from timestep 120
+  Timestep 134: REUSED from timestep 120
+  Timestep 135: REUSED from timestep 120
+  Timestep 136: REUSED from timestep 120
+  Timestep 137: REUSED from timestep 120
+  Timestep 138: REUSED from timestep 120
+  Timestep 139: REUSED from timestep 120
+  Timestep 140: REUSED from timestep 120
+  Timestep 141: REUSED from timestep 120
+  Timestep 142: REUSED from timestep 120
+  Timestep 143: REUSED from timestep 120
+  Timestep 144: REUSED from timestep 120
+  Timestep 145: REUSED from timestep 120
+  Timestep 146: REUSED from timestep 120
+  Timestep 147: REUSED from timestep 120
+  Timestep 148: REUSED from timestep 120
+  Timestep 149: REUSED from timestep 120
+  Timestep 150: REUSED from timestep 120
+  Timestep 151: REUSED from timestep 120
+  Timestep 152: REUSED from timestep 120
+  Timestep 153: REUSED from timestep 120
+  Timestep 154: REUSED from timestep 120
+  Timestep 155: REUSED from timestep 120
+  Timestep 156: REUSED from timestep 120
+  Timestep 157: REUSED from timestep 120
+  Timestep 158: REUSED from timestep 120
+  Timestep 159: REUSED from timestep 120
+
+Fine octree building complete:
+  Total timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+  Time: 266.2s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.54 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.55 MB
+
+Reuse Statistics:
+  Timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+
+Total build time: 291.7s
+======================================================================
+📂 Loading reference timestep 120 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 160
+🌲 Creating OPTIMIZED octree FEM interpolation field...
+🌲 Building optimized octree:
+   Mesh: 780922 points, 3048900 elements
+   Max elements/leaf: 32
+   Computing element bounds...
+      200000/3048900 elements...
+      400000/3048900 elements...
+      600000/3048900 elements...
+      800000/3048900 elements...
+      1000000/3048900 elements...
+      1200000/3048900 elements...
+      1400000/3048900 elements...
+      1600000/3048900 elements...
+      1800000/3048900 elements...
+      2000000/3048900 elements...
+      2200000/3048900 elements...
+      2400000/3048900 elements...
+      2600000/3048900 elements...
+      2800000/3048900 elements...
+      3000000/3048900 elements...
+   Domain: [-0.03  -0.023 -0.01 ] to [0.03  0.023 0.   ]
+   Building octree structure...
+   ✅ Octree built: 28268609 nodes

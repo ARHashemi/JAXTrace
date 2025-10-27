@@ -1,0 +1,119 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 20
+🔍 Auto-detect stable mesh: enabled
+⏭️  Skip initial timesteps: 30
+🌲 Octree: max_elements=32, max_depth=12
+🎯 Particles: {'x': 30, 'y': 40, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 1000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=none, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.6.2
+   ✅ VTK library: v9.5.0
+   ✅ SciPy: v1.16.0 (spatial indexing enabled)
+   ✅ Plotly: v6.2.0 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.037708282470703, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 3064627200, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔧 Using TEMPORAL BATCHING with Grid Hash (for AMR data)
+   Window size: 3 velocity timesteps
+   Grid resolution: 16^3 cells
+📁 Temporal batching field initialized:
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Files found: 160
+   Grid resolution: 16³ cells
+   Cache size: 3 timesteps
+✅ Temporal batching field created: 160 VTK files found
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Loading first timestep to determine field bounds...
+   Field bounds: [-0.0306  -0.02346 -0.0101 ] to [0.0306  0.02346 0.0001 ]
+🎯 Generating particles...
+   Domain size: X=0.0612, Y=0.0469, Z=0.0102
+   Using fractional particle bounds: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+   Grid resolution: 30 x 40 x 15 = 18000 particles
+✅ Generated 18000 particles with uniform grid distribution
+🚪 Boundary conditions:
+   All boundaries: Reflective
+   ⚠️  Note: Temporal batching currently uses reflective boundaries
+   Advanced boundary conditions (continuous inlet) will be added in future release
+🚀 Setting up temporal batching tracker...
+   💾 Recording positions only (velocities not stored)
+🚀 Temporal batching tracker initialized:
+   Window size: 3 velocity timesteps
+   Record velocities: False
+   Assuming data time interval: 0.001000
+🏃 Running temporal batching particle tracking...
+   Tracking 18000 particles for 1000 timesteps
+   Time span: (0.0, 6.25), dt=0.0025
+   Data dt: 0.001, Temporal window size: 3 velocity timesteps
+🏃 Temporal batching tracking:
+   Particles: 18,000
+   Tracking steps: 1,000
+   dt_tracking: 0.0025
+   dt_data: 0.001
+   Data timesteps needed: 160 / 160
+   Temporal windows: 54
+
+   Window 1/54:
+      Data timesteps: 0 to 2
+      Tracking steps: 0 to 2
+      Loaded 3 timesteps in 47.91s
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 2051, in <module>
+    main(config=user_config)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 397, in main
+    trajectory, strategy_info, initial_positions = execute_temporal_batching_tracking(
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1269, in execute_temporal_batching_tracking
+    trajectory_data = tracker.track_particles(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py", line 151, in track_particles
+    positions_window, velocities_window = self._advance_window(
+                                          ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py", line 300, in _advance_window
+    current_pos = advance_step(current_pos, t_current)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py", line 282, in advance_step
+    pos_next = self.integrator(pos, t_current, dt_tracking, field_fn)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1243, in integrator_fn
+    return rk4_step(x, t, dt, field_fn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/integrators/rk4.py", line 85, in rk4_step
+    k1 = field_fn(x, t_j)
+         ^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py", line 277, in field_fn
+    v_left = interpolators[t_idx_left](positions)
+             ~~~~~~~~~~~~~^^^^^^^^^^^^
+jax.errors.TracerIntegerConversionError: The __index__() method was called on traced array with shape int32[]
+The error occurred while tracing the function advance_step at /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py:258 for jit. This concrete value was not available in Python because it depends on the value of the argument t_current.
+See https://docs.jax.dev/en/latest/errors.html#jax.errors.TracerIntegerConversionError
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

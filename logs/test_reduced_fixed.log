@@ -1,0 +1,249 @@
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+REDUCED PARTICLE TEST
+================================================================================
+Particles: 10×10×5 = 500 (reduced from 60×50×15 = 45,000)
+Mode: JAX direct interpolation
+================================================================================
+
+Initial resources:
+  RAM: 11.96 GB
+  GPU Memory: 73 MB
+  GPU Util: 0%
+
+Starting test...
+
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu
+⏱  Timesteps to load: 40
+🔍 Auto-detect stable mesh: enabled
+🌲 Octree: max_elements=32, max_depth=12
+   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, 40 timesteps)
+🎯 Particles: {'x': 10, 'y': 10, 'z': 5}, distribution=uniform
+🏃 Tracking: 2000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=continuous, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 2922135552, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_*.pvtu
+   Found 146 files
+   Detecting stable mesh size (sampling first 10 files)...
+      Timestep 0: 185865 points
+   Mesh appears stable from the start (185865 points)
+   Loading 40 timesteps...
+   Mesh: 185865 points
+   Elements: 750773 tetrahedra
+🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)
+✅ Prepared 146 timesteps for on-demand loading (including refinement steps)
+🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 146
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 40
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 1 refinement steps
+  Refinement phase: 1 steps
+  Revolution cycle: 40 steps (timesteps 106 to 145)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 1 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Cases/004_caseCoarse.gid/post/0eule/004_caseCoarse_14.pvtu
+Mesh: 185865 points, 750773 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 2786 nodes, 0.49 MB
+  Time: 1.7s
+  Memory: 0.49 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 40 timesteps...
+  Timestep 106: NEW structure (0.00 MB, 1 nodes)
+  Timestep 107: REUSED from timestep 106
+  Timestep 108: REUSED from timestep 106
+  Timestep 109: REUSED from timestep 106
+  Timestep 110: REUSED from timestep 106
+  Timestep 111: REUSED from timestep 106
+  Timestep 112: REUSED from timestep 106
+  Timestep 113: REUSED from timestep 106
+  Timestep 114: REUSED from timestep 106
+  Timestep 115: REUSED from timestep 106
+  Timestep 116: REUSED from timestep 106
+  Timestep 117: REUSED from timestep 106
+  Timestep 118: REUSED from timestep 106
+  Timestep 119: REUSED from timestep 106
+  Timestep 120: REUSED from timestep 106
+  Timestep 121: REUSED from timestep 106
+  Timestep 122: REUSED from timestep 106
+  Timestep 123: REUSED from timestep 106
+  Timestep 124: REUSED from timestep 106
+  Timestep 125: REUSED from timestep 106
+  Timestep 126: REUSED from timestep 106
+  Timestep 127: REUSED from timestep 106
+  Timestep 128: REUSED from timestep 106
+  Timestep 129: REUSED from timestep 106
+  Timestep 130: REUSED from timestep 106
+  Timestep 131: REUSED from timestep 106
+  Timestep 132: REUSED from timestep 106
+  Timestep 133: REUSED from timestep 106
+  Timestep 134: REUSED from timestep 106
+  Timestep 135: REUSED from timestep 106
+  Timestep 136: REUSED from timestep 106
+  Timestep 137: REUSED from timestep 106
+  Timestep 138: REUSED from timestep 106
+  Timestep 139: REUSED from timestep 106
+  Timestep 140: REUSED from timestep 106
+  Timestep 141: REUSED from timestep 106
+  Timestep 142: REUSED from timestep 106
+  Timestep 143: REUSED from timestep 106
+  Timestep 144: REUSED from timestep 106
+  Timestep 145: REUSED from timestep 106
+
+Fine octree building complete:
+  Total timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+  Time: 110.2s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.49 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.49 MB
+
+Reuse Statistics:
+  Timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+
+Total build time: 115.5s
+======================================================================
+📂 Loading reference timestep 106 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 146
+✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)
+✅ Shared octree field ready with 146 timesteps (per-timestep loading + direct interpolation)
+✅ Loaded octree FEM field: SharedOctreeFEMTimeSeriesField(timesteps=146, cache_size=3, cached=1, mode=direct, reuse_rate=97.5%)
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Field bounds: [-0.03  -0.02  -0.008] to [0.07 0.02 0.  ]
+🎯 Generating particles with uniform distribution...
+   Domain size: X=0.1000, Y=0.0400, Z=0.0080
+   Using entire domain for particles
+   Grid resolution: 10 x 10 x 5 = 500 particles
+   Concentrations: X=10, Y=10, Z=5 particles/unit
+   Distribution type: uniform
+✅ Generated 500 particles with uniform grid distribution
+🚪 Boundary conditions:
+   X-axis: Inlet=continuous, Outlet=absorbing
+   Other axes: Reflective boundaries
+🚀 Setting up particle tracker...
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:206: UserWarning: ⚠️  Continuous inlet boundary detected - disabling JIT compilation.
+   This boundary condition uses numpy operations that are not JAX-compatible.
+   Performance will be slower but results remain accurate.
+   For best performance, use 'reflective' or 'periodic' boundaries.
+  warnings.warn(
+🏃 Running particle tracking...
+   Tracking 500 particles for 2000 timesteps
+   Time span: (106, 145), dt=0.0025
+W1022 09:59:36.117545 1461802 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.58GiB (2773904513 bytes) by rematerialization; only reduced to 7.68GiB (8248669372 bytes), down from 7.68GiB (8248669372 bytes) originally
+W1022 09:59:46.593901 1461802 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 7.67GiB (rounded to 8236698112)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1022 09:59:46.594171 1461802 bfc_allocator.cc:512] *****************_________________________***__******xxxx********************************xxxxxxxxxxx
+E1022 09:59:46.594194 1461802 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 8236697928 bytes. [tf-allocator-allocation-error='']
+
+================================================================================
+❌ TEST FAILED
+================================================================================
+Error: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 8236697928 bytes.
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_reduced.py", line 82, in <module>
+    main(config=config_reduced)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+    trajectory, strategy_info, initial_positions = execute_particle_tracking(
+                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        field=field,
+        ^^^^^^^^^^^^
+    ...<13 lines>...
+        inlet_distribution=cfg['inlet_distribution']
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+    trajectory = tracker.track_particles(
+        initial_positions=seeds,
+    ...<2 lines>...
+        dt=dt
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+    return self._track_single_batch(x0, times, dt)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+    v_initial = self.field_fn(x_current, times[0])
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+    field_fn = lambda positions, t: field.sample_at_positions(positions, t)
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 305, in sample_at_positions
+    return self._sample_with_direct_interpolation(query_positions, left_idx, right_idx, alpha)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 431, in _sample_with_direct_interpolation
+    values_left = interpolator_left(query_positions, field_left)
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 8236697928 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+Final resources:
+  RAM: 12.82 GB
+  GPU Memory: 133 MB
+  GPU Util: 0%
+
+Total time: 143.54 seconds
+
+✅ Summary saved to: logs/reduced_test_summary.json

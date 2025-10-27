@@ -1,0 +1,220 @@
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 40
+🌲 Octree: max_elements=32, max_depth=12
+   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, 40 timesteps)
+🎯 Particles: {'x': 10, 'y': 10, 'z': 5}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 2000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=none, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 2922135552, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   Loading 40 timesteps...
+   Mesh: 2301 points
+   Elements: 1296 tetrahedra
+🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)
+✅ Prepared 160 timesteps for on-demand loading (including refinement steps)
+🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 40
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 9 refinement steps
+  Refinement phase: 9 steps
+  Revolution cycle: 40 steps (timesteps 120 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 9 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_8.pvtu
+Mesh: 781466 points, 3050881 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 3105 nodes, 0.54 MB
+  Time: 6.5s
+  Memory: 0.54 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 40 timesteps...
+  Timestep 120: NEW structure (0.00 MB, 1 nodes)
+  Timestep 121: REUSED from timestep 120
+  Timestep 122: REUSED from timestep 120
+  Timestep 123: REUSED from timestep 120
+  Timestep 124: REUSED from timestep 120
+  Timestep 125: REUSED from timestep 120
+  Timestep 126: REUSED from timestep 120
+  Timestep 127: REUSED from timestep 120
+  Timestep 128: REUSED from timestep 120
+  Timestep 129: REUSED from timestep 120
+  Timestep 130: REUSED from timestep 120
+  Timestep 131: REUSED from timestep 120
+  Timestep 132: REUSED from timestep 120
+  Timestep 133: REUSED from timestep 120
+  Timestep 134: REUSED from timestep 120
+  Timestep 135: REUSED from timestep 120
+  Timestep 136: REUSED from timestep 120
+  Timestep 137: REUSED from timestep 120
+  Timestep 138: REUSED from timestep 120
+  Timestep 139: REUSED from timestep 120
+  Timestep 140: REUSED from timestep 120
+  Timestep 141: REUSED from timestep 120
+  Timestep 142: REUSED from timestep 120
+  Timestep 143: REUSED from timestep 120
+  Timestep 144: REUSED from timestep 120
+  Timestep 145: REUSED from timestep 120
+  Timestep 146: REUSED from timestep 120
+  Timestep 147: REUSED from timestep 120
+  Timestep 148: REUSED from timestep 120
+  Timestep 149: REUSED from timestep 120
+  Timestep 150: REUSED from timestep 120
+  Timestep 151: REUSED from timestep 120
+  Timestep 152: REUSED from timestep 120
+  Timestep 153: REUSED from timestep 120
+  Timestep 154: REUSED from timestep 120
+  Timestep 155: REUSED from timestep 120
+  Timestep 156: REUSED from timestep 120
+  Timestep 157: REUSED from timestep 120
+  Timestep 158: REUSED from timestep 120
+  Timestep 159: REUSED from timestep 120
+
+Fine octree building complete:
+  Total timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+  Time: 294.1s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.54 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.55 MB
+
+Reuse Statistics:
+  Timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+
+Total build time: 319.3s
+======================================================================
+📂 Loading reference timestep 120 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 160
+✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)
+✅ Shared octree field ready with 160 timesteps (per-timestep loading + direct interpolation)
+✅ Loaded octree FEM field: SharedOctreeFEMTimeSeriesField(timesteps=160, cache_size=3, cached=1, mode=direct, reuse_rate=97.5%)
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Field bounds: [-0.03  -0.023 -0.01 ] to [0.03  0.023 0.   ]
+🎯 Generating particles with uniform distribution...
+   Domain size: X=0.0600, Y=0.0460, Z=0.0100
+   Using fractional particle bounds: {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+   Computed bounds: [array([-0.024, -0.023, -0.01 ]), array([-0.012,  0.023,  0.   ])]
+   Grid resolution: 10 x 10 x 5 = 500 particles
+   Concentrations: X=10, Y=10, Z=5 particles/unit
+   Distribution type: uniform
+✅ Generated 500 particles with uniform grid distribution
+🚪 Boundary conditions:
+   X-axis: No inlet, absorbing outlet
+   ⚠️  Note: Currently using reflective boundary (absorbing without inlet requires custom implementation)
+   Other axes: Reflective boundaries
+🚀 Setting up particle tracker...
+🏃 Running particle tracking...
+   Tracking 500 particles for 2000 timesteps
+   Time span: (120, 159), dt=0.0025
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:424: UserWarning: Falling back to step-by-step path (JAX scan failed): Attempted boolean conversion of traced array with shape bool[].
+The error occurred while tracing the function body at /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:236 for scan. This concrete value was not available in Python because it depends on the value of the argument t_prev.
+See https://docs.jax.dev/en/latest/errors.html#jax.errors.TracerBoolConversionError
+  warnings.warn(f"Falling back to step-by-step path (JAX scan failed): {e}")
+
+W1021 15:41:33.939407  368891 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.58GiB (2767120863 bytes) by rematerialization; only reduced to 31.49GiB (33811139404 bytes), down from 31.49GiB (33811139404 bytes) originally
+W1021 15:41:44.828061  368891 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 31.44GiB (rounded to 33762398208)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1021 15:41:44.828460  368891 bfc_allocator.cc:512] *******************________________________*********************************xxxxxxxxxxx*********xxxx
+E1021 15:41:44.828498  368891 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 33762398024 bytes. [tf-allocator-allocation-error='']
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1736, in <module>
+    main(config=user_config)
+    ~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+    trajectory, strategy_info, initial_positions = execute_particle_tracking(
+                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        field=field,
+        ^^^^^^^^^^^^
+    ...<13 lines>...
+        inlet_distribution=cfg['inlet_distribution']
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+    trajectory = tracker.track_particles(
+        initial_positions=seeds,
+    ...<2 lines>...
+        dt=dt
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+    return self._track_single_batch(x0, times, dt)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+    v_initial = self.field_fn(x_current, times[0])
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+    field_fn = lambda positions, t: field.sample_at_positions(positions, t)
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 305, in sample_at_positions
+    return self._sample_with_direct_interpolation(query_positions, left_idx, right_idx, alpha)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 413, in _sample_with_direct_interpolation
+    values_left = interpolator_left(query_positions, field_left)
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 33762398024 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

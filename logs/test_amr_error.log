@@ -1,0 +1,78 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 40
+🌲 Octree: max_elements=32, max_depth=12
+   💡 Shared coarse octree: ENABLED (AMR optimized, 40 timesteps)
+🎯 Particles: {'x': 60, 'y': 50, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 2000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=continuous, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.6.2
+   ✅ VTK library: v9.5.0
+   ✅ SciPy: v1.16.0 (spatial indexing enabled)
+   ✅ Plotly: v6.2.0 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.03771209716797, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 3064627200, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   🔧 Shared octree strategy: loading LAST 40 timesteps (revolution cycle)
+   Selected timesteps: 120 to 159
+   Loading all 40 selected timesteps (no stride)
+   Loading 40 timesteps...
+   Mesh: 780922 points
+   Elements: 3048900 tetrahedra
+   Loaded 10/40 timesteps...
+   Loaded 20/40 timesteps...
+   Loaded 30/40 timesteps...
+   Loaded 40/40 timesteps...
+   ⚠️  AMR detected: Mesh size changes across timesteps
+   Different mesh sizes found:
+      - 780922 points: 37 timesteps
+      - 780933 points: 1 timesteps
+      - 781466 points: 1 timesteps
+      - 790285 points: 1 timesteps
+   ✅ Using SHARED COARSE OCTREE strategy - AMR is supported!
+   ❌ Failed to load VTK with octree FEM: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (40,) + inhomogeneous part.
+   
+   ERROR DETAILS:
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 653, in create_or_load_velocity_field
+    velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (40,) + inhomogeneous part.
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1698, in <module>
+    main(config=user_config)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 311, in main
+    field = create_or_load_velocity_field(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 653, in create_or_load_velocity_field
+    velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: setting an array element with a sequence. The requested array has an inhomogeneous shape after 1 dimensions. The detected shape was (40,) + inhomogeneous part.

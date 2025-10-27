@@ -1,0 +1,188 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 40
+🌲 Octree: max_elements=32, max_depth=12
+   💡 Shared coarse octree: ENABLED (AMR optimized, 40 timesteps)
+🎯 Particles: {'x': 60, 'y': 50, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 2000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=continuous, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.6.2
+   ✅ VTK library: v9.5.0
+   ✅ SciPy: v1.16.0 (spatial indexing enabled)
+   ✅ Plotly: v6.2.0 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.03771209716797, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 3064627200, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   🔧 Shared octree strategy: loading LAST 40 timesteps (revolution cycle)
+   Selected timesteps: 120 to 159
+   Loading all 40 selected timesteps (no stride)
+   Loading 40 timesteps...
+   Mesh: 780922 points
+   Elements: 3048900 tetrahedra
+   Loaded 10/40 timesteps...
+   Loaded 20/40 timesteps...
+   Loaded 30/40 timesteps...
+   Loaded 40/40 timesteps...
+   ⚠️  AMR detected: Mesh size changes across timesteps
+   Different mesh sizes found:
+      - 780922 points: 37 timesteps
+      - 780933 points: 1 timesteps
+      - 781466 points: 1 timesteps
+      - 790285 points: 1 timesteps
+   ✅ Using SHARED COARSE OCTREE strategy - AMR is supported!
+✅ AMR detected: using 37/40 timesteps with common mesh size (780922 points)
+✅ Loaded velocity data: (37, 780922, 3) (37 timesteps, mesh size 780922)
+📊 Data time information:
+   Time range: 63.000 to 99.000
+   Mean time interval (dt): 1.000000
+   ✅ Uniform time steps: dt = 1.000000
+🌲 Using SHARED COARSE OCTREE strategy (AMR optimized)
+🌲 Building shared coarse octree...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 40
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 3 refinement steps
+  Refinement phase: 3 steps
+  Revolution cycle: 40 steps (timesteps 120 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 3 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_10.pvtu
+Mesh: 780922 points, 3048900 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 2945 nodes, 0.52 MB
+  Time: 7.9s
+  Memory: 0.52 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 40 timesteps...
+  Timestep 120: NEW structure (0.00 MB, 1 nodes)
+  Timestep 121: REUSED from timestep 120
+  Timestep 122: REUSED from timestep 120
+  Timestep 123: REUSED from timestep 120
+  Timestep 124: REUSED from timestep 120
+  Timestep 125: REUSED from timestep 120
+  Timestep 126: REUSED from timestep 120
+  Timestep 127: REUSED from timestep 120
+  Timestep 128: REUSED from timestep 120
+  Timestep 129: REUSED from timestep 120
+  Timestep 130: REUSED from timestep 120
+  Timestep 131: REUSED from timestep 120
+  Timestep 132: REUSED from timestep 120
+  Timestep 133: REUSED from timestep 120
+  Timestep 134: REUSED from timestep 120
+  Timestep 135: REUSED from timestep 120
+  Timestep 136: REUSED from timestep 120
+  Timestep 137: REUSED from timestep 120
+  Timestep 138: REUSED from timestep 120
+  Timestep 139: REUSED from timestep 120
+  Timestep 140: REUSED from timestep 120
+  Timestep 141: REUSED from timestep 120
+  Timestep 142: REUSED from timestep 120
+  Timestep 143: REUSED from timestep 120
+  Timestep 144: REUSED from timestep 120
+  Timestep 145: REUSED from timestep 120
+  Timestep 146: REUSED from timestep 120
+  Timestep 147: REUSED from timestep 120
+  Timestep 148: REUSED from timestep 120
+  Timestep 149: REUSED from timestep 120
+  Timestep 150: REUSED from timestep 120
+  Timestep 151: REUSED from timestep 120
+  Timestep 152: REUSED from timestep 120
+  Timestep 153: REUSED from timestep 120
+  Timestep 154: REUSED from timestep 120
+  Timestep 155: REUSED from timestep 120
+  Timestep 156: REUSED from timestep 120
+  Timestep 157: REUSED from timestep 120
+  Timestep 158: REUSED from timestep 120
+  Timestep 159: REUSED from timestep 120
+
+Fine octree building complete:
+  Total timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+  Time: 304.9s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.52 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.52 MB
+
+Reuse Statistics:
+  Timesteps: 40
+  Unique structures: 1
+  Reuse rate: 97.5%
+  Memory savings: 40.0x
+
+Total build time: 327.5s
+======================================================================
+   ❌ Failed to load VTK with octree FEM: OctreeFEMTimeSeriesFieldOptimized.__init__() got an unexpected keyword argument 'use_advanced_search'
+   
+   ERROR DETAILS:
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 716, in create_or_load_velocity_field
+    field = create_shared_octree_fem_field(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 195, in create_shared_octree_fem_field
+    return SharedOctreeFEMTimeSeriesField(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 69, in __init__
+    super().__init__(
+TypeError: OctreeFEMTimeSeriesFieldOptimized.__init__() got an unexpected keyword argument 'use_advanced_search'
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1727, in <module>
+    main(config=user_config)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 311, in main
+    field = create_or_load_velocity_field(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 716, in create_or_load_velocity_field
+    field = create_shared_octree_fem_field(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 195, in create_shared_octree_fem_field
+    return SharedOctreeFEMTimeSeriesField(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 69, in __init__
+    super().__init__(
+TypeError: OctreeFEMTimeSeriesFieldOptimized.__init__() got an unexpected keyword argument 'use_advanced_search'

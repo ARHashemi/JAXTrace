@@ -1,0 +1,8 @@
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_reduced_particles.py", line 9, in <module>
+    from jaxtrace.core import configure
+ModuleNotFoundError: No module named 'jaxtrace.core'

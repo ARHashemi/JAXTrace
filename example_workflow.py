@@ -262,8 +262,10 @@ def main(config=None):
     if cfg['skip_initial_timesteps'] > 0:
         print(f"⏭️  Skip initial timesteps: {cfg['skip_initial_timesteps']}")
     print(f"🌲 Octree: max_elements={cfg['max_elements_per_leaf']}, max_depth={cfg['max_octree_depth']}")
-    if cfg.get('use_shared_coarse_octree', False):
-        print(f"   💡 Shared coarse octree: ENABLED (AMR optimized, {cfg.get('revolution_timesteps', 40)} timesteps)")
+    if cfg.get('use_legacy_octree', False):
+        print(f"   ⚠️  Legacy octree: ENABLED (monolithic, stable mesh only)")
+    else:
+        print(f"   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, {cfg.get('revolution_timesteps', 40)} timesteps)")
     print(f"🎯 Particles: {cfg['particle_concentrations']}, distribution={cfg['particle_distribution']}")
     if cfg['particle_distribution'] == 'gaussian':
         print(f"   Gaussian std: {cfg['gaussian_std']}")
@@ -457,7 +459,17 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         print(f"   Pattern: {vtk_pattern}")
 
         from glob import glob
-        files = sorted(glob(vtk_pattern))
+        import re
+
+        # CRITICAL FIX: Sort files NUMERICALLY by timestep number, not lexicographically
+        # Lexicographic sorting gives: 0, 1, 10, 100, 101, ..., 2, 20, ...
+        # Numeric sorting gives: 0, 1, 2, ..., 10, ..., 100, 101, ...
+        # This ensures times are monotonically increasing for proper temporal interpolation
+        def extract_timestep(filename):
+            match = re.search(r'_(\d+)\.pvtu$', filename)
+            return int(match.group(1)) if match else 0
+
+        files = sorted(glob(vtk_pattern), key=extract_timestep)
 
         if not files:
             raise FileNotFoundError(f"No files found: {vtk_pattern}")
@@ -472,7 +484,7 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         load_last_n = config.get('load_last_n_timesteps', True)
 
         if use_shared_octree and load_last_n:
-            # NEW STRATEGY: Load LAST N timesteps for revolution cycle
+            # Load LAST N timesteps for revolution cycle
             # The shared octree factory will handle refinement steps separately
             print(f"   🔧 Shared octree strategy: loading LAST {max_timesteps} timesteps (revolution cycle)")
             if len(files) >= max_timesteps:
@@ -570,66 +582,80 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
         connectivity = np.array(connectivity, dtype=np.int32)
         print(f"   Elements: {connectivity.shape[0]} tetrahedra")
 
-        # Load velocity data for all timesteps
-        velocity_data = []
-        times = []
-        mesh_sizes = []  # Track mesh size per timestep
+        # Check which octree implementation to use
+        # NEW DEFAULT: SharedOctree with direct JAX interpolation (memory-efficient, AMR-compatible)
+        # LEGACY: Optimized monolithic octree (only for stable mesh, user must explicitly enable)
+        use_legacy_octree = config.get('use_legacy_octree', False)
+        use_shared_octree = not use_legacy_octree  # SharedOctree is now the default!
 
-        for idx, filename in enumerate(files_to_load):
-            reader = vtk.vtkXMLPUnstructuredGridReader()
-            reader.SetFileName(filename)
-            reader.Update()
-            mesh = reader.GetOutput()
+        if use_shared_octree:
+            # Shared octree with JAX direct interpolation (DEFAULT MODE)
+            print(f"🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)")
 
-            # Get velocity field (stored as 'Displacement')
-            point_data = mesh.GetPointData()
-            vel_array = None
+            # For shared octree, we want to use ALL files including refinement steps
+            # This ensures the coarse octree is built from the complete mesh evolution
+            # Times will be extracted from filenames by the field class
+            velocity_data = None
+            points = None
+            connectivity = None
+            times = None  # Will be extracted by field class
 
-            for name in ['Displacement', 'displacement', 'Velocity', 'velocity']:
-                if point_data.HasArray(name):
-                    vel_array = point_data.GetArray(name)
-                    break
+            print(f"✅ Prepared {len(all_files)} timesteps for on-demand loading (including refinement steps)")
+        else:
+            # LEGACY MODE: Optimized monolithic octree (user explicitly requested)
+            print(f"⚠️  Using LEGACY OCTREE mode (monolithic, stable mesh only)")
+            print(f"📂 Pre-loading velocity data for {len(files_to_load)} timesteps...")
+            velocity_data = []
+            times = []
+            mesh_sizes = []  # Track mesh size per timestep
 
-            if vel_array is None:
-                raise ValueError(f"No velocity field found in {filename}")
+            for idx, filename in enumerate(files_to_load):
+                reader = vtk.vtkXMLPUnstructuredGridReader()
+                reader.SetFileName(filename)
+                reader.Update()
+                mesh = reader.GetOutput()
 
-            velocity = vtk_to_numpy(vel_array).astype(np.float32)
+                # Get velocity field (stored as 'Displacement')
+                point_data = mesh.GetPointData()
+                vel_array = None
 
-            # Ensure 3D
-            if velocity.shape[1] == 2:
-                velocity = np.column_stack([velocity, np.zeros(velocity.shape[0])])
+                for name in ['Displacement', 'displacement', 'Velocity', 'velocity']:
+                    if point_data.HasArray(name):
+                        vel_array = point_data.GetArray(name)
+                        break
 
-            velocity_data.append(velocity)
-            mesh_sizes.append(velocity.shape[0])
+                if vel_array is None:
+                    raise ValueError(f"No velocity field found in {filename}")
 
-            # Extract time from filename
-            import re
-            match = re.search(r'_(\d+)\.pvtu$', filename)
-            if match:
-                times.append(float(match.group(1)))
-            else:
-                times.append(float(idx))
+                velocity = vtk_to_numpy(vel_array).astype(np.float32)
 
-            if (idx + 1) % 10 == 0:
-                print(f"   Loaded {idx + 1}/{len(files_to_load)} timesteps...")
+                # Ensure 3D
+                if velocity.shape[1] == 2:
+                    velocity = np.column_stack([velocity, np.zeros(velocity.shape[0])])
 
-        # Check if all timesteps have the same mesh size
-        unique_sizes = set(mesh_sizes)
-        use_shared_octree = config.get('use_shared_coarse_octree', False)
+                velocity_data.append(velocity)
+                mesh_sizes.append(velocity.shape[0])
 
-        if len(unique_sizes) > 1:
-            size_counts = {}
-            for size in mesh_sizes:
-                size_counts[size] = size_counts.get(size, 0) + 1
+                # Extract time from filename
+                import re
+                match = re.search(r'_(\d+)\.pvtu$', filename)
+                if match:
+                    times.append(float(match.group(1)))
+                else:
+                    times.append(float(idx))
 
-            if use_shared_octree:
-                # AMR detected - shared octree can handle this!
-                print(f"   ⚠️  AMR detected: Mesh size changes across timesteps")
-                print(f"   Different mesh sizes found:")
-                for size, count in sorted(size_counts.items()):
-                    print(f"      - {size} points: {count} timesteps")
-                print(f"   ✅ Using SHARED COARSE OCTREE strategy - AMR is supported!")
-            else:
+                if (idx + 1) % 10 == 0:
+                    print(f"   Loaded {idx + 1}/{len(files_to_load)} timesteps...")
+
+        # Check if all timesteps have the same mesh size (only for non-shared octree)
+        if not use_shared_octree:
+            unique_sizes = set(mesh_sizes)
+
+            if len(unique_sizes) > 1:
+                size_counts = {}
+                for size in mesh_sizes:
+                    size_counts[size] = size_counts.get(size, 0) + 1
+
                 # Not using shared octree - this is an error
                 print(f"   ❌ ERROR: Mesh size changes across timesteps!")
                 print(f"   Different mesh sizes found:")
@@ -637,58 +663,26 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                     print(f"      - {size} points: {count} timesteps")
                 print(f"   This is adaptive mesh refinement (AMR) or remeshing data")
                 print(f"   ")
-                print(f"   💡 SOLUTIONS:")
-                print(f"   1. Enable shared coarse octree: 'use_shared_coarse_octree': True")
-                print(f"   2. Use only timesteps with consistent mesh (e.g., skip initial refinement)")
-                print(f"   3. Use a different interpolation method (RBF, structured grid)")
-                print(f"   4. Manually interpolate AMR data onto a fixed grid using ParaView/VTK")
+                print(f"   💡 SOLUTION:")
+                print(f"   Remove 'use_legacy_octree': True from your config")
+                print(f"   SharedOctree mode (default) handles AMR data automatically!")
                 print(f"   ")
-                print(f"   Current JAXTrace octree FEM requires fixed mesh topology.")
+                print(f"   Legacy octree requires fixed mesh topology and should only be used")
+                print(f"   when explicitly requested by the user for stable mesh data.")
                 raise ValueError(
-                    f"Inconsistent mesh sizes: {len(unique_sizes)} different sizes found {sorted(unique_sizes)}. "
-                    f"JAXTrace octree FEM requires fixed mesh topology. "
-                    f"Use 'use_shared_coarse_octree': True or --skip-timesteps or prepare data with constant mesh."
+                    f"Inconsistent mesh sizes in LEGACY mode: {len(unique_sizes)} different sizes found {sorted(unique_sizes)}. "
+                    f"Legacy octree requires fixed mesh topology. "
+                    f"Use default SharedOctree mode (remove 'use_legacy_octree': True) for AMR data."
                 )
 
-        # Convert times to array (before filtering)
-        times_all = np.array(times, dtype=np.float32)
-
-        # For shared octree with AMR, use only timesteps with the most common mesh size
-        # For regular octree, convert to uniform array
-        use_shared_octree = config.get('use_shared_coarse_octree', False)
-
-        if use_shared_octree and len(unique_sizes) > 1:
-            # AMR data - use only timesteps with most common mesh size
-            # Find most common size
-            size_counts = {}
-            for size in mesh_sizes:
-                size_counts[size] = size_counts.get(size, 0) + 1
-
-            most_common_size = max(size_counts.items(), key=lambda x: x[1])[0]
-            n_common = size_counts[most_common_size]
-
-            print(f"✅ AMR detected: using {n_common}/{len(velocity_data)} timesteps with common mesh size ({most_common_size} points)")
-
-            # Filter to keep only timesteps with most common size
-            filtered_data = []
-            filtered_times = []
-            for i, (vel, size) in enumerate(zip(velocity_data, mesh_sizes)):
-                if size == most_common_size:
-                    filtered_data.append(vel)
-                    filtered_times.append(times_all[i])
-
-            velocity_data = np.array(filtered_data, dtype=np.float32)  # (T_filtered, N, 3)
-            times = np.array(filtered_times, dtype=np.float32)
-            print(f"✅ Loaded velocity data: {velocity_data.shape} ({n_common} timesteps, mesh size {most_common_size})")
-        else:
             # Uniform mesh - convert to single array
             velocity_data = np.array(velocity_data, dtype=np.float32)  # (T, N, 3)
-            times = times_all
+            times = np.array(times, dtype=np.float32)
             print(f"✅ Loaded velocity data: {velocity_data.shape}")
 
-        # Calculate time interval from data
+        # Calculate time interval from data (only for non-shared octree)
         data_time_interval = None
-        if len(times) >= 2:
+        if not use_shared_octree and len(times) >= 2:
             time_intervals = np.diff(times)
             mean_dt = np.mean(time_intervals)
             std_dt = np.std(time_intervals)
@@ -707,22 +701,22 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 print(f"   ✅ Uniform time steps: dt = {mean_dt:.6f}")
                 data_time_interval = mean_dt
 
-        # Create octree FEM field (with optional shared coarse octree)
+        # Create octree FEM field
         if use_shared_octree:
-            print(f"🌲 Using SHARED COARSE OCTREE strategy (AMR optimized)")
+            # DEFAULT: SharedOctree with JAX direct interpolation
+            print(f"🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...")
             from jaxtrace.fields.shared_octree_fem_field import create_shared_octree_fem_field
 
-            # Pass ALL files so factory can access refinement steps
+            # Pass mesh files, no pre-loaded data!
+            # Use all_files (including refinement) for octree building and tracking
             field = create_shared_octree_fem_field(
-                data=velocity_data,
-                times=times,
-                positions=points,
-                connectivity=connectivity,
-                mesh_files=all_files,  # ALL files including refinement steps!
+                mesh_files=all_files,  # ALL files including refinement steps
+                times=None,  # Will be extracted from filenames
                 user_config=config
             )
         else:
-            print(f"🌲 Creating OPTIMIZED octree FEM field...")
+            # LEGACY: Monolithic optimized octree (user explicitly requested)
+            print(f"🌲 Creating LEGACY OPTIMIZED octree FEM field...")
             field = OctreeFEMTimeSeriesFieldOptimized(
                 data=velocity_data,
                 times=times,
@@ -734,20 +728,21 @@ def create_or_load_velocity_field(data_pattern=None, max_timesteps=40,
                 max_depth=max_octree_depth
             )
 
-        # Convert to JAX arrays on GPU
-        print(f"🔄 Converting to GPU...")
-        field.data = jnp.array(field.data)
-        field.positions = jnp.array(field.positions)
-        field.times = jnp.array(field.times)
-        field._data_dev = jax.device_put(field.data)
-        field._times_dev = jax.device_put(field.times)
-        field._pos_dev = jax.device_put(field.positions)
+            # Convert to JAX arrays on GPU (only for non-shared octree)
+            print(f"🔄 Converting to GPU...")
+            field.data = jnp.array(field.data)
+            field.positions = jnp.array(field.positions)
+            field.times = jnp.array(field.times)
+            field._data_dev = jax.device_put(field.data)
+            field._times_dev = jax.device_put(field.times)
+            field._pos_dev = jax.device_put(field.positions)
 
-        data_mb = field.data.nbytes / 1024 / 1024
-        print(f"✅ Field on GPU: {data_mb:.1f} MB")
+            data_mb = field.data.nbytes / 1024 / 1024
+            print(f"✅ Field on GPU: {data_mb:.1f} MB")
 
-        # Store data time interval in field object
-        field._data_time_interval = data_time_interval
+        # Store data time interval in field object (if available)
+        if 'data_time_interval' in locals():
+            field._data_time_interval = data_time_interval
 
         print(f"✅ Loaded octree FEM field: {field}")
         return field
@@ -1506,7 +1501,7 @@ if __name__ == "__main__":
         # -------------------------------------------------------------------------
         # Data Loading
         # -------------------------------------------------------------------------
-        'data_pattern': "/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu",
+        'data_pattern': "/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu",#"/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_*.pvtu",#
         'max_timesteps_to_load': 40,  # Number of LAST timesteps to load for revolution cycle tracking
 
         # For adaptive mesh refinement (AMR) data:
@@ -1522,21 +1517,35 @@ if __name__ == "__main__":
         'use_advanced_element_search': True,  # Check all elements, select best (more accurate)
 
         # -------------------------------------------------------------------------
-        # Shared Coarse Octree (for AMR data with variable mesh)
+        # Octree Implementation Selection
         # -------------------------------------------------------------------------
-        'use_shared_coarse_octree': True,  # Enable shared coarse octree strategy
+        # DEFAULT: SharedOctree with JAX direct interpolation (AMR-compatible, memory-efficient)
+        # Set 'use_legacy_octree': True ONLY if you need the old monolithic octree (stable mesh only)
+
+        # 'use_legacy_octree': False,  # Use legacy optimized octree (stable mesh only)
+                                       # Default: False (uses SharedOctree)
+                                       # Set to True ONLY for stable mesh data if needed
+
+        # -------------------------------------------------------------------------
+        # SharedOctree Configuration (DEFAULT MODE)
+        # -------------------------------------------------------------------------
         'n_refinement_steps': None,         # Number of refinement steps (None = auto-detect)
-        'n_coarse_levels': 6,               # Depth of shared coarse structure (levels 0-6 are static)
-        'enable_fine_structure_reuse': True,  # Enable 92.5% memory savings through reuse
+        'n_coarse_levels': 6,               # Depth of shared coarse structure (levels 0-5 are static)
+        'enable_fine_structure_reuse': True,  # Enable 97.5% memory savings through reuse
         'revolution_timesteps': 40,         # Number of revolution cycle timesteps to use (last N)
+
+        # JAX Direct Interpolation (OPTIMIZED - Now enabled by default!)
+        # 'use_direct_interpolation': True,   # Default: True (uses JAX direct mode, ~1 MB octrees)
+                                              # Set to False for legacy third octree (5-8 GB) if needed
+                                              # FIXED: Removed nested JIT, arrays passed as args
 
         # -------------------------------------------------------------------------
         # Particle Seeding
         # -------------------------------------------------------------------------
         'particle_concentrations': {
-            'x': 60,  # Particles per unit length in X
-            'y': 50,  # Particles per unit length in Y
-            'z': 15   # Particles per unit length in Z
+            'x': 40,  # Particles per unit length in X
+            'y': 70,  # Particles per unit length in Y
+            'z': 40   # Particles per unit length in Z
         },
 
         # Particle distribution type: 'uniform', 'gaussian', 'random'
@@ -1550,18 +1559,18 @@ if __name__ == "__main__":
         },
 
         # Option 1: Explicit bounds [min_xyz, max_xyz]
-        # 'particle_bounds': [
-        #     np.array([-0.03, -0.02, -0.008]),
-        #     np.array([0.01, 0.02, 0.0])
-        # ],
+        'particle_bounds': [
+            np.array([-0.026, -0.023, -0.01]),
+            np.array([-0.01, 0.023, 0.0])
+        ],
 
         # Option 2: Fractional bounds (fraction of domain)
         # Example: Seed particles only in first 20% of X domain
-        'particle_bounds_fraction': {
-            'x': (0.1, 0.3),  # Full X range
-            'y': (0.0, 1.0),  # Full Y range
-            'z': (0.0, 1.0)   # Full Z range
-        },
+        # 'particle_bounds_fraction': {
+        #     'x': (0.1, 0.3),  # Full X range
+        #     'y': (0.0, 1.0),  # Full Y range
+        #     'z': (0.0, 1.0)   # Full Z range
+        # },
 
         # -------------------------------------------------------------------------
         # Tracking Parameters
@@ -1569,7 +1578,7 @@ if __name__ == "__main__":
         'n_timesteps': 2000,         # Number of tracking timesteps
         'dt': 0.0025,                  # Time step size (ignored if use_data_dt=True)
         'use_data_dt': False,          # Use time interval from VTK files (overrides dt)
-        'time_span': (0.0, 6.25),      # Simulation time range (t_start, t_end)
+        'time_span': (120,159),#(0.0, 6.25),      # Simulation time range (t_start, t_end)
         'batch_size': 10000,            # Particles per batch
         'integrator': 'rk4',           # Integration method: 'rk4', 'euler', etc.
 
@@ -1581,7 +1590,7 @@ if __name__ == "__main__":
         # Inlet boundary (first wall along flow axis)
         # Options: 'continuous' (inject particles), 'none' (no injection),
         #          'reflective', 'periodic'
-        'boundary_inlet': 'continuous',
+        'boundary_inlet': 'none',#'continuous',
 
         # Outlet boundary (last wall along flow axis)
         # Options: 'absorbing' (particles exit), 'reflective', 'periodic'

@@ -1,0 +1,136 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 20
+🔍 Auto-detect stable mesh: enabled
+⏭️  Skip initial timesteps: 30
+🌲 Octree: max_elements=32, max_depth=12
+🎯 Particles: {'x': 30, 'y': 40, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 1000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=none, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.6.2
+   ✅ VTK library: v9.5.0
+   ✅ SciPy: v1.16.0 (spatial indexing enabled)
+   ✅ Plotly: v6.2.0 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.037708282470703, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 3064627200, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔧 Using TEMPORAL BATCHING with Grid Hash (for AMR data)
+   Window size: 3 velocity timesteps
+   Grid resolution: 16^3 cells
+📁 Temporal batching field initialized:
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Files found: 160
+   Grid resolution: 16³ cells
+   Cache size: 3 timesteps
+✅ Temporal batching field created: 160 VTK files found
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Loading first timestep to determine field bounds...
+   Field bounds: [-0.0306  -0.02346 -0.0101 ] to [0.0306  0.02346 0.0001 ]
+🎯 Generating particles...
+   Domain size: X=0.0612, Y=0.0469, Z=0.0102
+   Using fractional particle bounds: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+   Grid resolution: 30 x 40 x 15 = 18000 particles
+✅ Generated 18000 particles with uniform grid distribution
+🚪 Boundary conditions:
+   All boundaries: Reflective
+   ⚠️  Note: Temporal batching currently uses reflective boundaries
+   Advanced boundary conditions (continuous inlet) will be added in future release
+🚀 Setting up temporal batching tracker...
+   💾 Recording positions only (velocities not stored)
+🚀 Temporal batching tracker initialized:
+   Window size: 3 velocity timesteps
+   Record velocities: False
+   Assuming data time interval: 0.001000
+🏃 Running temporal batching particle tracking...
+   Tracking 18000 particles for 1000 timesteps
+   Time span: (0.0, 6.25), dt=0.0025
+   Data dt: 0.001, Temporal window size: 3 velocity timesteps
+🏃 Temporal batching tracking:
+   Particles: 18,000
+   Tracking steps: 1,000
+   dt_tracking: 0.0025
+   dt_data: 0.001
+   Data timesteps needed: 160 / 160
+   Temporal windows: 54
+
+   Window 1/54:
+      Data timesteps: 0 to 2
+      Tracking steps: 0 to 2
+      Loaded 3 timesteps in 47.94s
+2025-10-09 09:44:00.703814: W external/xla/xla/hlo/transforms/simplifiers/hlo_rematerialization.cc:3023] Can't reduce memory use below 93.96MiB (98525184 bytes) by rematerialization; only reduced to 1.38GiB (1480458240 bytes), down from 1.38GiB (1480458240 bytes) originally
+2025-10-09 09:44:11.059177: W external/xla/xla/tsl/framework/bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 1.38GiB (rounded to 1480458240)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+2025-10-09 09:44:11.059283: W external/xla/xla/tsl/framework/bfc_allocator.cc:512] *************************************************************__________________________*____***x__**
+E1009 09:44:11.059301 2103933 pjrt_stream_executor_client.cc:2916] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 1480458240 bytes. [tf-allocator-allocation-error='']
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 2051, in <module>
+    main(config=user_config)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 397, in main
+    trajectory, strategy_info, initial_positions = execute_temporal_batching_tracking(
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1269, in execute_temporal_batching_tracking
+    trajectory_data = tracker.track_particles(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/temporal_tracker.py", line 146, in track_particles
+    interpolators = [create_grid_hash_interpolator(mesh) for mesh in meshes]
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/grid_hash_field.py", line 297, in create_grid_hash_interpolator
+    cell_elements_jax = jnp.array(mesh.cell_elements)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/numpy/array.py", line 268, in array
+    out_array: Array = lax._convert_element_type(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/lax/lax.py", line 1726, in _convert_element_type
+    return convert_element_type_p.bind(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/core.py", line 536, in bind
+    return self._true_bind(*args, **params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/core.py", line 552, in _true_bind
+    return self.bind_with_trace(prev_trace, args, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/lax/lax.py", line 4902, in _convert_element_type_bind_with_trace
+    operand = core.Primitive.bind_with_trace(convert_element_type_p, trace, args, params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/core.py", line 562, in bind_with_trace
+    return trace.process_primitive(self, args, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/core.py", line 1066, in process_primitive
+    return primitive.impl(*args, **params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.12/site-packages/jax/_src/dispatch.py", line 91, in apply_primitive
+    outs = fun(*args)
+           ^^^^^^^^^^
+jaxlib._jax.XlaRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 1480458240 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

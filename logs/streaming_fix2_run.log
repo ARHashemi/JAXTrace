@@ -1,0 +1,392 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 20
+🔍 Auto-detect stable mesh: enabled
+⏭️  Skip initial timesteps: 30
+🌲 Octree: max_elements=32, max_depth=12
+🎯 Particles: {'x': 30, 'y': 40, 'z': 15}, distribution=uniform
+📦 Particle region: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+🏃 Tracking: 1000 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=none, outlet=absorbing
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.6.2
+   ✅ VTK library: v9.5.0
+   ✅ SciPy: v1.16.0 (spatial indexing enabled)
+   ✅ Plotly: v6.2.0 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.037708282470703, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 3064627200, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔧 Using TEMPORAL BATCHING with Grid Hash (for AMR data)
+   Window size: 3 velocity timesteps
+   Grid resolution: 16^3 cells
+📁 Temporal batching field initialized:
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Files found: 160
+   Grid resolution: 16³ cells
+   Cache size: 3 timesteps
+✅ Temporal batching field created: 160 VTK files found
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Loading first timestep to determine field bounds...
+   Field bounds: [-0.0306  -0.02346 -0.0101 ] to [0.0306  0.02346 0.0001 ]
+🎯 Generating particles...
+   Domain size: X=0.0612, Y=0.0469, Z=0.0102
+   Using fractional particle bounds: {'x': (0.1, 0.25), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+   Grid resolution: 30 x 40 x 15 = 18000 particles
+✅ Generated 18000 particles with uniform grid distribution
+🚪 Boundary conditions:
+   All boundaries: Reflective
+   ⚠️  Note: Temporal batching currently uses reflective boundaries
+   Advanced boundary conditions (continuous inlet) will be added in future release
+🚀 Setting up temporal batching tracker...
+   💾 Recording positions only (velocities not stored)
+🚀 Temporal batching tracker initialized:
+   Window size: 3 velocity timesteps
+   Record velocities: False
+   Assuming data time interval: 0.001000
+🏃 Running temporal batching particle tracking...
+   Tracking 18000 particles for 1000 timesteps
+   Time span: (0.0, 6.25), dt=0.0025
+   Data dt: 0.001, Temporal window size: 3 velocity timesteps
+🏃 Temporal batching tracking:
+   Particles: 18,000
+   Tracking steps: 1,000
+   dt_tracking: 0.0025
+   dt_data: 0.001
+   Data timesteps needed: 160 / 160
+   Temporal windows: 54
+
+   Window 1/54:
+      Data timesteps: 0 to 2
+      Tracking steps: 0 to 2
+      Loaded 3 timesteps in 46.82s
+      Computed 3 steps in 79.34s
+      Speed: 681 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.3%    Window 2/54:
+      Data timesteps: 3 to 5
+      Tracking steps: 3 to 3
+      Loaded 3 timesteps in 145.85s
+      Computed 1 steps in 0.07s
+      Speed: 265905 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.4%    Window 3/54:
+      Data timesteps: 6 to 8
+      Tracking steps: 4 to 4
+      Loaded 3 timesteps in 144.47s
+      Computed 1 steps in 0.00s
+      Speed: 12198654 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.5%    Window 4/54:
+      Data timesteps: 9 to 11
+      Tracking steps: 5 to 5
+      Loaded 3 timesteps in 144.16s
+      Computed 1 steps in 0.00s
+      Speed: 11715933 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.6%    Window 5/54:
+      Data timesteps: 12 to 14
+      Tracking steps: 6 to 6
+      Loaded 3 timesteps in 142.34s
+      Computed 1 steps in 0.00s
+      Speed: 13116309 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.7%    Window 6/54:
+      Data timesteps: 15 to 17
+      Tracking steps: 7 to 8
+      Loaded 3 timesteps in 141.48s
+      Computed 2 steps in 29.36s
+      Speed: 1226 particle-steps/sec
+   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.9%    Window 7/54:
+      Data timesteps: 18 to 20
+      Tracking steps: 9 to 9
+      Loaded 3 timesteps in 141.03s
+      Computed 1 steps in 0.00s
+      Speed: 12985461 particle-steps/sec
+   Window 8/54:
+      Data timesteps: 21 to 23
+      Tracking steps: 10 to 10
+      Loaded 3 timesteps in 141.18s
+      Computed 1 steps in 0.00s
+      Speed: 11359836 particle-steps/sec
+   Window 9/54:
+      Data timesteps: 24 to 26
+      Tracking steps: 11 to 11
+      Loaded 3 timesteps in 141.11s
+      Computed 1 steps in 0.00s
+      Speed: 13942285 particle-steps/sec
+   Window 10/54:
+      Data timesteps: 27 to 29
+      Tracking steps: 12 to 12
+      Loaded 3 timesteps in 141.46s
+      Computed 1 steps in 0.00s
+      Speed: 14017355 particle-steps/sec
+   Window 11/54:
+      Data timesteps: 30 to 32
+      Tracking steps: 13 to 14
+      Loaded 3 timesteps in 139.77s
+      Computed 2 steps in 28.87s
+      Speed: 1247 particle-steps/sec
+   Window 12/54:
+      Data timesteps: 33 to 35
+      Tracking steps: 15 to 15
+      Loaded 3 timesteps in 140.93s
+      Computed 1 steps in 0.00s
+      Speed: 13792012 particle-steps/sec
+   Window 13/54:
+      Data timesteps: 36 to 38
+      Tracking steps: 16 to 16
+      Loaded 3 timesteps in 140.00s
+      Computed 1 steps in 0.00s
+      Speed: 14358591 particle-steps/sec
+   Window 14/54:
+      Data timesteps: 39 to 41
+      Tracking steps: 17 to 17
+      Loaded 3 timesteps in 140.59s
+      Computed 1 steps in 0.00s
+      Speed: 14148702 particle-steps/sec
+   Window 15/54:
+      Data timesteps: 42 to 44
+      Tracking steps: 18 to 18
+      Loaded 3 timesteps in 139.99s
+      Computed 1 steps in 0.00s
+      Speed: 13129995 particle-steps/sec
+   Window 16/54:
+      Data timesteps: 45 to 47
+      Tracking steps: 19 to 20
+      Loaded 3 timesteps in 139.76s
+      Computed 2 steps in 29.12s
+      Speed: 1236 particle-steps/sec
+   Window 17/54:
+      Data timesteps: 48 to 50
+      Tracking steps: 21 to 21
+      Loaded 3 timesteps in 140.03s
+      Computed 1 steps in 0.00s
+      Speed: 13378960 particle-steps/sec
+   Window 18/54:
+      Data timesteps: 51 to 53
+      Tracking steps: 22 to 22
+      Loaded 3 timesteps in 140.33s
+      Computed 1 steps in 0.00s
+      Speed: 12091203 particle-steps/sec
+   Window 19/54:
+      Data timesteps: 54 to 56
+      Tracking steps: 23 to 23
+      Loaded 3 timesteps in 139.96s
+      Computed 1 steps in 0.00s
+      Speed: 13412235 particle-steps/sec
+   Window 20/54:
+      Data timesteps: 57 to 59
+      Tracking steps: 24 to 24
+      Loaded 3 timesteps in 140.09s
+      Computed 1 steps in 0.00s
+      Speed: 12316064 particle-steps/sec
+   Window 21/54:
+      Data timesteps: 60 to 62
+      Tracking steps: 25 to 26
+      Loaded 3 timesteps in 140.47s
+      Computed 2 steps in 28.84s
+      Speed: 1248 particle-steps/sec
+   Window 22/54:
+      Data timesteps: 63 to 65
+      Tracking steps: 27 to 27
+      Loaded 3 timesteps in 140.08s
+      Computed 1 steps in 0.00s
+      Speed: 12952045 particle-steps/sec
+   Window 23/54:
+      Data timesteps: 66 to 68
+      Tracking steps: 28 to 28
+      Loaded 3 timesteps in 139.72s
+      Computed 1 steps in 0.00s
+      Speed: 13007835 particle-steps/sec
+   Window 24/54:
+      Data timesteps: 69 to 71
+      Tracking steps: 29 to 29
+      Loaded 3 timesteps in 139.70s
+      Computed 1 steps in 0.00s
+      Speed: 13919150 particle-steps/sec
+   Window 25/54:
+      Data timesteps: 72 to 74
+      Tracking steps: 30 to 30
+      Loaded 3 timesteps in 94.74s
+      Computed 1 steps in 0.00s
+      Speed: 14555132 particle-steps/sec
+   Window 26/54:
+      Data timesteps: 75 to 77
+      Tracking steps: 31 to 32
+      Loaded 3 timesteps in 139.18s
+      Computed 2 steps in 29.04s
+      Speed: 1240 particle-steps/sec
+   Window 27/54:
+      Data timesteps: 78 to 80
+      Tracking steps: 33 to 33
+      Loaded 3 timesteps in 140.08s
+      Computed 1 steps in 0.00s
+      Speed: 15968162 particle-steps/sec
+   Window 28/54:
+      Data timesteps: 81 to 83
+      Tracking steps: 34 to 34
+      Loaded 3 timesteps in 95.44s
+      Computed 1 steps in 0.00s
+      Speed: 12855010 particle-steps/sec
+   Window 29/54:
+      Data timesteps: 84 to 86
+      Tracking steps: 35 to 35
+      Loaded 3 timesteps in 139.93s
+      Computed 1 steps in 0.00s
+      Speed: 21613934 particle-steps/sec
+   Window 30/54:
+      Data timesteps: 87 to 89
+      Tracking steps: 36 to 36
+      Loaded 3 timesteps in 140.27s
+      Computed 1 steps in 0.00s
+      Speed: 14847094 particle-steps/sec
+   Window 31/54:
+      Data timesteps: 90 to 92
+      Tracking steps: 37 to 38
+      Loaded 3 timesteps in 139.67s
+      Computed 2 steps in 28.61s
+      Speed: 1258 particle-steps/sec
+   Window 32/54:
+      Data timesteps: 93 to 95
+      Tracking steps: 39 to 39
+      Loaded 3 timesteps in 98.78s
+      Computed 1 steps in 0.00s
+      Speed: 12980996 particle-steps/sec
+   Window 33/54:
+      Data timesteps: 96 to 98
+      Tracking steps: 40 to 40
+      Loaded 3 timesteps in 138.84s
+      Computed 1 steps in 0.00s
+      Speed: 12466557 particle-steps/sec
+   Window 34/54:
+      Data timesteps: 99 to 101
+      Tracking steps: 41 to 41
+      Loaded 3 timesteps in 140.95s
+      Computed 1 steps in 0.00s
+      Speed: 13284792 particle-steps/sec
+   Window 35/54:
+      Data timesteps: 102 to 104
+      Tracking steps: 42 to 42
+      Loaded 3 timesteps in 139.86s
+      Computed 1 steps in 0.00s
+      Speed: 13457660 particle-steps/sec
+   Window 36/54:
+      Data timesteps: 105 to 107
+      Tracking steps: 43 to 44
+      Loaded 3 timesteps in 109.15s
+      Computed 2 steps in 28.98s
+      Speed: 1242 particle-steps/sec
+   Window 37/54:
+      Data timesteps: 108 to 110
+      Tracking steps: 45 to 45
+      Loaded 3 timesteps in 139.73s
+      Computed 1 steps in 0.00s
+      Speed: 21663550 particle-steps/sec
+   Window 38/54:
+      Data timesteps: 111 to 113
+      Tracking steps: 46 to 46
+      Loaded 3 timesteps in 140.62s
+      Computed 1 steps in 0.00s
+      Speed: 13709365 particle-steps/sec
+   Window 39/54:
+      Data timesteps: 114 to 116
+      Tracking steps: 47 to 47
+      Loaded 3 timesteps in 140.34s
+      Computed 1 steps in 0.00s
+      Speed: 12384756 particle-steps/sec
+   Window 40/54:
+      Data timesteps: 117 to 119
+      Tracking steps: 48 to 48
+      Loaded 3 timesteps in 140.50s
+      Computed 1 steps in 0.00s
+      Speed: 14557939 particle-steps/sec
+   Window 41/54:
+      Data timesteps: 120 to 122
+      Tracking steps: 49 to 50
+      Loaded 3 timesteps in 139.49s
+      Computed 2 steps in 28.79s
+      Speed: 1250 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.1%    Window 42/54:
+      Data timesteps: 123 to 125
+      Tracking steps: 51 to 51
+      Loaded 3 timesteps in 140.31s
+      Computed 1 steps in 0.00s
+      Speed: 13233562 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.2%    Window 43/54:
+      Data timesteps: 126 to 128
+      Tracking steps: 52 to 52
+      Loaded 3 timesteps in 139.97s
+      Computed 1 steps in 0.00s
+      Speed: 13102650 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.3%    Window 44/54:
+      Data timesteps: 129 to 131
+      Tracking steps: 53 to 53
+      Loaded 3 timesteps in 139.88s
+      Computed 1 steps in 0.00s
+      Speed: 14164629 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.4%    Window 45/54:
+      Data timesteps: 132 to 134
+      Tracking steps: 54 to 54
+      Loaded 3 timesteps in 141.08s
+      Computed 1 steps in 0.00s
+      Speed: 11295253 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.5%    Window 46/54:
+      Data timesteps: 135 to 137
+      Tracking steps: 55 to 56
+      Loaded 3 timesteps in 140.48s
+      Computed 2 steps in 29.21s
+      Speed: 1232 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.7%    Window 47/54:
+      Data timesteps: 138 to 140
+      Tracking steps: 57 to 57
+      Loaded 3 timesteps in 140.22s
+      Computed 1 steps in 0.00s
+      Speed: 12595508 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.8%    Window 48/54:
+      Data timesteps: 141 to 143
+      Tracking steps: 58 to 58
+      Loaded 3 timesteps in 140.76s
+      Computed 1 steps in 0.00s
+      Speed: 13620327 particle-steps/sec
+   Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.9%    Window 49/54:
+      Data timesteps: 144 to 146
+      Tracking steps: 59 to 59
+      Loaded 3 timesteps in 140.42s
+      Computed 1 steps in 0.00s
+      Speed: 14391436 particle-steps/sec
+   Window 50/54:
+      Data timesteps: 147 to 149
+      Tracking steps: 60 to 60
+      Loaded 3 timesteps in 140.23s
+      Computed 1 steps in 0.00s
+      Speed: 14569176 particle-steps/sec
+   Window 51/54:
+      Data timesteps: 150 to 152
+      Tracking steps: 61 to 62
+      Loaded 3 timesteps in 140.45s
+      Computed 2 steps in 28.89s
+      Speed: 1246 particle-steps/sec
+   Window 52/54:
+      Data timesteps: 153 to 155
+      Tracking steps: 63 to 63
