@@ -1035,6 +1035,11 @@ def execute_particle_tracking(field, concentrations=None, particle_distribution=
     print(f"✅ Tracking completed in {tracking_time:.2f} seconds")
     print(f"   Trajectory: {trajectory}")
 
+    # Phase 1: Print element cache statistics
+    if hasattr(field, 'print_cache_statistics'):
+        print("\n")
+        field.print_cache_statistics()
+
     return trajectory, strategy_info, seeds
 
 
