@@ -1,6 +1,11 @@
-✅ Enhanced VTK I/O available
 /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
   from .hdf5_io import H5Series
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:206: UserWarning: ⚠️  Continuous inlet boundary detected - disabling JIT compilation.
+   This boundary condition uses numpy operations that are not JAX-compatible.
+   Performance will be slower but results remain accurate.
+   For best performance, use 'reflective' or 'periodic' boundaries.
+  warnings.warn(
+✅ Enhanced VTK I/O available
 ✅ HDF5 I/O available
 JAXTrace v0.1.0
 ================================================================================
@@ -11,7 +16,7 @@ Mode: JAX direct interpolation
 ================================================================================
 
 Initial resources:
-  RAM: 12.19 GB
+  RAM: 13.99 GB
   GPU Memory: 73 MB
   GPU Util: 0%
 
@@ -141,7 +146,7 @@ Fine octree building complete:
   Unique structures: 1
   Reuse rate: 97.5%
   Memory savings: 40.0x
-  Time: 108.7s
+  Time: 108.0s
 
 ======================================================================
 BUILD COMPLETE
@@ -158,8 +163,9 @@ Reuse Statistics:
   Reuse rate: 97.5%
   Memory savings: 40.0x
 
-Total build time: 113.9s
+Total build time: 113.2s
 ======================================================================
+💾 Element ID caching enabled (Phase 1 optimization)
 📂 Loading reference timestep 106 for mesh structure...
    (Using revolution cycle mesh, not refinement)
    Total files: 146
@@ -182,72 +188,115 @@ Total build time: 113.9s
    X-axis: Inlet=continuous, Outlet=absorbing
    Other axes: Reflective boundaries
 🚀 Setting up particle tracker...
-/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:206: UserWarning: ⚠️  Continuous inlet boundary detected - disabling JIT compilation.
-   This boundary condition uses numpy operations that are not JAX-compatible.
-   Performance will be slower but results remain accurate.
-   For best performance, use 'reflective' or 'periodic' boundaries.
-  warnings.warn(
 🏃 Running particle tracking...
    Tracking 500 particles for 2000 timesteps
-   Time span: (0.0, 4.0), dt=0.0025
+   Time span: (120, 159), dt=0.0025
+Tracking: 0.1%   Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.1%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.1%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.2%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.2%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.3%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.3%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.4%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.4%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.5%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.5%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.6%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.6%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.7%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.7%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.8%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.8%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.9%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   0.9%    Progress: |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   1.0%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.0%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.1%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.1%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.2%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.2%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.3%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.3%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.4%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.4%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.5%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.5%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.6%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.6%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.7%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.7%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.8%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.8%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.9%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   5.9%    Progress: |█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   6.0%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.0%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.1%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.1%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.2%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.2%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.3%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.3%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.4%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.4%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.5%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.5%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.6%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.6%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.7%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.7%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.8%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.8%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.9%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  10.9%    Progress: |███░░░░░░░░░░░░░░░░░░░░░░░░░░░|  11.0%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.0%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.1%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.1%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.2%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.2%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.3%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.3%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.4%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.4%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.5%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.5%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.6%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.6%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.7%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.7%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.8%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.8%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.9%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  15.9%    Progress: |████░░░░░░░░░░░░░░░░░░░░░░░░░░|  16.0%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.0%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.1%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.1%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.2%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.2%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.3%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.3%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.4%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.4%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.5%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.5%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.6%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.6%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.7%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.7%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.8%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.8%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.9%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  20.9%    Progress: |██████░░░░░░░░░░░░░░░░░░░░░░░░|  21.0%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.0%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.1%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.1%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.2%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.2%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.3%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.3%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.4%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.4%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.5%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.5%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.6%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.6%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.7%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.7%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.8%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.8%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.9%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  25.9%    Progress: |███████░░░░░░░░░░░░░░░░░░░░░░░|  26.0%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.0%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.1%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.1%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.2%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.2%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.3%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.3%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.4%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.4%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.5%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.5%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.6%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.6%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.7%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.7%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.8%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.8%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.9%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  30.9%    Progress: |█████████░░░░░░░░░░░░░░░░░░░░░|  31.0%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.0%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.1%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.1%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.2%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.2%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.3%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.3%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.4%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.4%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.5%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.5%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.6%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.6%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.7%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.7%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.8%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.8%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.9%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  35.9%    Progress: |██████████░░░░░░░░░░░░░░░░░░░░|  36.0%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.0%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.1%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.1%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.2%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.2%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.3%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.3%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.4%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.4%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.5%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.5%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.6%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.6%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.7%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.7%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.8%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.8%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.9%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  40.9%    Progress: |████████████░░░░░░░░░░░░░░░░░░|  41.0%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.0%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.1%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.1%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.2%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.2%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.3%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.3%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.4%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.4%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.5%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.5%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.6%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.6%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.7%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.7%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.8%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.8%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.9%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  45.9%    Progress: |█████████████░░░░░░░░░░░░░░░░░|  46.0%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.0%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.1%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.1%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.2%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.2%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.3%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.3%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.4%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.4%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.5%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.5%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.6%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.6%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.7%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.7%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.8%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.8%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.9%    Progress: |███████████████░░░░░░░░░░░░░░░|  50.9%    Progress: |███████████████░░░░░░░░░░░░░░░|  51.0%    Progress: |████████████████░░░░░░░░░░░░░░|  55.0%    Progress: |████████████████░░░░░░░░░░░░░░|  55.1%    Progress: |████████████████░░░░░░░░░░░░░░|  55.1%    Progress: |████████████████░░░░░░░░░░░░░░|  55.2%    Progress: |████████████████░░░░░░░░░░░░░░|  55.2%    Progress: |████████████████░░░░░░░░░░░░░░|  55.3%    Progress: |████████████████░░░░░░░░░░░░░░|  55.3%    Progress: |████████████████░░░░░░░░░░░░░░|  55.4%    Progress: |████████████████░░░░░░░░░░░░░░|  55.4%    Progress: |████████████████░░░░░░░░░░░░░░|  55.5%    Progress: |████████████████░░░░░░░░░░░░░░|  55.5%    Progress: |████████████████░░░░░░░░░░░░░░|  55.6%    Progress: |████████████████░░░░░░░░░░░░░░|  55.6%    Progress: |████████████████░░░░░░░░░░░░░░|  55.7%    Progress: |████████████████░░░░░░░░░░░░░░|  55.7%    Progress: |████████████████░░░░░░░░░░░░░░|  55.8%    Progress: |████████████████░░░░░░░░░░░░░░|  55.8%    Progress: |████████████████░░░░░░░░░░░░░░|  55.9%    Progress: |████████████████░░░░░░░░░░░░░░|  55.9%    Progress: |████████████████░░░░░░░░░░░░░░|  56.0%    Progress: |██████████████████░░░░░░░░░░░░|  60.0%    Progress: |██████████████████░░░░░░░░░░░░|  60.1%    Progress: |██████████████████░░░░░░░░░░░░|  60.1%    Progress: |██████████████████░░░░░░░░░░░░|  60.2%    Progress: |██████████████████░░░░░░░░░░░░|  60.2%    Progress: |██████████████████░░░░░░░░░░░░|  60.3%    Progress: |██████████████████░░░░░░░░░░░░|  60.3%    Progress: |██████████████████░░░░░░░░░░░░|  60.4%    Progress: |██████████████████░░░░░░░░░░░░|  60.4%    Progress: |██████████████████░░░░░░░░░░░░|  60.5%    Progress: |██████████████████░░░░░░░░░░░░|  60.5%    Progress: |██████████████████░░░░░░░░░░░░|  60.6%    Progress: |██████████████████░░░░░░░░░░░░|  60.6%    Progress: |██████████████████░░░░░░░░░░░░|  60.7%    Progress: |██████████████████░░░░░░░░░░░░|  60.7%    Progress: |██████████████████░░░░░░░░░░░░|  60.8%    Progress: |██████████████████░░░░░░░░░░░░|  60.8%    Progress: |██████████████████░░░░░░░░░░░░|  60.9%    Progress: |██████████████████░░░░░░░░░░░░|  60.9%    Progress: |██████████████████░░░░░░░░░░░░|  61.0%    Progress: |███████████████████░░░░░░░░░░░|  65.0%    Progress: |███████████████████░░░░░░░░░░░|  65.1%    Progress: |███████████████████░░░░░░░░░░░|  65.1%    Progress: |███████████████████░░░░░░░░░░░|  65.2%    Progress: |███████████████████░░░░░░░░░░░|  65.2%    Progress: |███████████████████░░░░░░░░░░░|  65.3%    Progress: |███████████████████░░░░░░░░░░░|  65.3%    Progress: |███████████████████░░░░░░░░░░░|  65.4%    Progress: |███████████████████░░░░░░░░░░░|  65.4%    Progress: |███████████████████░░░░░░░░░░░|  65.5%    Progress: |███████████████████░░░░░░░░░░░|  65.5%    Progress: |███████████████████░░░░░░░░░░░|  65.6%    Progress: |███████████████████░░░░░░░░░░░|  65.6%    Progress: |███████████████████░░░░░░░░░░░|  65.7%    Progress: |███████████████████░░░░░░░░░░░|  65.7%    Progress: |███████████████████░░░░░░░░░░░|  65.8%    Progress: |███████████████████░░░░░░░░░░░|  65.8%    Progress: |███████████████████░░░░░░░░░░░|  65.9%    Progress: |███████████████████░░░░░░░░░░░|  65.9%    Progress: |███████████████████░░░░░░░░░░░|  66.0%    Progress: |█████████████████████░░░░░░░░░|  70.0%    Progress: |█████████████████████░░░░░░░░░|  70.1%    Progress: |█████████████████████░░░░░░░░░|  70.1%    Progress: |█████████████████████░░░░░░░░░|  70.2%    Progress: |█████████████████████░░░░░░░░░|  70.2%    Progress: |█████████████████████░░░░░░░░░|  70.3%    Progress: |█████████████████████░░░░░░░░░|  70.3%    Progress: |█████████████████████░░░░░░░░░|  70.4%    Progress: |█████████████████████░░░░░░░░░|  70.4%    Progress: |█████████████████████░░░░░░░░░|  70.5%    Progress: |█████████████████████░░░░░░░░░|  70.5%    Progress: |█████████████████████░░░░░░░░░|  70.6%    Progress: |█████████████████████░░░░░░░░░|  70.6%    Progress: |█████████████████████░░░░░░░░░|  70.7%    Progress: |█████████████████████░░░░░░░░░|  70.7%    Progress: |█████████████████████░░░░░░░░░|  70.8%    Progress: |█████████████████████░░░░░░░░░|  70.8%    Progress: |█████████████████████░░░░░░░░░|  70.9%    Progress: |█████████████████████░░░░░░░░░|  70.9%    Progress: |█████████████████████░░░░░░░░░|  71.0%    Progress: |██████████████████████░░░░░░░░|  75.0%    Progress: |██████████████████████░░░░░░░░|  75.1%    Progress: |██████████████████████░░░░░░░░|  75.1%    Progress: |██████████████████████░░░░░░░░|  75.2%    Progress: |██████████████████████░░░░░░░░|  75.2%    Progress: |██████████████████████░░░░░░░░|  75.3%    Progress: |██████████████████████░░░░░░░░|  75.3%    Progress: |██████████████████████░░░░░░░░|  75.4%    Progress: |██████████████████████░░░░░░░░|  75.4%    Progress: |██████████████████████░░░░░░░░|  75.5%    Progress: |██████████████████████░░░░░░░░|  75.5%    Progress: |██████████████████████░░░░░░░░|  75.6%    Progress: |██████████████████████░░░░░░░░|  75.6%    Progress: |██████████████████████░░░░░░░░|  75.7%    Progress: |██████████████████████░░░░░░░░|  75.7%    Progress: |██████████████████████░░░░░░░░|  75.8%    Progress: |██████████████████████░░░░░░░░|  75.8%    Progress: |██████████████████████░░░░░░░░|  75.9%    Progress: |██████████████████████░░░░░░░░|  75.9%    Progress: |██████████████████████░░░░░░░░|  76.0%    Progress: |████████████████████████░░░░░░|  80.0%    Progress: |████████████████████████░░░░░░|  80.1%    Progress: |████████████████████████░░░░░░|  80.1%    Progress: |████████████████████████░░░░░░|  80.2%    Progress: |████████████████████████░░░░░░|  80.2%    Progress: |████████████████████████░░░░░░|  80.3%    Progress: |████████████████████████░░░░░░|  80.3%    Progress: |████████████████████████░░░░░░|  80.4%    Progress: |████████████████████████░░░░░░|  80.4%    Progress: |████████████████████████░░░░░░|  80.5%    Progress: |████████████████████████░░░░░░|  80.5%    Progress: |████████████████████████░░░░░░|  80.6%    Progress: |████████████████████████░░░░░░|  80.6%    Progress: |████████████████████████░░░░░░|  80.7%    Progress: |████████████████████████░░░░░░|  80.7%    Progress: |████████████████████████░░░░░░|  80.8%    Progress: |████████████████████████░░░░░░|  80.8%    Progress: |████████████████████████░░░░░░|  80.9%    Progress: |████████████████████████░░░░░░|  80.9%    Progress: |████████████████████████░░░░░░|  81.0%    Progress: |█████████████████████████░░░░░|  85.0%    Progress: |█████████████████████████░░░░░|  85.1%    Progress: |█████████████████████████░░░░░|  85.1%    Progress: |█████████████████████████░░░░░|  85.2%    Progress: |█████████████████████████░░░░░|  85.2%    Progress: |█████████████████████████░░░░░|  85.3%    Progress: |█████████████████████████░░░░░|  85.3%    Progress: |█████████████████████████░░░░░|  85.4%    Progress: |█████████████████████████░░░░░|  85.4%    Progress: |█████████████████████████░░░░░|  85.5%    Progress: |█████████████████████████░░░░░|  85.5%    Progress: |█████████████████████████░░░░░|  85.6%    Progress: |█████████████████████████░░░░░|  85.6%    Progress: |█████████████████████████░░░░░|  85.7%    Progress: |█████████████████████████░░░░░|  85.7%    Progress: |█████████████████████████░░░░░|  85.8%    Progress: |█████████████████████████░░░░░|  85.8%    Progress: |█████████████████████████░░░░░|  85.9%    Progress: |█████████████████████████░░░░░|  85.9%    Progress: |█████████████████████████░░░░░|  86.0%    Progress: |███████████████████████████░░░|  90.0%    Progress: |███████████████████████████░░░|  90.1%    Progress: |███████████████████████████░░░|  90.1%    Progress: |███████████████████████████░░░|  90.2%    Progress: |███████████████████████████░░░|  90.2%    Progress: |███████████████████████████░░░|  90.3%    Progress: |███████████████████████████░░░|  90.3%    Progress: |███████████████████████████░░░|  90.4%    Progress: |███████████████████████████░░░|  90.4%    Progress: |███████████████████████████░░░|  90.5%    Progress: |███████████████████████████░░░|  90.5%    Progress: |███████████████████████████░░░|  90.6%    Progress: |███████████████████████████░░░|  90.6%    Progress: |███████████████████████████░░░|  90.7%    Progress: |███████████████████████████░░░|  90.7%    Progress: |███████████████████████████░░░|  90.8%    Progress: |███████████████████████████░░░|  90.8%    Progress: |███████████████████████████░░░|  90.9%    Progress: |███████████████████████████░░░|  90.9%    Progress: |███████████████████████████░░░|  91.0%    Progress: |████████████████████████████░░|  95.0%    Progress: |████████████████████████████░░|  95.1%    Progress: |████████████████████████████░░|  95.1%    Progress: |████████████████████████████░░|  95.2%    Progress: |████████████████████████████░░|  95.2%    Progress: |████████████████████████████░░|  95.3%    Progress: |████████████████████████████░░|  95.3%    Progress: |████████████████████████████░░|  95.4%    Progress: |████████████████████████████░░|  95.4%    Progress: |████████████████████████████░░|  95.5%    Progress: |████████████████████████████░░|  95.5%    Progress: |████████████████████████████░░|  95.6%    Progress: |████████████████████████████░░|  95.6%    Progress: |████████████████████████████░░|  95.7%    Progress: |████████████████████████████░░|  95.7%    Progress: |████████████████████████████░░|  95.8%    Progress: |████████████████████████████░░|  95.8%    Progress: |████████████████████████████░░|  95.9%    Progress: |████████████████████████████░░|  95.9%    Progress: |████████████████████████████░░|  96.0%    Progress: |██████████████████████████████| 100.0% 
+
+/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py:125: UserWarning: Explicitly requested dtype int64 requested in astype is not available, and will be truncated to dtype int32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+  return lax_numpy.astype(self, dtype, copy=copy, device=device)
+✅ Tracking completed in 142.80 seconds
+   Trajectory: Trajectory(T=2000, N=500, duration=39.000, memory=22.9MB)
+
+
+
+=== Element Cache Statistics ===
+  Hits:                  0
+  Misses:              500
+  Invalidations:         0
+  Hit Rate:          0.00%
+  Total Queries:       500
+  Cache Size:          500 particles
+================================
+
 
 ================================================================================
-❌ TEST FAILED
+5. EXPORT TRAJECTORIES
 ================================================================================
-Error: list index out of range
-Traceback (most recent call last):
-  File "/home/arhashemi/Workspace/welding/JAXTrace/test_reduced.py", line 76, in <module>
-    main(config=config_reduced)
-    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
-    trajectory, strategy_info, initial_positions = execute_particle_tracking(
-                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~^
-        field=field,
-        ^^^^^^^^^^^^
-    ...<13 lines>...
-        inlet_distribution=cfg['inlet_distribution']
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
-    trajectory = tracker.track_particles(
-        initial_positions=seeds,
-    ...<2 lines>...
-        dt=dt
-    )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
-    return self._track_single_batch(x0, times, dt)
-           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
-    v_initial = self.field_fn(x_current, times[0])
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
-    field_fn = lambda positions, t: field.sample_at_positions(positions, t)
-                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 305, in sample_at_positions
-    return self._sample_with_direct_interpolation(query_positions, left_idx, right_idx, alpha)
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 349, in _sample_with_direct_interpolation
-    self._direct_interpolator_cache[left_idx] = create_jax_direct_interpolator(
-                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-        self.shared_octree,
-        ^^^^^^^^^^^^^^^^^^^
-    ...<2 lines>...
-        revolution_idx  # Use revolution cycle index, not global index
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/direct_octree_interpolator_jax.py", line 112, in create_jax_direct_interpolator
-    fine = shared_octree.get_fine_level_for_timestep(timestep_idx)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_coarse_octree.py", line 132, in get_fine_level_for_timestep
-    return self.fine_levels_per_timestep[timestep]
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
-IndexError: list index out of range
+💾 Exporting trajectory to VTK...
+Writing trajectory to output/trajectory.vtp...
+Trajectory written successfully to output/trajectory.vtp
+Trajectory exported to output/trajectory.vtp
+   ✅ Exported trajectory: output/trajectory.vtp
+💾 Exporting trajectory time series...
+Writing trajectory time series to output/trajectory_series_series...
+Time series written: 2000 files
+Trajectory exported as time series to output/trajectory_series_series
+   ✅ Exported trajectory time series
+
+================================================================================
+6. TRAJECTORY ANALYSIS
+================================================================================
+
+📊 Analyzing trajectory results...
+   📏 Trajectory dimensions: (2000, 500, 3) (T,N,3)
+   🕒 Time steps: 2000
+   🎯 Particles: 500
+   ⏱️  Duration: 39.00
+   💾 Memory: 22.9 MB
+   ✅ Data validation: PASSED
+
+   📈 Trajectory Statistics:
+      Mean displacement: 0.000 ± 0.001
+      Max displacement: 0.014
+      Mean speed: 0.000 ± 0.000
+
+   🌍 Spatial Analysis:
+      Initial spread (XYZ): [0.032, 0.013, 0.003]
+      Final spread (XYZ): [0.032, 0.013, 0.003]
+      Spread change: [-0.2%, 0.0%, 0.0%]
+      Mixing efficiency: 0.000 units/time/particle
+
+================================================================================
+7. DENSITY ESTIMATION
+================================================================================
+📊 Analyzing density with 500 particles...
+   Methods: kde, sph
+📈 Performing KDE analysis...
+   Bandwidth: auto (scott)
+   ✅ KDE bandwidth: 0.006514
+🔬 Performing SPH analysis...
+   Smoothing length: 0.1
+   Adaptive: False
+   Kernel: cubic_spline
+   ✅ SPH density range: [1.709e-02, 6.786e-02]
+
+================================================================================
+8. VISUALIZATION
+================================================================================
+📊 Creating particle visualization...
+   ✅ Saved particles_final.png
+📈 Creating trajectory visualization...
+   ✅ Saved trajectories_2d.png
+🎨 Creating density visualization...
+   ✅ Saved density_analysis.png
+🎯 Creating YZ slice density contour...
+   📍 Creating YZ density slice at x = 0.049
+   📊 Using 50 particles for density estimation
+   ✅ Saved density_yz_slice_x_0_049_png
+✅ All visualizations saved to output/
+
+================================================================================
+9. REPORTING
+================================================================================
+📋 Generating summary report...
+
+📋 Generating summary report...
+⚠️  Report generation failed: 'SharedOctreeFEMTimeSeriesField' object has no attribute 'data'
+
+================================================================================
+🎉 WORKFLOW COMPLETED SUCCESSFULLY!
+================================================================================
+
+================================================================================
+✅ TEST COMPLETED SUCCESSFULLY!
+================================================================================
 
 Final resources:
-  RAM: 12.74 GB
-  GPU Memory: 115 MB
+  RAM: 14.60 GB
+  GPU Memory: 149 MB
   GPU Util: 0%
 
-Total time: 129.04 seconds
+Total time: 279.40 seconds
 
 ✅ Summary saved to: logs/reduced_test_summary.json

@@ -51,6 +51,9 @@ MONITOR_PID=$!
 # Trap to kill monitoring on exit
 trap "kill $MONITOR_PID 2>/dev/null || true" EXIT
 
+echo "Activating virtual environment..."
+source .venv/bin/activate
+
 echo "Running example_workflow.py..."
 echo ""
 
