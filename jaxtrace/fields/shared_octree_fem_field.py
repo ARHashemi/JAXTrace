@@ -84,21 +84,23 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
 
         self._times = np.asarray(times, dtype=np.float32)
 
-        # Build shared octree first
-        if shared_octree_config is None:
-            shared_octree_config = {}
+        # Build shared octree ONLY if using direct interpolation mode
+        # Legacy mode builds its own monolithic octree, doesn't need shared octree
+        if use_direct_interpolation:
+            if shared_octree_config is None:
+                shared_octree_config = {}
 
-        config = SharedOctreeConfig(**shared_octree_config)
-        factory = SharedOctreeFactory(config)
+            config = SharedOctreeConfig(**shared_octree_config)
+            factory = SharedOctreeFactory(config)
 
-        print("🌲 Building shared coarse octree...")
-        self.shared_octree = factory.build_from_files(mesh_files, verbose=True)
-        self.shared_octree_config = config
-
-        # Phase 1 Optimization: Initialize element ID cache
-        self.element_cache = ElementCache(threshold=0.001)  # 1mm displacement threshold
-        self.use_element_caching = True  # Feature flag to enable/disable caching
-        print("💾 Element ID caching enabled (Phase 1 optimization)")
+            print("🌲 Building shared coarse octree (for direct interpolation)...")
+            self.shared_octree = factory.build_from_files(mesh_files, verbose=True)
+            self.shared_octree_config = config
+        else:
+            # Legacy mode: Skip shared octree building (will use monolithic octree instead)
+            print("⏭️  Skipping shared octree build (legacy mode uses monolithic octree)")
+            self.shared_octree = None
+            self.shared_octree_config = None
 
         # Load reference timestep for octree mesh structure
         # Use the FIRST REVOLUTION TIMESTEP, not refinement timestep
@@ -129,6 +131,11 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         if not use_direct_interpolation:
             # LEGACY MODE: Build third octree via parent class
             print("⚠️  Using legacy monolithic octree (5-8 GB memory)")
+            print("   Note: Element caching disabled in legacy mode")
+
+            # Phase 1: Disable element caching in legacy mode (not used)
+            self.element_cache = None
+            self.use_element_caching = False
 
             # Create dummy data array for base class initialization
             # Shape: (n_timesteps, n_points, 3) but we only store first timestep
@@ -155,6 +162,11 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         else:
             # EFFICIENT MODE: Use coarse+fine octrees directly (no third octree!)
             print("✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)")
+
+            # Phase 1 Optimization: Enable element ID caching in direct mode
+            self.element_cache = ElementCache(threshold=0.001)  # 1mm displacement threshold
+            self.use_element_caching = True
+            print("💾 Element ID caching enabled (Phase 1 optimization)")
 
             # We skip parent class initialization to avoid building the third octree
             # Instead, manually initialize only what we need from TimeSeriesField
@@ -651,13 +663,14 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         if self.use_direct_interpolation:
             # Direct interpolation mode
             num_timesteps = len(self.mesh_files)
+            reuse_rate = self.shared_octree.get_reuse_statistics()['reuse_rate']*100 if self.shared_octree else 0.0
             return (
                 f"SharedOctreeFEMTimeSeriesField("
                 f"timesteps={num_timesteps}, "
                 f"cache_size={self.cache_size}, "
                 f"cached={len(self._timestep_cache)}, "
                 f"mode=direct, "
-                f"reuse_rate={self.shared_octree.get_reuse_statistics()['reuse_rate']*100:.1f}%)"
+                f"reuse_rate={reuse_rate:.1f}%)"
             )
         else:
             # Legacy mode
@@ -670,8 +683,7 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
                 f"cached={len(self._timestep_cache)}, "
                 f"mode=legacy, "
                 f"octree_nodes={self.octree_mesh.nodes_min.shape[0] if hasattr(self, 'octree_mesh') and self.octree_mesh is not None else 0}, "
-                f"octree_leaves={num_leaves}, "
-                f"reuse_rate={self.shared_octree.get_reuse_statistics()['reuse_rate']*100:.1f}%)"
+                f"octree_leaves={num_leaves})"
             )
 
     def get_memory_statistics(self) -> Dict[str, float]:
@@ -684,24 +696,37 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         # Base field memory
         base_stats = super().get_memory_statistics() if hasattr(super(), 'get_memory_statistics') else {}
 
-        # Shared octree memory
-        coarse_mem, unique_fine_mem, total_octree_mem = self.shared_octree.get_memory_size()
-        reuse_stats = self.shared_octree.get_reuse_statistics()
+        # Shared octree memory (only in direct mode)
+        if self.shared_octree is not None:
+            coarse_mem, unique_fine_mem, total_octree_mem = self.shared_octree.get_memory_size()
+            reuse_stats = self.shared_octree.get_reuse_statistics()
 
-        # Calculate savings vs. independent octrees
-        n_timesteps = len(self.times)
-        estimated_independent_mem = coarse_mem * n_timesteps  # Rough estimate
+            # Calculate savings vs. independent octrees
+            n_timesteps = len(self.times)
+            estimated_independent_mem = coarse_mem * n_timesteps  # Rough estimate
 
-        stats = {
-            'coarse_octree_mb': coarse_mem / (1024**2),
-            'fine_octrees_mb': unique_fine_mem / (1024**2),
-            'total_octree_mb': total_octree_mem / (1024**2),
-            'n_timesteps': reuse_stats['n_timesteps'],
-            'n_unique_structures': reuse_stats['n_unique_structures'],
-            'reuse_rate': reuse_stats['reuse_rate'],
-            'memory_savings_factor': reuse_stats['memory_savings_factor'],
-            'estimated_independent_mb': estimated_independent_mem / (1024**2),
-        }
+            stats = {
+                'coarse_octree_mb': coarse_mem / (1024**2),
+                'fine_octrees_mb': unique_fine_mem / (1024**2),
+                'total_octree_mb': total_octree_mem / (1024**2),
+                'n_timesteps': reuse_stats['n_timesteps'],
+                'n_unique_structures': reuse_stats['n_unique_structures'],
+                'reuse_rate': reuse_stats['reuse_rate'],
+                'memory_savings_factor': reuse_stats['memory_savings_factor'],
+                'estimated_independent_mb': estimated_independent_mem / (1024**2),
+            }
+        else:
+            # Legacy mode: No shared octree
+            stats = {
+                'coarse_octree_mb': 0.0,
+                'fine_octrees_mb': 0.0,
+                'total_octree_mb': 0.0,
+                'n_timesteps': len(self.times),
+                'n_unique_structures': 0,
+                'reuse_rate': 0.0,
+                'memory_savings_factor': 1.0,
+                'estimated_independent_mb': 0.0,
+            }
 
         # Merge with base stats
         stats.update(base_stats)
@@ -793,12 +818,12 @@ def create_shared_octree_fem_field(
     cache_size = user_config.get('timestep_cache_size', 3)
 
     # Direct interpolation mode (OPTIMIZED - Now enabled by default!)
-    # FIXED: Removed nested JIT, pass arrays as arguments, keep as NumPy until JIT
-    # Uses coarse+fine octrees directly (~1 MB octrees vs 5-8 GB third octree)
-    # Default: False (JAX direct mode currently blocked by compilation memory limits)
-    # Set to True only for testing (will fail with >100 particles currently)
-    # TODO: Implement chunked processing to enable this feature
-    use_direct_interpolation = user_config.get('use_direct_interpolation', False)
+    # Uses two-stage interpolation: CPU octree search + GPU JAX interpolation
+    # Memory: ~1 MB octrees (vs 5-8 GB legacy monolithic octree)
+    # Phase 1: Element caching only works in this mode
+    # Default: True (efficient mode with element caching)
+    # Set to False for legacy mode (stable mesh only, no element caching)
+    use_direct_interpolation = user_config.get('use_direct_interpolation', True)
 
     return SharedOctreeFEMTimeSeriesField(
         mesh_files=mesh_files,
