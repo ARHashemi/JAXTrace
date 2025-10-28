@@ -1595,11 +1595,13 @@ if __name__ == "__main__":
         # Inlet boundary (first wall along flow axis)
         # Options: 'continuous' (inject particles), 'none' (no injection),
         #          'reflective', 'periodic'
-        'boundary_inlet': 'none',#'continuous',
+        # NOTE: 'continuous' disables JIT compilation! Use 'reflective' for GPU acceleration
+        'boundary_inlet': 'reflective',  # Changed for JIT/GPU compatibility
 
         # Outlet boundary (last wall along flow axis)
         # Options: 'absorbing' (particles exit), 'reflective', 'periodic'
-        'boundary_outlet': 'absorbing',
+        # NOTE: 'absorbing' may disable JIT. Use 'reflective' or 'periodic' for GPU acceleration
+        'boundary_outlet': 'reflective',  # Changed for JIT/GPU compatibility
 
         # Inlet particle distribution (only for continuous inlet)
         'inlet_distribution': 'grid',  # 'grid' or 'random'

@@ -18,6 +18,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from collections import OrderedDict
 from typing import List, Optional, Dict, Any, Tuple
 import re
+from jax.experimental import io_callback  # Phase 1 Task 2: JAX io_callback for CPU operations
 
 from .octree_fem_time_series_optimized import OctreeFEMTimeSeriesFieldOptimized
 from .shared_octree_factory import SharedOctreeFactory, SharedOctreeConfig
@@ -290,9 +291,53 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
 
         return left_idx, right_idx, alpha
 
+    def _sample_cpu_callback(self, query_positions_np: np.ndarray, t_scalar: float) -> np.ndarray:
+        """
+        Pure CPU callback for sampling (Phase 1 Task 2: JAX io_callback).
+
+        This function performs all CPU-bound operations:
+        - Find timesteps (searchsorted)
+        - Load velocity data
+        - Octree search
+        - Interpolation
+
+        Returns velocities as NumPy array for io_callback.
+
+        Args:
+            query_positions_np: NumPy array (N, 3)
+            t_scalar: Python float
+
+        Returns:
+            velocities: NumPy array (N, 3)
+        """
+        # Find timesteps (CPU operation with NumPy search sorted)
+        left_idx, right_idx, alpha = self._find_timestep_for_time(t_scalar)
+
+        if self.use_direct_interpolation:
+            # Direct interpolation mode: two-stage CPU+GPU
+            result = self._sample_with_two_stage_interpolation(
+                jnp.asarray(query_positions_np),
+                left_idx,
+                right_idx,
+                alpha
+            )
+        else:
+            # Legacy mode: use parent class interpolation
+            result = self._sample_with_legacy_octree(
+                jnp.asarray(query_positions_np),
+                left_idx,
+                right_idx,
+                alpha
+            )
+
+        # Convert result to NumPy for io_callback
+        return np.asarray(result, dtype=np.float32)
+
     def sample_at_positions(self, query_positions: np.ndarray, t: float) -> jnp.ndarray:
         """
         Sample field at positions using per-timestep data loading.
+
+        Phase 1 Task 2: Now JAX-traceable using io_callback for CPU operations!
 
         This overrides the base class method to load velocity data on-demand
         for the specific timesteps needed.
@@ -314,18 +359,28 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         """
         # Ensure JAX array
         query_positions = jnp.asarray(query_positions, dtype=jnp.float32)
+        t_jax = jnp.asarray(t, dtype=jnp.float32)
 
-        # Find which timesteps we need
-        left_idx, right_idx, alpha = self._find_timestep_for_time(t)
+        # Phase 1 Task 2: Use io_callback to make CPU operations JAX-traceable
+        # This allows the RK4 loop to be fully JIT-compiled!
 
-        if self.use_direct_interpolation:
-            # EFFICIENT MODE: Two-stage (CPU search + GPU interpolation)
-            # Memory: ~15 MB, Speed: ~5-100ms
-            return self._sample_with_two_stage_interpolation(query_positions, left_idx, right_idx, alpha)
-        else:
-            # LEGACY MODE: Use monolithic third octree
-            # Memory: 5-8 GB, Speed: Fast
-            return self._sample_with_legacy_octree(query_positions, left_idx, right_idx, alpha)
+        # Use io_callback to call CPU function
+        # Both positions and time are passed to the callback
+        def callback_wrapper(pos, t_array):
+            """Wrapper to convert JAX arrays to NumPy and extract scalar time."""
+            pos_np = np.asarray(pos, dtype=np.float32)
+            t_scalar = float(np.asarray(t_array).item())  # Extract scalar from JAX array
+            return self._sample_cpu_callback(pos_np, t_scalar)
+
+        result = io_callback(
+            callback_wrapper,
+            jax.ShapeDtypeStruct(query_positions.shape, jnp.float32),
+            query_positions,
+            t_jax,
+            ordered=False  # Allow JAX to reorder for efficiency
+        )
+
+        return result
 
     def _sample_with_direct_interpolation(
         self, query_positions: jnp.ndarray, left_idx: int, right_idx: int, alpha: float

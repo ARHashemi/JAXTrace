@@ -1,17 +1,17 @@
 {
   "success": true,
-  "total_time_sec": 279.4005289077759,
+  "total_time_sec": 284.4622850418091,
   "num_particles": 500,
   "initial_resources": {
-    "ram_gb": 13.99441909790039,
+    "ram_gb": 14.145256042480469,
     "gpu_mem_mb": 73,
     "gpu_util_pct": 0,
-    "timestamp": 1761642649.8064466
+    "timestamp": 1761644672.1858492
   },
   "final_resources": {
-    "ram_gb": 14.604789733886719,
+    "ram_gb": 14.93906021118164,
     "gpu_mem_mb": 149,
     "gpu_util_pct": 0,
-    "timestamp": 1761642929.2336876
+    "timestamp": 1761644956.6688979
   }
 }
