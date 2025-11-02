@@ -305,14 +305,17 @@ def find_elements_for_particles_interface(particles, shared_octree, positions, c
     """
     # Extract coarse octree data
     coarse = shared_octree.coarse_levels
-    coarse_centers = np.asarray(coarse.node_centers, dtype=np.float32)
+    coarse_centers = np.asarray(coarse.node_centers, dtype=np.float32)  # Uses property
     coarse_children = np.asarray(coarse.node_children, dtype=np.int32)
     coarse_elem_lists = np.asarray(coarse.node_element_lists, dtype=np.int32)
     coarse_elem_counts = np.asarray(coarse.node_element_counts, dtype=np.int32)
 
     # Extract fine octree data for this timestep
+    # Phase 2: Fine octree needs domain bounds to decode Morton codes
     fine = shared_octree.get_fine_level_for_timestep(timestep_idx)
-    fine_centers = np.asarray(fine.node_centers, dtype=np.float32)
+    domain_min = np.asarray(coarse.bbox_min, dtype=np.float32)
+    domain_max = np.asarray(coarse.bbox_max, dtype=np.float32)
+    fine_centers = np.asarray(fine.decode_node_centers(domain_min, domain_max), dtype=np.float32)
     fine_children = np.asarray(fine.node_children, dtype=np.int32)
     fine_elem_lists = np.asarray(fine.node_element_lists, dtype=np.int32)
     fine_elem_counts = np.asarray(fine.node_element_counts, dtype=np.int32)

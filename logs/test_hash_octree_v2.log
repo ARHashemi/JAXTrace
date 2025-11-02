@@ -1,0 +1,124 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+======================================================================
+PHASE 3: HASH OCTREE TEST SUITE
+======================================================================
+
+======================================================================
+TEST 1: Prime Number Generation
+======================================================================
+  ✓ 2 is prime
+  ✓ 3 is prime
+  ✓ 5 is prime
+  ✓ 7 is prime
+  ✓ 11 is prime
+  ✓ 13 is prime
+  ✓ 17 is prime
+  ✓ 19 is prime
+  ✓ 23 is prime
+  ✓ 29 is prime
+  ✓ 31 is prime
+  ✓ 101 is prime
+  ✓ 1009 is prime
+  ✓ 0 is not prime
+  ✓ 1 is not prime
+  ✓ 4 is not prime
+  ✓ 6 is not prime
+  ✓ 8 is not prime
+  ✓ 9 is not prime
+  ✓ 10 is not prime
+  ✓ 15 is not prime
+  ✓ 100 is not prime
+  ✓ 1000 is not prime
+  ✓ next_prime(100) = 101
+  ✓ next_prime(101) = 101
+  ✓ next_prime(1000) = 1009
+  ✓ next_prime(1009) = 1009
+  ✓ compute_hash_table_size(1000) = 1301 (prime, load factor ~0.77)
+
+✅ Prime number generation test PASSED
+
+======================================================================
+TEST 2: Hash Table Construction
+======================================================================
+  ✓ 5 leaves inserted successfully
+  ✓ Hash table size: 7 (prime)
+  ✓ Load factor: 0.714
+  ✓ Total elements: 15
+  ✓ Max elements per cell: 5
+
+✅ Hash table construction test PASSED
+
+======================================================================
+TEST 3: Hash Function and Collision Handling
+======================================================================
+  ✓ Generated 1000 Morton codes
+  ✓ Hash table size: 1429
+  ✓ Unique hashes: 724 / 1000
+  ✓ Collision rate: 27.6%
+  ✓ All hashes in valid range [0, 1429)
+  ✓ All 100 codes inserted successfully with linear probing
+
+✅ Hash function and collision handling test PASSED
+
+======================================================================
+TEST 4: JAX Hash Lookup (Single Point)
+======================================================================
+  ✓ Position 0 (0.0, 0.0, 0.0): Found 3 elements [10, 20, 30]
+  ✓ Position 1 (0.5, 0.5, 0.5): Found 2 elements [40, 50]
+  ✓ Position 2 (-0.5, -0.5, -0.5): Found 1 elements [60]
+  ✓ Missing position (0.99, 0.99, 0.99): Found 0 elements (expected 0 or not found)
+
+✅ JAX hash lookup (single point) test PASSED
+
+======================================================================
+TEST 5: JAX Hash Lookup (Batch)
+======================================================================
+  ✓ Batch position 0: Found 3 elements [10, 20, 30]
+  ✓ Batch position 1: Found 2 elements [40, 50]
+  ✓ Batch position 2: Found 1 elements [60]
+  ✓ Batch position 3: Found 4 elements [70, 80, 90, 100]
+
+✅ JAX hash lookup (batch) test PASSED
+
+======================================================================
+TEST 6: Memory Statistics
+======================================================================
+  Hash Table:
+    Leaves: 1,000
+    Table size: 2,003
+    Load factor: 0.499
+  Memory:
+    Morton keys: 0.015 MB
+    Starts array: 0.008 MB
+    Lengths array: 0.008 MB
+    Elements array: 0.021 MB
+    Hash table overhead: 0.031 MB
+    Total: 0.051 MB
+  Elements:
+    Total elements: 5,395
+    Max per cell: 10
+
+✅ Memory statistics test PASSED
+
+======================================================================
+TEST 7: Edge Cases
+======================================================================
+  Testing single leaf...
+  ✓ Single leaf case works
+  Testing cell with many elements...
+  ✓ Many elements (100) in one cell works
+
+✅ Edge cases test PASSED
+
+======================================================================
+✅ ALL TESTS PASSED
+======================================================================
+
+Hash octree implementation validated successfully!
+Ready for integration with SharedOctreeFEMField (Phase 3 next step).
+======================================================================
+

@@ -8,6 +8,8 @@ when mesh topology is identical across timesteps.
 
 Key insight: Most timesteps during tool rotation have identical mesh topology.
 We hash the fine structure and reuse existing structures when possible.
+
+Phase 2 Update: Uses Morton codes for 3× memory reduction.
 """
 
 import jax.numpy as jnp
@@ -21,6 +23,7 @@ from .shared_coarse_octree import (
     compute_structure_hash
 )
 from .coarse_octree_builder import MeshData, load_mesh_from_pvtu, compute_cell_centers
+from .morton_code import encode_morton_3d  # Phase 2: Morton code encoding
 
 
 def build_fine_octree_for_timestep(
@@ -56,7 +59,11 @@ def build_fine_octree_for_timestep(
     fine_nodes = []
     coarse_leaf_indices = []
 
-    for coarse_idx in range(len(coarse_octree.node_centers)):
+    # Phase 2: Decode domain bounds once
+    domain_min = np.asarray(coarse_octree.bbox_min, dtype=np.float32)
+    domain_max = np.asarray(coarse_octree.bbox_max, dtype=np.float32)
+
+    for coarse_idx in range(len(coarse_octree.node_morton_codes)):
         # Check if this is a leaf in coarse structure
         children = coarse_octree.node_children[coarse_idx]
         is_leaf = np.all(children == -1)
@@ -70,14 +77,11 @@ def build_fine_octree_for_timestep(
         if n_cells <= max_cells_per_node:
             continue  # No fine refinement needed
 
-        # Build fine nodes for this coarse leaf
-        coarse_center = np.array(coarse_octree.node_centers[coarse_idx])
-        coarse_size = float(coarse_octree.node_sizes[coarse_idx])
-        cell_indices = coarse_octree.node_element_lists[coarse_idx, :n_cells]
+        # Phase 2: Decode Morton code to get node bounds
+        code = np.uint64(coarse_octree.node_morton_codes[coarse_idx])
+        bbox_min, bbox_max, _ = decode_morton_3d(code, domain_min, domain_max)
 
-        # Recursively build fine structure
-        bbox_min = coarse_center - coarse_size / 2
-        bbox_max = coarse_center + coarse_size / 2
+        cell_indices = coarse_octree.node_element_lists[coarse_idx, :n_cells]
 
         _build_fine_nodes_recursive(
             cell_centers,
@@ -94,30 +98,44 @@ def build_fine_octree_for_timestep(
         coarse_leaf_indices.append(coarse_idx)
 
     # Convert fine nodes to arrays
+    # Phase 2: Domain bounds for Morton encoding
+    domain_min = np.array(mesh.bbox_min, dtype=np.float32)
+    domain_max = np.array(mesh.bbox_max, dtype=np.float32)
+
     if len(fine_nodes) == 0:
         # No fine refinement needed - mesh is coarse enough
         n_nodes = 1
-        node_centers = np.zeros((n_nodes, 3), dtype=np.float32)
-        node_sizes = np.zeros(n_nodes, dtype=np.float32)
-        node_levels = np.full(n_nodes, n_coarse_levels, dtype=np.int32)
+        node_morton_codes = np.zeros(n_nodes, dtype=np.uint64)
         node_parents = np.zeros(n_nodes, dtype=np.int32)
         node_children = np.full((n_nodes, 8), -1, dtype=np.int32)
         node_element_lists = np.full((n_nodes, max_cells_per_node), -1, dtype=np.int32)
         node_element_counts = np.zeros(n_nodes, dtype=np.int32)
+
+        # Phase 2: Encode dummy node (root center at coarse level)
+        center = (domain_min + domain_max) / 2.0
+        node_morton_codes[0] = encode_morton_3d(
+            center[0], center[1], center[2],
+            n_coarse_levels,
+            domain_min, domain_max
+        )
     else:
         n_nodes = len(fine_nodes)
-        node_centers = np.zeros((n_nodes, 3), dtype=np.float32)
-        node_sizes = np.zeros(n_nodes, dtype=np.float32)
-        node_levels = np.zeros(n_nodes, dtype=np.int32)
+        node_morton_codes = np.zeros(n_nodes, dtype=np.uint64)
         node_parents = np.zeros(n_nodes, dtype=np.int32)
         node_children = np.full((n_nodes, 8), -1, dtype=np.int32)
         node_element_lists = np.full((n_nodes, max_cells_per_node), -1, dtype=np.int32)
         node_element_counts = np.zeros(n_nodes, dtype=np.int32)
 
         for i, node in enumerate(fine_nodes):
-            node_centers[i] = node['center']
-            node_sizes[i] = node['size']
-            node_levels[i] = node['level']
+            # Phase 2: Encode center and level as Morton code
+            center = node['center']
+            level = node['level']
+            node_morton_codes[i] = encode_morton_3d(
+                center[0], center[1], center[2],
+                level,
+                domain_min, domain_max
+            )
+
             node_parents[i] = node['parent']
             node_children[i] = node['children']
 
@@ -126,18 +144,14 @@ def build_fine_octree_for_timestep(
             node_element_lists[i, :n_cells] = cells[:n_cells]
             node_element_counts[i] = n_cells
 
-    # Compute structure hash for reuse detection
+    # Phase 2: Compute structure hash from Morton codes
     structure_hash = compute_structure_hash(
-        jnp.array(node_centers),
-        jnp.array(node_sizes),
-        jnp.array(node_levels)
+        jnp.array(node_morton_codes)
     )
 
     return OctreeFineLevel(
         timestep_id=timestep_id,
-        node_centers=jnp.array(node_centers),
-        node_sizes=jnp.array(node_sizes),
-        node_levels=jnp.array(node_levels),
+        node_morton_codes=jnp.array(node_morton_codes),  # Phase 2: Morton codes
         node_parents=jnp.array(node_parents),
         node_children=jnp.array(node_children),
         node_element_lists=jnp.array(node_element_lists),
@@ -308,7 +322,7 @@ def build_fine_octrees_with_reuse(
             # New unique structure
             unique_structures[fine_level.structure_hash] = fine_level
             memory_mb = fine_level.get_memory_size() / (1024 ** 2)
-            print(f"  Timestep {timestep_id}: NEW structure ({memory_mb:.2f} MB, {len(fine_level.node_centers)} nodes)")
+            print(f"  Timestep {timestep_id}: NEW structure ({memory_mb:.2f} MB, {len(fine_level.node_morton_codes)} nodes)")
 
         fine_levels.append(fine_level)
 

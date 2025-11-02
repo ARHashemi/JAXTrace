@@ -1,0 +1,275 @@
+================================================================================
+PHASE 3: SIMPLE HASH OCTREE INTEGRATION TEST
+================================================================================
+
+Configuration:
+  Data files: 10
+  Hash octree: ENABLED
+  Particles: ~50
+  Timesteps: 50
+
+Starting test...
+--------------------------------------------------------------------------------
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 10
+🔍 Auto-detect stable mesh: enabled
+🌲 Octree: max_elements=32, max_depth=12
+   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, 10 timesteps)
+🎯 Particles: {'x': 5, 'y': 5, 'z': 2}, distribution=uniform
+🏃 Tracking: 50 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=reflective, outlet=reflective
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 2922135552, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   Detecting stable mesh size (sampling first 10 files)...
+      Timestep 0: 2301 points
+   Mesh appears stable from the start (2301 points)
+   Loading 10 timesteps...
+   Mesh: 2301 points
+   Elements: 1296 tetrahedra
+🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)
+✅ Prepared 160 timesteps for on-demand loading (including refinement steps)
+🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree (for direct interpolation)...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 10
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 9 refinement steps
+  Refinement phase: 9 steps
+  Revolution cycle: 10 steps (timesteps 150 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 9 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_8.pvtu
+Mesh: 781466 points, 3050881 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 3105 nodes, 0.51 MB
+  Time: 6.9s
+  Memory: 0.51 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 10 timesteps...
+  Timestep 150: NEW structure (0.00 MB, 1 nodes)
+  Timestep 151: REUSED from timestep 150
+  Timestep 152: REUSED from timestep 150
+  Timestep 153: REUSED from timestep 150
+  Timestep 154: REUSED from timestep 150
+  Timestep 155: REUSED from timestep 150
+  Timestep 156: REUSED from timestep 150
+  Timestep 157: REUSED from timestep 150
+  Timestep 158: REUSED from timestep 150
+  Timestep 159: REUSED from timestep 150
+
+Fine octree building complete:
+  Total timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+  Time: 74.6s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.51 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.51 MB
+
+Reuse Statistics:
+  Timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+
+Total build time: 99.9s
+======================================================================
+🔷 Phase 3A: Building hash octrees EAGERLY for GPU-native search...
+   Building all hash octrees during initialization (not lazy)
+   This prevents crashes from building inside io_callback
+📂 Loading reference timestep 150 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 160
+✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)
+💾 Element ID caching enabled (Phase 1 optimization)
+
+🔷 Phase 3A: Building hash octrees eagerly (during initialization)...
+   Building 10 hash octrees (timesteps 150 to 159)
+   This is a ONE-TIME cost during initialization
+
+✅ All 192131 Morton codes are unique
+   [1/10] Built hash octree for revolution timestep 0
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+   [5/10] Built hash octree for revolution timestep 4
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+
+✅ All 192131 Morton codes are unique
+   [10/10] Built hash octree for revolution timestep 9
+✅ Pre-built 10 hash octrees for GPU
+   All 10 hash octrees successfully built!
+✅ Shared octree field ready with 160 timesteps (per-timestep loading + direct interpolation)
+✅ Loaded octree FEM field: SharedOctreeFEMTimeSeriesField(timesteps=160, cache_size=3, cached=1, mode=direct, reuse_rate=90.0%)
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Field bounds: [-0.03  -0.023 -0.01 ] to [0.03  0.023 0.   ]
+🎯 Generating particles with uniform distribution...
+   Domain size: X=0.0600, Y=0.0460, Z=0.0100
+   Using explicit particle bounds: [array([-0.026, -0.023, -0.01 ]), array([-0.02 , -0.018, -0.005])]
+   Grid resolution: 5 x 5 x 2 = 50 particles
+   Concentrations: X=5, Y=5, Z=2 particles/unit
+   Distribution type: uniform
+✅ Generated 50 particles with uniform grid distribution
+🚪 Boundary conditions:
+   All boundaries: Reflective
+🚀 Setting up particle tracker...
+🏃 Running particle tracking...
+   Tracking 50 particles for 50 timesteps
+   Time span: (150.0, 159.0), dt=0.0025
+Tracking: 50.0%
+✅ Tracking completed in 416.20 seconds
+   Trajectory: Trajectory(T=50, N=50, duration=9.000, memory=0.1MB)
+
+
+
+=== Element Cache Statistics ===
+  Hits:                  0
+  Misses:                0
+  Invalidations:         0
+  Hit Rate:          0.00%
+  Total Queries:         0
+  Cache Size:            0 particles
+================================
+
+
+================================================================================
+5. EXPORT TRAJECTORIES
+================================================================================
+💾 Exporting trajectory to VTK...
+Writing trajectory to output/trajectory.vtp...
+Trajectory written successfully to output/trajectory.vtp
+Trajectory exported to output/trajectory.vtp
+   ✅ Exported trajectory: output/trajectory.vtp
+💾 Exporting trajectory time series...
+Writing trajectory time series to output/trajectory_series_series...
+Time series written: 50 files
+Trajectory exported as time series to output/trajectory_series_series
+   ✅ Exported trajectory time series
+
+================================================================================
+6. TRAJECTORY ANALYSIS
+================================================================================
+
+📊 Analyzing trajectory results...
+   📏 Trajectory dimensions: (50, 50, 3) (T,N,3)
+   🕒 Time steps: 50
+   🎯 Particles: 50
+   ⏱️  Duration: 9.00
+   💾 Memory: 0.1 MB
+   ✅ Data validation: PASSED
+
+   📈 Trajectory Statistics:
+      Mean displacement: 0.000 ± 0.000
+      Max displacement: 0.000
+      Mean speed: 0.000 ± 0.000
+
+   🌍 Spatial Analysis:
+      Initial spread (XYZ): [0.002, 0.002, 0.003]
+      Final spread (XYZ): [0.002, 0.002, 0.003]
+      Spread change: [0.0%, 0.0%, 0.0%]
+      Mixing efficiency: 0.000 units/time/particle
+
+================================================================================
+7. DENSITY ESTIMATION
+================================================================================
+⏭️  Density analysis skipped (perform_density_analysis=False)
+
+================================================================================
+8. VISUALIZATION
+================================================================================
+📊 Creating particle visualization...
+   ✅ Saved particles_final.png
+📈 Creating trajectory visualization...
+   ✅ Saved trajectories_2d.png
+🎯 Creating YZ slice density contour...
+   📍 Creating YZ density slice at x = -0.014
+   ⚠️  Too few particles (0) near slice x = -0.014
+✅ All visualizations saved to output/
+
+================================================================================
+9. REPORTING
+================================================================================
+📋 Generating summary report...
+
+📋 Generating summary report...
+⚠️  Report generation failed: 'SharedOctreeFEMTimeSeriesField' object has no attribute 'data'
+
+================================================================================
+🎉 WORKFLOW COMPLETED SUCCESSFULLY!
+================================================================================
+
+================================================================================
+✅ HASH OCTREE INTEGRATION TEST PASSED
+================================================================================
+
+The hash octree successfully integrated with the workflow!
+Ready for full profiling test.

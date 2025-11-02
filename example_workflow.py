@@ -211,7 +211,7 @@ def main(config=None):
         # Tracking
         'n_timesteps': 2000,
         'dt': 0.0025,
-        'time_span': (0.0, 4.0),
+        'time_span': None,  # Auto-detect from revolution cycle (will be set based on loaded timesteps)
         'batch_size': 1000,
         'integrator': 'rk4',
         'use_data_dt': False,  # If True, use time interval from VTK data (overrides 'dt')
@@ -243,6 +243,9 @@ def main(config=None):
         'slice_levels': 20,
         'slice_cutoff_min': 0,
         'slice_cutoff_max': 95,
+
+        # Phase 3: Hash Octree (GPU Acceleration)
+        'use_hash_octree': True,  # Phase 3E+3F: GPU-native hash octree for full GPU acceleration
 
         # GPU
         'device': 'gpu',
@@ -337,6 +340,26 @@ def main(config=None):
         print(f"⚠️  use_data_dt=True but no data time interval available, using user dt = {cfg['dt']}")
         print()
 
+    # Auto-detect time_span from revolution cycle if not specified
+    time_span_to_use = cfg['time_span']
+    if time_span_to_use is None and hasattr(field, '_times') and field._times is not None:
+        import numpy as np
+        # Use revolution cycle times (for shared octree)
+        if hasattr(field, 'revolution_start_idx') and hasattr(field, 'revolution_end_idx'):
+            t_start = float(field._times[field.revolution_start_idx])
+            t_end = float(field._times[field.revolution_end_idx])
+            time_span_to_use = (t_start, t_end)
+            print(f"🔄 Auto-detected time_span from revolution cycle: ({t_start:.1f}, {t_end:.1f})")
+            print(f"   Revolution cycle: timesteps {field.revolution_start_idx} to {field.revolution_end_idx}")
+            print()
+        else:
+            # Fallback: use full data range
+            t_start = float(field._times[0])
+            t_end = float(field._times[-1])
+            time_span_to_use = (t_start, t_end)
+            print(f"🔄 Auto-detected time_span from data: ({t_start:.1f}, {t_end:.1f})")
+            print()
+
     trajectory, strategy_info, initial_positions = execute_particle_tracking(
         field=field,
         concentrations=cfg['particle_concentrations'],
@@ -346,7 +369,7 @@ def main(config=None):
         particle_bounds_fraction=cfg['particle_bounds_fraction'],
         n_timesteps=cfg['n_timesteps'],
         dt=dt_to_use,
-        time_span=cfg['time_span'],
+        time_span=time_span_to_use,
         batch_size=cfg['batch_size'],
         integrator=cfg['integrator'],
         flow_axis=cfg['flow_axis'],
@@ -1545,12 +1568,20 @@ if __name__ == "__main__":
                                               # FIXED: Removed nested JIT, arrays passed as args
 
         # -------------------------------------------------------------------------
+        # Phase 3: GPU-Native Hash Octree (EXPERIMENTAL)
+        # -------------------------------------------------------------------------
+        'use_hash_octree': True,  # Phase 3E: Enable GPU-native hash octree for full GPU acceleration
+                                  # Requires use_direct_interpolation=True
+                                  # Benefits: O(1) hash lookup vs O(log n) tree traversal
+                                   # Enables full GPU acceleration without CPU callbacks
+
+        # -------------------------------------------------------------------------
         # Particle Seeding
         # -------------------------------------------------------------------------
         'particle_concentrations': {
-            'x': 40,  # Particles per unit length in X
-            'y': 70,  # Particles per unit length in Y
-            'z': 40   # Particles per unit length in Z
+            'x': 20,  # Particles per unit length in X
+            'y': 30,  # Particles per unit length in Y
+            'z': 10   # Particles per unit length in Z
         },
 
         # Particle distribution type: 'uniform', 'gaussian', 'random'

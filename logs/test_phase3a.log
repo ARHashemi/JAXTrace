@@ -1,0 +1,228 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 712, in create_or_load_velocity_field
+    field = create_shared_octree_fem_field(
+        mesh_files=all_files,  # ALL files including refinement steps
+        times=None,  # Will be extracted from filenames
+        user_config=config
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 1145, in create_shared_octree_fem_field
+    return SharedOctreeFEMTimeSeriesField(
+        mesh_files=mesh_files,
+    ...<5 lines>...
+        **field_config
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 230, in __init__
+    self._build_hash_octree_for_timestep(revolution_idx)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 602, in _build_hash_octree_for_timestep
+    hash_octree = build_hash_octree_from_mesh_data(
+        positions=positions_np,
+    ...<5 lines>...
+        target_load_factor=self._hash_octree_config['load_factor']
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 737, in build_hash_octree_from_mesh_data
+    return build_hash_octree_from_leaves(
+        morton_codes,
+    ...<3 lines>...
+        target_load_factor
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 312, in build_hash_octree_from_leaves
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: Hash table insertion failed for leaf 81932/192131. Try increasing target_load_factor (current: 0.77)
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+    main(config=config)
+    ~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 313, in main
+    field = create_or_load_velocity_field(
+        data_pattern=cfg['data_pattern'],
+    ...<6 lines>...
+        config=cfg  # Pass full config for shared octree
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 712, in create_or_load_velocity_field
+    field = create_shared_octree_fem_field(
+        mesh_files=all_files,  # ALL files including refinement steps
+        times=None,  # Will be extracted from filenames
+        user_config=config
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 1145, in create_shared_octree_fem_field
+    return SharedOctreeFEMTimeSeriesField(
+        mesh_files=mesh_files,
+    ...<5 lines>...
+        **field_config
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 230, in __init__
+    self._build_hash_octree_for_timestep(revolution_idx)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 602, in _build_hash_octree_for_timestep
+    hash_octree = build_hash_octree_from_mesh_data(
+        positions=positions_np,
+    ...<5 lines>...
+        target_load_factor=self._hash_octree_config['load_factor']
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 737, in build_hash_octree_from_mesh_data
+    return build_hash_octree_from_leaves(
+        morton_codes,
+    ...<3 lines>...
+        target_load_factor
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 312, in build_hash_octree_from_leaves
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: Hash table insertion failed for leaf 81932/192131. Try increasing target_load_factor (current: 0.77)
+================================================================================
+PHASE 3: SIMPLE HASH OCTREE INTEGRATION TEST
+================================================================================
+
+Configuration:
+  Data files: 10
+  Hash octree: ENABLED
+  Particles: ~50
+  Timesteps: 50
+
+Starting test...
+--------------------------------------------------------------------------------
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 10
+🔍 Auto-detect stable mesh: enabled
+🌲 Octree: max_elements=32, max_depth=12
+   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, 10 timesteps)
+🎯 Particles: {'x': 5, 'y': 5, 'z': 2}, distribution=uniform
+🏃 Tracking: 50 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=reflective, outlet=reflective
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 2922135552, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   Detecting stable mesh size (sampling first 10 files)...
+      Timestep 0: 2301 points
+   Mesh appears stable from the start (2301 points)
+   Loading 10 timesteps...
+   Mesh: 2301 points
+   Elements: 1296 tetrahedra
+🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)
+✅ Prepared 160 timesteps for on-demand loading (including refinement steps)
+🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree (for direct interpolation)...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 10
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 9 refinement steps
+  Refinement phase: 9 steps
+  Revolution cycle: 10 steps (timesteps 150 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 9 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_8.pvtu
+Mesh: 781466 points, 3050881 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 3105 nodes, 0.51 MB
+  Time: 6.8s
+  Memory: 0.51 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 10 timesteps...
+  Timestep 150: NEW structure (0.00 MB, 1 nodes)
+  Timestep 151: REUSED from timestep 150
+  Timestep 152: REUSED from timestep 150
+  Timestep 153: REUSED from timestep 150
+  Timestep 154: REUSED from timestep 150
+  Timestep 155: REUSED from timestep 150
+  Timestep 156: REUSED from timestep 150
+  Timestep 157: REUSED from timestep 150
+  Timestep 158: REUSED from timestep 150
+  Timestep 159: REUSED from timestep 150
+
+Fine octree building complete:
+  Total timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+  Time: 74.7s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.51 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.51 MB
+
+Reuse Statistics:
+  Timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+
+Total build time: 100.0s
+======================================================================
+🔷 Phase 3A: Building hash octrees EAGERLY for GPU-native search...
+   Building all hash octrees during initialization (not lazy)
+   This prevents crashes from building inside io_callback
+📂 Loading reference timestep 150 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 160
+✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)
+💾 Element ID caching enabled (Phase 1 optimization)
+
+🔷 Phase 3A: Building hash octrees eagerly (during initialization)...
+   Building 10 hash octrees (timesteps 150 to 159)
+   This is a ONE-TIME cost during initialization
+   ❌ Failed to load VTK with octree FEM: Hash table insertion failed for leaf 81932/192131. Try increasing target_load_factor (current: 0.77)
+   
+   ERROR DETAILS:
+
+================================================================================
+❌ HASH OCTREE INTEGRATION TEST FAILED
+================================================================================
+
+Error: Hash table insertion failed for leaf 81932/192131. Try increasing target_load_factor (current: 0.77)
+
+Full traceback:

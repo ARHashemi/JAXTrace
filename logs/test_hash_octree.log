@@ -1,0 +1,99 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_hash_octree.py", line 468, in run_all_tests
+    test_jax_hash_lookup_single()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_hash_octree.py", line 255, in test_jax_hash_lookup_single
+    elements, n_elements = hash_lookup_jax(point, hash_octree, level)
+                           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 663, in hash_lookup_jax
+    return hash_lookup_jax_from_morton(morton_code, hash_octree)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 542, in hash_lookup_jax_from_morton
+    initial_slot = hash_morton_scrambled_jax(morton_code_jax, table_size)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 508, in hash_morton_scrambled_jax
+    h = (h * jnp.int64(0xff51afd7ed558ccd)) & jnp.int64(0xFFFFFFFFFFFFFFFF)
+             ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/scalar_types.py", line 50, in __call__
+    return asarray(x, dtype=self.dtype)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_constructors.py", line 399, in asarray
+    return array(a, dtype=dtype, copy=bool(copy), order=order, device=device,
+                 out_sharding=out_sharding)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_constructors.py", line 205, in array
+    _ = dtypes.coerce_to_array(object, dtype)
+OverflowError: Python int too large to convert to C long
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+======================================================================
+PHASE 3: HASH OCTREE TEST SUITE
+======================================================================
+
+======================================================================
+TEST 1: Prime Number Generation
+======================================================================
+  ✓ 2 is prime
+  ✓ 3 is prime
+  ✓ 5 is prime
+  ✓ 7 is prime
+  ✓ 11 is prime
+  ✓ 13 is prime
+  ✓ 17 is prime
+  ✓ 19 is prime
+  ✓ 23 is prime
+  ✓ 29 is prime
+  ✓ 31 is prime
+  ✓ 101 is prime
+  ✓ 1009 is prime
+  ✓ 0 is not prime
+  ✓ 1 is not prime
+  ✓ 4 is not prime
+  ✓ 6 is not prime
+  ✓ 8 is not prime
+  ✓ 9 is not prime
+  ✓ 10 is not prime
+  ✓ 15 is not prime
+  ✓ 100 is not prime
+  ✓ 1000 is not prime
+  ✓ next_prime(100) = 101
+  ✓ next_prime(101) = 101
+  ✓ next_prime(1000) = 1009
+  ✓ next_prime(1009) = 1009
+  ✓ compute_hash_table_size(1000) = 1301 (prime, load factor ~0.77)
+
+✅ Prime number generation test PASSED
+
+======================================================================
+TEST 2: Hash Table Construction
+======================================================================
+  ✓ 5 leaves inserted successfully
+  ✓ Hash table size: 7 (prime)
+  ✓ Load factor: 0.714
+  ✓ Total elements: 15
+  ✓ Max elements per cell: 5
+
+✅ Hash table construction test PASSED
+
+======================================================================
+TEST 3: Hash Function and Collision Handling
+======================================================================
+  ✓ Generated 1000 Morton codes
+  ✓ Hash table size: 1429
+  ✓ Unique hashes: 724 / 1000
+  ✓ Collision rate: 27.6%
+  ✓ All hashes in valid range [0, 1429)
+  ✓ All 100 codes inserted successfully with linear probing
+
+✅ Hash function and collision handling test PASSED
+
+======================================================================
+TEST 4: JAX Hash Lookup (Single Point)
+======================================================================
+
+======================================================================
+❌ TEST FAILED
+======================================================================
+
+Error: Python int too large to convert to C long

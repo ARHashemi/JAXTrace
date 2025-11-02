@@ -1,0 +1,8 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/debug_morton_distribution.py", line 14, in <module>
+    from jaxtrace.fields.fine_octree_builder import build_fine_octree
+ImportError: cannot import name 'build_fine_octree' from 'jaxtrace.fields.fine_octree_builder' (/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/fine_octree_builder.py)

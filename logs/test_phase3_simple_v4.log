@@ -1,0 +1,734 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+ERROR:2025-10-29 10:21:24,559:jax._src.callback:441: jax.io_callback failed
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 439, in io_callback_impl
+    return tree_util.tree_map(np.asarray, callback(*args))
+                                          ~~~~~~~~^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+    return tree_util.tree_leaves(self.callback_func(*args, **kwargs))
+                                 ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+    return self._sample_cpu_callback(pos_np, t_scalar)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+    result = self._sample_with_two_stage_interpolation(
+        jnp.asarray(query_positions_np),
+    ...<2 lines>...
+        alpha
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+    element_ids_left = self._find_elements_with_hash_octree(
+        query_positions_np,
+        revolution_idx_left
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+    candidate_elements_batch, n_elements_batch = hash_lookup_batch_jax(
+                                                 ~~~~~~~~~~~~~~~~~~~~~^
+        query_positions_jax,
+        ^^^^^^^^^^^^^^^^^^^^
+        hash_octree,
+        ^^^^^^^^^^^^
+        levels
+        ^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+    return jax.vmap(
+           ~~~~~~~~~
+        lambda code: hash_lookup_jax_from_morton(code, hash_octree),
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        in_axes=0  # Map over Morton codes (axis 0)
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    )(morton_codes_jax)
+    ~^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1158, in vmap_f
+    out_flat = batching.batch(
+        flat_fun, axis_data, in_axes_flat,
+        lambda: flatten_axes("vmap out_axes", out_tree(), out_axes)
+    ).call_wrapped(*args_flat)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+    return self.f_transformed(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+    outs, trace = f(tag, in_dims, *in_vals)
+                  ~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+    outs = f(*in_tracers)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+    ans = f(*py_args, **py_kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+    ans = _fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+    lambda code: hash_lookup_jax_from_morton(code, hash_octree),
+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+    elements = jax.lax.fori_loop(0, max_elements, copy_element, elements)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+    (_, result), _ = scan(
+                     ~~~~^
+        scan_body,
+        ^^^^^^^^^^
+    ...<3 lines>...
+        unroll=unroll,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+    init_flat, carry_avals, carry_avals_out, init_tree, *rest = _create_jaxpr(init)
+                                                                ~~~~~~~~~~~~~^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+    jaxpr, consts, out_tree = _initial_style_jaxpr(
+                              ~~~~~~~~~~~~~~~~~~~~^
+        f, in_tree, (*carry_avals, *x_avals), debug_info=dbg_body)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+    jaxpr, consts, out_tree = _initial_style_open_jaxpr(
+                              ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        fun, in_tree, in_avals, debug_info)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+    jaxpr, _, consts = pe.trace_to_jaxpr_dynamic(wrapped_fun, in_avals)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+    return func(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+    ans = fun.call_wrapped(*in_tracers)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+    return self.f_transformed(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+    ans = f(*py_args)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+    return (i + 1, body_fun_ref()(i, x)), None
+                   ~~~~~~~~~~~~~~^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+    hash_octree.flattened_elements[src_idx],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+    return indexing.rewriting_take(self, idx)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+    return internal_gather(arr, dynamic_idx)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+    indexer = index_to_gather(
+        np.shape(arr), idx, core.typeof(arr).sharding,
+        normalize_indices=normalize_indices)  # shared with _scatter_update
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+    raise IndexError(f"index is out of bounds for axis {x_axis} with size 0")
+IndexError: index is out of bounds for axis 0 with size 0
+E1029 10:21:24.564450 3117121 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 384, in _track_single_batch
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 263, in cache_miss
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 146, in _python_pjit_helper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 1622, in _pjit_call_impl_python
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/pxla.py", line 1371, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 784, in _wrapped_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1162, in vmap_f
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+IndexError: index is out of bounds for axis 0 with size 0
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:424: UserWarning: Falling back to step-by-step path (JAX scan failed): INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 384, in _track_single_batch
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 263, in cache_miss
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 146, in _python_pjit_helper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 1622, in _pjit_call_impl_python
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/pxla.py", line 1371, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 784, in _wrapped_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1162, in vmap_f
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+IndexError: index is out of bounds for axis 0 with size 0
+  warnings.warn(f"Falling back to step-by-step path (JAX scan failed): {e}")
+================================================================================
+PHASE 3: SIMPLE HASH OCTREE INTEGRATION TEST
+================================================================================
+
+Configuration:
+  Data files: 10
+  Hash octree: ENABLED
+  Particles: ~50
+  Timesteps: 50
+
+Starting test...
+--------------------------------------------------------------------------------
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+JAXTrace v0.1.0
+================================================================================
+CONFIGURATION SUMMARY
+================================================================================
+📁 Data pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+⏱  Timesteps to load: 10
+🔍 Auto-detect stable mesh: enabled
+🌲 Octree: max_elements=32, max_depth=12
+   ✅ SharedOctree: ENABLED (DEFAULT, AMR-compatible, 10 timesteps)
+🎯 Particles: {'x': 5, 'y': 5, 'z': 2}, distribution=uniform
+🏃 Tracking: 50 steps, dt=0.0025, integrator=rk4
+🚪 Boundary: x-axis, inlet=reflective, outlet=reflective
+💻 Device: gpu, memory=3.0 GB
+================================================================================
+
+================================================================================
+1. SYSTEM DIAGNOSTICS
+================================================================================
+🔍 Checking JAXTrace system requirements...
+   ✅ JAX: v0.8.0
+   ✅ VTK library: v9.5.2
+   ✅ SciPy: v1.16.2 (spatial indexing enabled)
+   ✅ Plotly: v6.3.1 (interactive plots available)
+   ✅ JAX acceleration: Available
+   ✅ VTK I/O: Available
+   ✅ Density estimation: Available
+   ✅ Visualization: Available
+✅ All critical requirements met!
+
+================================================================================
+2. CONFIGURATION
+================================================================================
+✅ JAXTrace configured: PackageConfig(dtype='float32', device='gpu', device_id=None, memory_limit_gb=3.0, auto_batch_sizing=True, oom_recovery=True, use_jax_jit=True, use_jax_vmap=True, precompile_functions=True, show_progress=True, verbose=False, precision='highest', optimization_level=2, _system_memory_gb=31.036884307861328, _available_devices=[{'type': 'cpu', 'devices': [CpuDevice(id=0)]}, {'type': 'gpu', 'devices': [CudaDevice(id=0)], 'memory': [{'num_allocs': 0, 'bytes_in_use': 0, 'peak_bytes_in_use': 0, 'largest_alloc_size': 0, 'bytes_limit': 2922135552, 'bytes_reserved': 0, 'peak_bytes_reserved': 0, 'largest_free_block_bytes': 0, 'pool_bytes': 0, 'peak_pool_bytes': 0}]}])
+✅ JAX device: [CudaDevice(id=0)]
+
+================================================================================
+3. VELOCITY FIELD
+================================================================================
+🔍 Loading VTK data with connectivity for octree FEM...
+   Pattern: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_*.pvtu
+   Found 160 files
+   Detecting stable mesh size (sampling first 10 files)...
+      Timestep 0: 2301 points
+   Mesh appears stable from the start (2301 points)
+   Loading 10 timesteps...
+   Mesh: 2301 points
+   Elements: 1296 tetrahedra
+🚀 Using SHARED OCTREE mode (AMR-compatible, memory-efficient)
+✅ Prepared 160 timesteps for on-demand loading (including refinement steps)
+🌲 Creating SHARED OCTREE field (AMR-compatible, memory-efficient)...
+📅 Extracting times from filenames...
+🌲 Building shared coarse octree (for direct interpolation)...
+======================================================================
+SHARED COARSE OCTREE BUILDER
+======================================================================
+Total mesh files: 160
+Configuration:
+  Coarse levels: 6
+  Max depth: 12
+  Fine structure reuse: True
+  Revolution timesteps: 10
+
+Step 1: Analyzing mesh phases...
+Auto-detecting refinement steps...
+Detected 9 refinement steps
+  Refinement phase: 9 steps
+  Revolution cycle: 10 steps (timesteps 150 to 159)
+
+Step 2: Building static coarse octree...
+Building coarse octree from 9 refinement steps...
+Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_8.pvtu
+Mesh: 781466 points, 3050881 cells
+Building coarse octree (levels 0-5)...
+Coarse octree built: 3105 nodes, 0.51 MB
+  Time: 7.1s
+  Memory: 0.51 MB
+
+Step 3: Building fine octrees with reuse detection...
+Building fine octrees for 10 timesteps...
+  Timestep 150: NEW structure (0.00 MB, 1 nodes)
+  Timestep 151: REUSED from timestep 150
+  Timestep 152: REUSED from timestep 150
+  Timestep 153: REUSED from timestep 150
+  Timestep 154: REUSED from timestep 150
+  Timestep 155: REUSED from timestep 150
+  Timestep 156: REUSED from timestep 150
+  Timestep 157: REUSED from timestep 150
+  Timestep 158: REUSED from timestep 150
+  Timestep 159: REUSED from timestep 150
+
+Fine octree building complete:
+  Total timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+  Time: 74.5s
+
+======================================================================
+BUILD COMPLETE
+======================================================================
+
+Memory Usage:
+  Coarse octree (static): 0.51 MB
+  Fine octrees (unique): 0.00 MB
+  Total: 0.51 MB
+
+Reuse Statistics:
+  Timesteps: 10
+  Unique structures: 1
+  Reuse rate: 90.0%
+  Memory savings: 10.0x
+
+Total build time: 100.7s
+======================================================================
+🔷 Phase 3: Building hash octrees for GPU-native search...
+  Built hash octree 1/10
+✅ Built 10 hash octrees for GPU-native search
+   Memory per hash octree: ~0.33 load factor
+📂 Loading reference timestep 150 for mesh structure...
+   (Using revolution cycle mesh, not refinement)
+   Total files: 160
+✅ Using EFFICIENT direct interpolation (coarse+fine octrees, ~1 MB memory)
+💾 Element ID caching enabled (Phase 1 optimization)
+✅ Shared octree field ready with 160 timesteps (per-timestep loading + direct interpolation)
+✅ Loaded octree FEM field: SharedOctreeFEMTimeSeriesField(timesteps=160, cache_size=3, cached=1, mode=direct, reuse_rate=90.0%)
+
+================================================================================
+4. PARTICLE TRACKING
+================================================================================
+📏 Field bounds: [-0.03  -0.023 -0.01 ] to [0.03  0.023 0.   ]
+🎯 Generating particles with uniform distribution...
+   Domain size: X=0.0600, Y=0.0460, Z=0.0100
+   Using explicit particle bounds: [array([-0.026, -0.023, -0.01 ]), array([-0.02 , -0.018, -0.005])]
+   Grid resolution: 5 x 5 x 2 = 50 particles
+   Concentrations: X=5, Y=5, Z=2 particles/unit
+   Distribution type: uniform
+✅ Generated 50 particles with uniform grid distribution
+🚪 Boundary conditions:
+   All boundaries: Reflective
+🚀 Setting up particle tracker...
+🏃 Running particle tracking...
+   Tracking 50 particles for 50 timesteps
+   Time span: (150.0, 159.0), dt=0.0025
+
+ERROR:2025-10-29 10:21:24,649:jax._src.callback:441: jax.io_callback failed
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 439, in io_callback_impl
+    return tree_util.tree_map(np.asarray, callback(*args))
+                                          ~~~~~~~~^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+    return tree_util.tree_leaves(self.callback_func(*args, **kwargs))
+                                 ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+    return self._sample_cpu_callback(pos_np, t_scalar)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+    result = self._sample_with_two_stage_interpolation(
+        jnp.asarray(query_positions_np),
+    ...<2 lines>...
+        alpha
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+    element_ids_left = self._find_elements_with_hash_octree(
+        query_positions_np,
+        revolution_idx_left
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+    candidate_elements_batch, n_elements_batch = hash_lookup_batch_jax(
+                                                 ~~~~~~~~~~~~~~~~~~~~~^
+        query_positions_jax,
+        ^^^^^^^^^^^^^^^^^^^^
+        hash_octree,
+        ^^^^^^^^^^^^
+        levels
+        ^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+    return jax.vmap(
+           ~~~~~~~~~
+        lambda code: hash_lookup_jax_from_morton(code, hash_octree),
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        in_axes=0  # Map over Morton codes (axis 0)
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    )(morton_codes_jax)
+    ~^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1158, in vmap_f
+    out_flat = batching.batch(
+        flat_fun, axis_data, in_axes_flat,
+        lambda: flatten_axes("vmap out_axes", out_tree(), out_axes)
+    ).call_wrapped(*args_flat)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+    return self.f_transformed(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+    outs, trace = f(tag, in_dims, *in_vals)
+                  ~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+    outs = f(*in_tracers)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+    ans = f(*py_args, **py_kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+    ans = _fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+    lambda code: hash_lookup_jax_from_morton(code, hash_octree),
+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+    elements = jax.lax.fori_loop(0, max_elements, copy_element, elements)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+    (_, result), _ = scan(
+                     ~~~~^
+        scan_body,
+        ^^^^^^^^^^
+    ...<3 lines>...
+        unroll=unroll,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+    return fun(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+    init_flat, carry_avals, carry_avals_out, init_tree, *rest = _create_jaxpr(init)
+                                                                ~~~~~~~~~~~~~^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+    jaxpr, consts, out_tree = _initial_style_jaxpr(
+                              ~~~~~~~~~~~~~~~~~~~~^
+        f, in_tree, (*carry_avals, *x_avals), debug_info=dbg_body)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+    jaxpr, consts, out_tree = _initial_style_open_jaxpr(
+                              ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        fun, in_tree, in_avals, debug_info)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+    jaxpr, _, consts = pe.trace_to_jaxpr_dynamic(wrapped_fun, in_avals)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+    return func(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+    ans = fun.call_wrapped(*in_tracers)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+    return self.f_transformed(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+    ans = f(*py_args)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+    return (i + 1, body_fun_ref()(i, x)), None
+                   ~~~~~~~~~~~~~~^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+    hash_octree.flattened_elements[src_idx],
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+    return indexing.rewriting_take(self, idx)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+    return internal_gather(arr, dynamic_idx)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+    indexer = index_to_gather(
+        np.shape(arr), idx, core.typeof(arr).sharding,
+        normalize_indices=normalize_indices)  # shared with _scatter_update
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+    raise IndexError(f"index is out of bounds for axis {x_axis} with size 0")
+IndexError: index is out of bounds for axis 0 with size 0
+E1029 10:21:24.652428 3117121 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 660, in bind_with_trace
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 1189, in process_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/dispatch.py", line 94, in apply_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 263, in cache_miss
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 146, in _python_pjit_helper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 1622, in _pjit_call_impl_python
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/pxla.py", line 1371, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 784, in _wrapped_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1162, in vmap_f
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+IndexError: index is out of bounds for axis 0 with size 0
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+    main(config=config)
+    ~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+    trajectory, strategy_info, initial_positions = execute_particle_tracking(
+                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        field=field,
+        ^^^^^^^^^^^^
+    ...<13 lines>...
+        inlet_distribution=cfg['inlet_distribution']
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+    trajectory = tracker.track_particles(
+        initial_positions=seeds,
+    ...<2 lines>...
+        dt=dt
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+    return self._track_single_batch(x0, times, dt)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+    v_initial = self.field_fn(x_current, times[0])
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+    field_fn = lambda positions, t: field.sample_at_positions(positions, t)
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
+    result = io_callback(
+        callback_wrapper,
+    ...<3 lines>...
+        ordered=False  # Allow JAX to reorder for efficiency
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
+    out_flat = io_callback_p.bind(
+        *flat_args,
+    ...<3 lines>...
+        ordered=ordered,
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
+    return self._true_bind(*args, **params)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
+    return self.bind_with_trace(prev_trace, args, params)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 660, in bind_with_trace
+    return trace.process_primitive(self, args, params)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 1189, in process_primitive
+    return primitive.impl(*args, **params)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/dispatch.py", line 94, in apply_primitive
+    outs = fun(*args)
+jax.errors.JaxRuntimeError: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 660, in bind_with_trace
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 1189, in process_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/dispatch.py", line 94, in apply_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 263, in cache_miss
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 146, in _python_pjit_helper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 1622, in _pjit_call_impl_python
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/pxla.py", line 1371, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 784, in _wrapped_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1162, in vmap_f
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+IndexError: index is out of bounds for axis 0 with size 0
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+================================================================================
+❌ HASH OCTREE INTEGRATION TEST FAILED
+================================================================================
+
+Error: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
+  File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 660, in bind_with_trace
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 1189, in process_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/dispatch.py", line 94, in apply_primitive
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 180, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 263, in cache_miss
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 146, in _python_pjit_helper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/pjit.py", line 1622, in _pjit_call_impl_python
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/pxla.py", line 1371, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 784, in _wrapped_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 790, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 576, in _find_elements_with_hash_octree
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 612, in hash_lookup_batch_jax
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api.py", line 1162, in vmap_f
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 703, in _batch_outer
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 719, in _batch_inner
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/batching.py", line 400, in flatten_fun_for_vmap
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 421, in _get_result_paths_thunk
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 613, in <lambda>
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 528, in hash_lookup_jax_from_morton
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2643, in fori_loop
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/traceback_util.py", line 184, in reraise_with_filtered_traceback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 300, in scan
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 282, in _create_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 63, in _initial_style_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/common.py", line 55, in _initial_style_open_jaxpr
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/profiler.py", line 359, in wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/interpreters/partial_eval.py", line 2483, in trace_to_jaxpr_dynamic
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/linear_util.py", line 212, in call_wrapped
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/api_util.py", line 90, in flatten_fun_nokwargs
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/lax/control_flow/loops.py", line 2529, in scanned_fun
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 521, in copy_element
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/array.py", line 374, in __getitem__
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 930, in index_to_gather
+IndexError: index is out of bounds for axis 0 with size 0
+
+Full traceback:

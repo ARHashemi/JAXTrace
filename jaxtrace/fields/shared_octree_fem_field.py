@@ -25,6 +25,7 @@ from .shared_octree_factory import SharedOctreeFactory, SharedOctreeConfig
 from .shared_coarse_octree import SharedOctreeStructure
 from .direct_octree_interpolator_jax import create_jax_direct_interpolator
 from .element_cache import ElementCache  # Phase 1 optimization
+from .hash_octree import build_hash_octree_from_fine_octree  # Phase 3: GPU-native hash octree
 
 
 class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
@@ -63,6 +64,7 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         shared_octree_config: Optional[Dict[str, Any]] = None,
         cache_size: int = 3,
         use_direct_interpolation: bool = True,
+        use_hash_octree: bool = False,  # Phase 3: GPU-native hash octree (default off for backward compatibility)
         data: Optional[np.ndarray] = None,
         positions: Optional[np.ndarray] = None,
         connectivity: Optional[np.ndarray] = None,
@@ -72,8 +74,10 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         self.mesh_files = mesh_files
         self.cache_size = cache_size
         self.use_direct_interpolation = use_direct_interpolation
+        self.use_hash_octree = use_hash_octree  # Phase 3: Enable GPU-native hash octree
         self._timestep_cache = OrderedDict()  # LRU cache: {timestep_idx: (velocity, positions, connectivity)}
         self._direct_interpolator_cache = {}  # Cache of direct interpolators per timestep
+        self._hash_octree_cache = {}  # Phase 3: Cache of hash octrees per timestep
 
         # Extract or validate times
         if times is None:
@@ -97,6 +101,25 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
             print("🌲 Building shared coarse octree (for direct interpolation)...")
             self.shared_octree = factory.build_from_files(mesh_files, verbose=True)
             self.shared_octree_config = config
+
+            # Phase 3: Build hash octrees for GPU-native search if enabled
+            if use_hash_octree:
+                print("🔷 Phase 3A: Building hash octrees EAGERLY for GPU-native search...")
+                print("   Building all hash octrees during initialization (not lazy)")
+                print("   This prevents crashes from building inside io_callback")
+
+                import jax
+                jax.config.update("jax_enable_x64", True)  # Required for uint64 Morton codes
+
+                # Store configuration for building
+                self._hash_octree_config = {
+                    'max_depth': self.shared_octree_config.max_octree_depth,
+                    'max_elements': self.shared_octree_config.max_cells_per_node,
+                    'load_factor': 0.77  # Phase 3: Default load factor with MurmurHash3 + high MAX_PROBES
+                }
+
+                # Note: Actual building happens after reference_timestep data is loaded
+                # See below after line ~150
         else:
             # Legacy mode: Skip shared octree building (will use monolithic octree instead)
             print("⏭️  Skipping shared octree build (legacy mode uses monolithic octree)")
@@ -183,6 +206,56 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
             # No octree_mesh or octree_interpolator (we use shared_octree directly)
             self.octree_mesh = None
             self.octree_interpolator = None
+
+            # Phase 3A: EAGER hash octree building (after reference data is loaded)
+            if use_hash_octree and hasattr(self, '_hash_octree_config'):
+                print("\n🔷 Phase 3A: Building hash octrees eagerly (during initialization)...")
+
+                # Get domain bounds from coarse octree
+                coarse = self.shared_octree.coarse_levels
+                bbox_min = coarse.bbox_min
+                bbox_max = coarse.bbox_max
+
+                # Determine revolution cycle range
+                revolution_timesteps = shared_octree_config.get('revolution_timesteps', 40)
+                reference_timestep = max(0, len(mesh_files) - revolution_timesteps)
+
+                n_octrees_to_build = len(mesh_files) - reference_timestep
+                print(f"   Building {n_octrees_to_build} hash octrees (timesteps {reference_timestep} to {len(mesh_files)-1})")
+                print(f"   This is a ONE-TIME cost during initialization")
+
+                # Phase 3F: Add hash octree reuse tracking
+                self._fine_to_hash_map = {}  # fine_structure_hash → hash_octree
+                self._hash_reuse_count = 0
+
+                # Build all hash octrees NOW (not lazy)
+                for timestep_idx in range(reference_timestep, len(mesh_files)):
+                    revolution_idx = timestep_idx - reference_timestep
+                    self._build_hash_octree_for_timestep(revolution_idx)
+
+                    if (revolution_idx + 1) % 5 == 0 or revolution_idx == 0:
+                        reuse_info = " (REUSED)" if revolution_idx in self._hash_octree_cache and hasattr(self._hash_octree_cache[revolution_idx], '_reused_from') else ""
+                        print(f"   [{revolution_idx+1}/{n_octrees_to_build}] Built hash octree for revolution timestep {revolution_idx}{reuse_info}")
+
+                # Print reuse statistics
+                n_unique = len(self._fine_to_hash_map)
+                reuse_rate = self._hash_reuse_count / n_octrees_to_build if n_octrees_to_build > 0 else 0.0
+                print(f"✅ Pre-built {len(self._hash_octree_cache)} hash octrees for GPU")
+                print(f"   Unique hash octrees: {n_unique} ({100*(1-reuse_rate):.1f}%)")
+                print(f"   Reused: {self._hash_reuse_count} timesteps ({100*reuse_rate:.1f}%)")
+                if self._hash_reuse_count > 0:
+                    print(f"   🚀 Speedup from reuse: ~{n_octrees_to_build/n_unique:.1f}×")
+
+                # Verify all octrees were built
+                missing = []
+                for i in range(n_octrees_to_build):
+                    if i not in self._hash_octree_cache:
+                        missing.append(i)
+
+                if missing:
+                    print(f"⚠️  Warning: Failed to build {len(missing)} hash octrees: {missing[:5]}...")
+                else:
+                    print(f"   All {n_octrees_to_build} hash octrees successfully built!")
 
             print(f"✅ Shared octree field ready with {len(mesh_files)} timesteps (per-timestep loading + direct interpolation)")
 
@@ -337,14 +410,13 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         """
         Sample field at positions using per-timestep data loading.
 
-        Phase 1 Task 2: Now JAX-traceable using io_callback for CPU operations!
+        Phase 3E: Pure JAX version - NO io_callback! Full GPU acceleration.
 
         This overrides the base class method to load velocity data on-demand
         for the specific timesteps needed.
 
-        Supports two modes:
-        - Direct interpolation: Uses coarse+fine octrees directly (~1 MB memory)
-        - Legacy mode: Uses monolithic third octree (~5-8 GB memory)
+        Uses hash octrees for GPU-accelerated element finding and pure JAX
+        for all operations (temporal interpolation, FEM interpolation).
 
         IMPORTANT: The mesh structure (positions, connectivity) is fixed at initialization.
         Only velocity values change across timesteps. This works for revolution cycle
@@ -361,26 +433,274 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
         query_positions = jnp.asarray(query_positions, dtype=jnp.float32)
         t_jax = jnp.asarray(t, dtype=jnp.float32)
 
-        # Phase 1 Task 2: Use io_callback to make CPU operations JAX-traceable
-        # This allows the RK4 loop to be fully JIT-compiled!
+        # Phase 3E: Pure JAX implementation - no io_callback!
+        # Check if hash octrees are available
+        if hasattr(self, '_hash_octree_cache') and len(self._hash_octree_cache) > 0:
+            # GPU-accelerated path with hash octrees
+            if not hasattr(self, '_gpu_path_logged'):
+                print("🚀 Phase 3E: Using GPU-accelerated hash octree path (no io_callback)")
+                self._gpu_path_logged = True
+            return self._sample_gpu_with_hash_octrees(query_positions, t_jax)
+        else:
+            # Fallback to io_callback for backward compatibility
+            if not hasattr(self, '_cpu_fallback_logged'):
+                print("⚠️  Falling back to io_callback (hash octrees not available)")
+                self._cpu_fallback_logged = True
+            def callback_wrapper(pos, t_array):
+                """Wrapper to convert JAX arrays to NumPy and extract scalar time."""
+                pos_np = np.asarray(pos, dtype=np.float32)
+                t_scalar = float(np.asarray(t_array).item())
+                return self._sample_cpu_callback(pos_np, t_scalar)
 
-        # Use io_callback to call CPU function
-        # Both positions and time are passed to the callback
-        def callback_wrapper(pos, t_array):
-            """Wrapper to convert JAX arrays to NumPy and extract scalar time."""
-            pos_np = np.asarray(pos, dtype=np.float32)
-            t_scalar = float(np.asarray(t_array).item())  # Extract scalar from JAX array
-            return self._sample_cpu_callback(pos_np, t_scalar)
+            result = io_callback(
+                callback_wrapper,
+                jax.ShapeDtypeStruct(query_positions.shape, jnp.float32),
+                query_positions,
+                t_jax,
+                ordered=False
+            )
+            return result
 
+    def _sample_gpu_with_hash_octrees(self, query_positions: jnp.ndarray, t: jnp.ndarray) -> jnp.ndarray:
+        """
+        Phase 3E: GPU-accelerated sampling with hash octrees (via io_callback).
+
+        Uses io_callback to access Python dicts (hash octree cache) but performs
+        actual computation (hash lookup, element testing, interpolation) on GPU via JAX.
+
+        Args:
+            query_positions: Query positions (M, 3) JAX array
+            t: Query time (scalar) JAX array
+
+        Returns:
+            Interpolated velocities (M, 3) JAX array
+        """
+        def gpu_sample_callback(positions, t_array):
+            """Callback that performs GPU operations with hash octrees."""
+            import numpy as np
+
+            # Convert to numpy for dict lookups
+            positions_np = np.asarray(positions, dtype=np.float32)
+            t_scalar = float(np.asarray(t_array).item())
+
+            # Find temporal indices (NumPy version for dict access)
+            times = self._times
+            t_clamped = np.clip(t_scalar, times[self.revolution_start_idx], times[self.revolution_end_idx])
+            right_idx = int(np.searchsorted(times, t_clamped))
+            right_idx = np.clip(right_idx, self.revolution_start_idx + 1, self.revolution_end_idx)
+            left_idx = right_idx - 1
+
+            # Compute alpha
+            t_left = times[left_idx]
+            t_right = times[right_idx]
+            dt = t_right - t_left
+            alpha = (t_clamped - t_left) / dt if dt > 1e-10 else 0.0
+
+            # Sample at both timesteps (GPU operations via JAX inside)
+            field_left = self._sample_field_gpu_timestep_callback(positions_np, left_idx)
+            field_right = self._sample_field_gpu_timestep_callback(positions_np, right_idx)
+
+            # Temporal interpolation
+            result = (1.0 - alpha) * field_left + alpha * field_right
+            return result.astype(np.float32)
+
+        # Use io_callback
+        from jax.experimental import io_callback
         result = io_callback(
-            callback_wrapper,
+            gpu_sample_callback,
             jax.ShapeDtypeStruct(query_positions.shape, jnp.float32),
             query_positions,
-            t_jax,
-            ordered=False  # Allow JAX to reorder for efficiency
+            t,
+            ordered=False
         )
 
         return result
+
+    def _sample_field_gpu_timestep_callback(self, positions_np: np.ndarray, timestep_idx: int) -> np.ndarray:
+        """
+        Sample field at a single timestep using GPU hash octrees.
+
+        This is called from within io_callback, so it receives NumPy arrays and Python ints.
+        It performs GPU operations using JAX and returns NumPy results.
+
+        Args:
+            positions_np: Query positions (M, 3) NumPy array
+            timestep_idx: Global timestep index (Python int)
+
+        Returns:
+            Field values (M, 3) NumPy array
+        """
+        from .hash_octree import hash_lookup_batch_jax
+        from .element_testing_jax import test_candidates_batch_jax_compiled
+        from .interpolator_jax_simple import interpolate_particles_with_known_elements
+        import numpy as np
+
+        # Convert timestep index to revolution index (Python int arithmetic)
+        revolution_idx = timestep_idx - self.revolution_start_idx
+
+        # Get hash octree for this timestep (dict access with Python int)
+        if revolution_idx not in self._hash_octree_cache:
+            raise RuntimeError(
+                f"Hash octree for revolution_idx={revolution_idx} not found. "
+                f"Available: {list(self._hash_octree_cache.keys())}"
+            )
+
+        hash_octree = self._hash_octree_cache[revolution_idx]
+
+        # Convert positions to JAX for GPU operations
+        query_positions = jnp.asarray(positions_np, dtype=jnp.float32)
+
+        # Hash lookup to find candidate elements (GPU)
+        max_fine_level = self.shared_octree_config.max_octree_depth - 1
+        levels = jnp.full(len(query_positions), max_fine_level, dtype=jnp.int32)
+
+        candidate_elements_batch, n_elements_batch = hash_lookup_batch_jax(
+            query_positions,
+            hash_octree,
+            levels
+        )
+
+        # Element testing to find containing elements (GPU)
+        positions_jax = jnp.asarray(self.reference_positions, dtype=jnp.float32)
+        connectivity_jax = jnp.asarray(self.reference_connectivity, dtype=jnp.int32)
+
+        element_ids = test_candidates_batch_jax_compiled(
+            query_positions,
+            candidate_elements_batch,
+            n_elements_batch,
+            positions_jax,
+            connectivity_jax,
+            max_candidates=hash_octree.max_elements_per_cell
+        )
+
+        # Load velocity field for this timestep
+        velocity, _, _ = self._load_timestep_data(timestep_idx)
+        velocity_jax = jnp.asarray(velocity, dtype=jnp.float32)
+
+        # FEM interpolation (GPU)
+        interpolated_values = interpolate_particles_with_known_elements(
+            query_positions,
+            element_ids,
+            connectivity_jax,
+            positions_jax,
+            velocity_jax
+        )
+
+        # Convert back to NumPy
+        return np.asarray(interpolated_values, dtype=np.float32)
+
+    def _find_temporal_indices_jax(self, t: jnp.ndarray) -> tuple:
+        """
+        Find temporal interpolation indices in pure JAX (GPU-compilable).
+
+        Phase 3E: Returns indices in the REVOLUTION CYCLE range (not global indices).
+        The returned indices should be in range [revolution_start_idx, revolution_end_idx].
+
+        Args:
+            t: Query time (scalar JAX array)
+
+        Returns:
+            left_idx: Left timestep GLOBAL index (int) - maps to revolution cycle
+            right_idx: Right timestep GLOBAL index (int) - maps to revolution cycle
+            alpha: Interpolation weight [0, 1]
+        """
+        # Convert times to JAX array (constant during tracking)
+        times_jax = jnp.asarray(self._times, dtype=jnp.float32)
+
+        # Get revolution cycle time range
+        t_start = times_jax[self.revolution_start_idx]
+        t_end = times_jax[self.revolution_end_idx]
+
+        # Clamp time to revolution cycle range (not full data range!)
+        t_clamped = jnp.clip(t, t_start, t_end)
+
+        # Find indices using searchsorted (binary search, O(log n))
+        right_idx = jnp.searchsorted(times_jax, t_clamped)
+
+        # Clamp to revolution cycle range
+        right_idx = jnp.clip(right_idx, self.revolution_start_idx + 1, self.revolution_end_idx)
+        left_idx = right_idx - 1
+
+        # Compute interpolation weight
+        t_left = times_jax[left_idx]
+        t_right = times_jax[right_idx]
+        dt = t_right - t_left
+
+        # Safe division (avoid divide by zero)
+        alpha = jnp.where(
+            dt > 1e-10,
+            (t_clamped - t_left) / dt,
+            0.0
+        )
+
+        return left_idx, right_idx, alpha
+
+    def _sample_field_gpu_single_timestep(
+        self, query_positions: jnp.ndarray, timestep_idx: int
+    ) -> jnp.ndarray:
+        """
+        Sample field at single timestep using GPU hash octrees (pure JAX).
+
+        Args:
+            query_positions: Query positions (M, 3) JAX array
+            timestep_idx: Timestep index
+
+        Returns:
+            Field values (M, 3) JAX array
+        """
+        from .hash_octree import hash_lookup_batch_jax
+        from .element_testing_jax import test_candidates_batch_jax_compiled
+        from .interpolator_jax_simple import interpolate_particles_with_known_elements
+
+        # Convert timestep index to revolution index
+        revolution_idx = int(timestep_idx) - self.revolution_start_idx
+
+        # Get hash octree for this timestep
+        if revolution_idx not in self._hash_octree_cache:
+            raise RuntimeError(
+                f"Hash octree for revolution_idx={revolution_idx} not found. "
+                f"Available: {list(self._hash_octree_cache.keys())}"
+            )
+
+        hash_octree = self._hash_octree_cache[revolution_idx]
+
+        # Hash lookup to find candidate elements (GPU)
+        max_fine_level = self.shared_octree_config.max_octree_depth - 1
+        levels = jnp.full(len(query_positions), max_fine_level, dtype=jnp.int32)
+
+        candidate_elements_batch, n_elements_batch = hash_lookup_batch_jax(
+            query_positions,
+            hash_octree,
+            levels
+        )
+
+        # Element testing to find containing elements (GPU)
+        positions_jax = jnp.asarray(self.reference_positions, dtype=jnp.float32)
+        connectivity_jax = jnp.asarray(self.reference_connectivity, dtype=jnp.int32)
+
+        element_ids = test_candidates_batch_jax_compiled(
+            query_positions,
+            candidate_elements_batch,
+            n_elements_batch,
+            positions_jax,
+            connectivity_jax,
+            max_candidates=hash_octree.max_elements_per_cell
+        )
+
+        # Load velocity field for this timestep
+        velocity, _, _ = self._load_timestep_data(int(timestep_idx))
+        velocity_jax = jnp.asarray(velocity, dtype=jnp.float32)
+
+        # FEM interpolation (GPU)
+        interpolated_values = interpolate_particles_with_known_elements(
+            query_positions,
+            element_ids,
+            connectivity_jax,
+            positions_jax,
+            velocity_jax
+        )
+
+        return interpolated_values
 
     def _sample_with_direct_interpolation(
         self, query_positions: jnp.ndarray, left_idx: int, right_idx: int, alpha: float
@@ -508,18 +828,159 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
 
             return (1.0 - alpha) * values_left + alpha * values_right
 
+    def _build_hash_octree_for_timestep(self, revolution_idx: int):
+        """
+        Phase 3A: Build hash octree EAGERLY from mesh data during initialization.
+        Phase 3F: Implement hash octree reuse based on fine_structure_hash.
+
+        This is called during __init__() to pre-build all hash octrees.
+        It runs on CPU and uses NumPy arrays (no JAX, no Numba yet).
+
+        Args:
+            revolution_idx: Revolution cycle index (0 to revolution_timesteps-1)
+        """
+        from .hash_octree import build_hash_octree_from_mesh_data
+        from .coarse_octree_builder import load_mesh_from_pvtu
+
+        # Map revolution_idx to absolute timestep
+        timestep_abs = self.revolution_start_idx + revolution_idx
+
+        # Phase 3F: Check if we can reuse existing hash octree
+        # Get the fine octree structure hash for this timestep
+        # NOTE: fine_levels_per_timestep is indexed by revolution_idx (0-39), not global timestep!
+        if hasattr(self.shared_octree, 'fine_levels_per_timestep') and revolution_idx < len(self.shared_octree.fine_levels_per_timestep):
+            fine_level = self.shared_octree.fine_levels_per_timestep[revolution_idx]
+            fine_hash = fine_level.structure_hash
+
+            # Check if we already built a hash octree for this fine structure
+            if hasattr(self, '_fine_to_hash_map') and fine_hash in self._fine_to_hash_map:
+                # Reuse existing hash octree!
+                hash_octree = self._fine_to_hash_map[fine_hash]
+                self._hash_octree_cache[revolution_idx] = hash_octree
+
+                # Track reuse for statistics
+                if hasattr(self, '_hash_reuse_count'):
+                    self._hash_reuse_count += 1
+
+                # Mark as reused (for logging)
+                hash_octree._reused_from = fine_hash
+                return
+
+        # No reuse possible - build new hash octree
+        # Load mesh for this timestep (returns NumPy arrays)
+        mesh_file = self.mesh_files[timestep_abs]
+        mesh_data = load_mesh_from_pvtu(mesh_file)
+
+        # Get domain bounds from coarse octree (NumPy arrays)
+        coarse = self.shared_octree.coarse_levels
+        bbox_min = np.asarray(coarse.bbox_min, dtype=np.float32)
+        bbox_max = np.asarray(coarse.bbox_max, dtype=np.float32)
+
+        # Ensure mesh data is NumPy (not JAX)
+        positions_np = np.asarray(mesh_data.points, dtype=np.float32)
+        connectivity_np = np.asarray(mesh_data.cells, dtype=np.int32)
+
+        # Build hash octree from mesh (CPU, NumPy-based)
+        hash_octree = build_hash_octree_from_mesh_data(
+            positions=positions_np,
+            connectivity=connectivity_np,
+            bbox_min=bbox_min,
+            bbox_max=bbox_max,
+            max_depth=self._hash_octree_config['max_depth'],
+            max_elements_per_leaf=self._hash_octree_config['max_elements'],
+            target_load_factor=self._hash_octree_config['load_factor']
+        )
+
+        # Cache it
+        self._hash_octree_cache[revolution_idx] = hash_octree
+
+        # Phase 3F: Store in reuse map keyed by fine structure hash
+        # NOTE: fine_levels_per_timestep is indexed by revolution_idx (0-39), not global timestep!
+        if hasattr(self.shared_octree, 'fine_levels_per_timestep') and revolution_idx < len(self.shared_octree.fine_levels_per_timestep):
+            fine_level = self.shared_octree.fine_levels_per_timestep[revolution_idx]
+            fine_hash = fine_level.structure_hash
+            if hasattr(self, '_fine_to_hash_map'):
+                self._fine_to_hash_map[fine_hash] = hash_octree
+
+    def _find_elements_with_hash_octree(
+        self,
+        query_positions_np: np.ndarray,
+        revolution_idx: int
+    ) -> np.ndarray:
+        """
+        Phase 3: GPU-native element finding using hash octree.
+
+        This replaces CPU octree traversal with GPU hash table lookup.
+
+        Args:
+            query_positions_np: Query positions (N, 3) NumPy array
+            revolution_idx: Revolution cycle timestep index
+
+        Returns:
+            element_ids: (N,) array of element IDs (-1 if not found)
+        """
+        from .hash_octree import hash_lookup_batch_jax
+        from .element_testing_jax import test_candidates_batch_jax_compiled  # Phase 3C: Pure JAX
+
+        # Phase 3A: Hash octrees are now pre-built during initialization (not lazy)
+        # Simply retrieve from cache
+        if revolution_idx not in self._hash_octree_cache:
+            raise RuntimeError(
+                f"Hash octree for revolution_idx={revolution_idx} not found in cache. "
+                f"This should have been pre-built during initialization. "
+                f"Available indices: {list(self._hash_octree_cache.keys())}"
+            )
+
+        hash_octree = self._hash_octree_cache[revolution_idx]
+
+        # Convert positions to JAX
+        query_positions_jax = jnp.asarray(query_positions_np, dtype=jnp.float32)
+
+        # All queries at max fine level (TODO: adaptive level selection)
+        max_fine_level = self.shared_octree_config.max_octree_depth - 1
+        levels = jnp.full(len(query_positions_np), max_fine_level, dtype=jnp.int32)
+
+        # Batch hash lookup (GPU-parallelized via vmap)
+        candidate_elements_batch, n_elements_batch = hash_lookup_batch_jax(
+            query_positions_jax,
+            hash_octree,
+            levels
+        )
+
+        # Phase 3C: Test candidates with PURE JAX (GPU-compilable, NO Numba)
+        # Extract mesh data as JAX arrays
+        positions_jax = jnp.asarray(self.reference_positions, dtype=jnp.float32)
+        connectivity_jax = jnp.asarray(self.reference_connectivity, dtype=jnp.int32)
+
+        # Test all candidates (GPU)
+        element_ids_jax = test_candidates_batch_jax_compiled(
+            query_positions_jax,
+            candidate_elements_batch,
+            n_elements_batch,
+            positions_jax,
+            connectivity_jax,
+            max_candidates=hash_octree.max_elements_per_cell
+        )
+
+        # Convert result to NumPy for return
+        element_ids = np.asarray(element_ids_jax, dtype=np.int32)
+
+        return element_ids
+
     def _sample_with_two_stage_interpolation(
         self, query_positions: jnp.ndarray, left_idx: int, right_idx: int, alpha: float
     ) -> jnp.ndarray:
         """
         Two-stage interpolation: CPU octree search + GPU interpolation.
 
+        Phase 3 Update: Can use GPU hash octree if use_hash_octree=True.
+
         This eliminates JAX compilation memory issues by separating:
-        - Stage 1 (CPU): Octree traversal to find element IDs
+        - Stage 1 (CPU/GPU): Octree traversal or hash lookup to find element IDs
         - Stage 2 (GPU): Direct interpolation with known element IDs
 
         Memory: ~15 MB (vs 7.68 GB for old direct mode)
-        Speed: ~5-100 ms for 500-45K particles
+        Speed: ~5-100 ms for 500-45K particles (CPU), faster with GPU hash octree
         """
         from .octree_search_cpu import find_elements_for_particles_interface
         from .interpolator_jax_simple import create_jax_interpolator_simple
@@ -562,11 +1023,17 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
                     f"but reference mesh has {expected_n_nodes} nodes."
                 )
 
-            # Stage 1 (CPU): Find element IDs via octree search (with caching in Phase 1)
+            # Stage 1: Find element IDs via octree search or hash lookup
             revolution_idx = left_idx - self.revolution_start_idx
 
-            # Phase 1 Optimization: Use element cache if enabled
-            if self.use_element_caching:
+            # Phase 3: Use GPU hash octree if enabled
+            if self.use_hash_octree:
+                element_ids = self._find_elements_with_hash_octree(
+                    query_positions_np,
+                    revolution_idx
+                )
+            # Phase 1 Optimization: Use element cache if enabled (CPU octree)
+            elif self.use_element_caching:
                 n_particles = len(query_positions_np)
                 particle_ids = np.arange(n_particles, dtype=np.int32)
 
@@ -582,7 +1049,7 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
                     timestep_idx=revolution_idx
                 )
             else:
-                # Original path (no caching)
+                # Original path (CPU octree, no caching)
                 element_ids = find_elements_for_particles_interface(
                     query_positions_np,
                     self.shared_octree,
@@ -615,25 +1082,37 @@ class SharedOctreeFEMTimeSeriesField(OctreeFEMTimeSeriesFieldOptimized):
                     f"but reference mesh has {expected_n_nodes} nodes."
                 )
 
-            # Stage 1 (CPU): Find element IDs for both timesteps
+            # Stage 1: Find element IDs for both timesteps
             revolution_idx_left = left_idx - self.revolution_start_idx
             revolution_idx_right = right_idx - self.revolution_start_idx
 
-            element_ids_left = find_elements_for_particles_interface(
-                query_positions_np,
-                self.shared_octree,
-                self.reference_positions,
-                self.reference_connectivity,
-                revolution_idx_left
-            )
+            # Phase 3: Use GPU hash octree if enabled
+            if self.use_hash_octree:
+                element_ids_left = self._find_elements_with_hash_octree(
+                    query_positions_np,
+                    revolution_idx_left
+                )
+                element_ids_right = self._find_elements_with_hash_octree(
+                    query_positions_np,
+                    revolution_idx_right
+                )
+            else:
+                # CPU octree search
+                element_ids_left = find_elements_for_particles_interface(
+                    query_positions_np,
+                    self.shared_octree,
+                    self.reference_positions,
+                    self.reference_connectivity,
+                    revolution_idx_left
+                )
 
-            element_ids_right = find_elements_for_particles_interface(
-                query_positions_np,
-                self.shared_octree,
-                self.reference_positions,
-                self.reference_connectivity,
-                revolution_idx_right
-            )
+                element_ids_right = find_elements_for_particles_interface(
+                    query_positions_np,
+                    self.shared_octree,
+                    self.reference_positions,
+                    self.reference_connectivity,
+                    revolution_idx_right
+                )
 
             # Stage 2 (GPU): Interpolate with known element IDs
             values_left = self._jax_simple_interpolator(
@@ -880,11 +1359,17 @@ def create_shared_octree_fem_field(
     # Set to False for legacy mode (stable mesh only, no element caching)
     use_direct_interpolation = user_config.get('use_direct_interpolation', True)
 
+    # Phase 3: GPU-native hash octree (EXPERIMENTAL)
+    # Replaces CPU octree search with GPU hash table lookup
+    # Requires use_direct_interpolation=True
+    use_hash_octree = user_config.get('use_hash_octree', False)
+
     return SharedOctreeFEMTimeSeriesField(
         mesh_files=mesh_files,
         times=times,
         shared_octree_config=shared_config,
         cache_size=cache_size,
         use_direct_interpolation=use_direct_interpolation,
+        use_hash_octree=use_hash_octree,  # Phase 3
         **field_config
     )

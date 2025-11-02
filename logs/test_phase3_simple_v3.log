@@ -1,6 +1,6 @@
 /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
   from .hdf5_io import H5Series
-ERROR:2025-10-29 10:50:57,226:jax._src.callback:441: jax.io_callback failed
+ERROR:2025-10-29 10:05:18,739:jax._src.callback:441: jax.io_callback failed
 Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 439, in io_callback_impl
     return tree_util.tree_map(np.asarray, callback(*args))
@@ -8,56 +8,25 @@ Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
     return tree_util.tree_leaves(self.callback_func(*args, **kwargs))
                                  ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
     return self._sample_cpu_callback(pos_np, t_scalar)
            ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
     result = self._sample_with_two_stage_interpolation(
         jnp.asarray(query_positions_np),
     ...<2 lines>...
         alpha
     )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
     element_ids_left = self._find_elements_with_hash_octree(
         query_positions_np,
         revolution_idx_left
     )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-    self._build_hash_octree_for_timestep(revolution_idx)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-    hash_octree = build_hash_octree_from_mesh_data(
-        positions=mesh_data.points,
-    ...<5 lines>...
-        target_load_factor=self._hash_octree_config['load_factor']
-    )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-    leaf_nodes = subdivide_node(root_center, root_half_size, all_elements, 0)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-    leaves.extend(subdivide_node(child_center, child_half_size, child_elements, depth + 1))
-                  ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-    leaves.extend(subdivide_node(child_center, child_half_size, child_elements, depth + 1))
-                  ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-    morton_code = encode_morton_3d(
-        float(center[0]), float(center[1]), float(center[2]),
-        depth,
-        bbox_min, bbox_max
-    )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 687, in typeof_pyval
-    tp = typeof(val, Purpose.argument)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-    ty = typeof_impl(val, c)
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-    return dispatch(args[0].__class__)(*args, **kw)
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-    tp = _typeof_buffer(val, c)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 69, in _typeof_buffer
-    m = memoryview(val)
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
-E1029 10:50:57.263918 3138114 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+    max_fine_level = self.shared_octree_config.n_coarse_levels + self.shared_octree_config.n_fine_levels - 1
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'. Did you mean: 'n_coarse_levels'?
+E1029 10:05:18.741294 3100513 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
   File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
   File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
@@ -73,21 +42,11 @@ E1029 10:50:57.263918 3138114 pjrt_stream_executor_client.cc:2974] Execution of 
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 688, in typeof_pyval
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 70, in _typeof_buffer
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'
 /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py:424: UserWarning: Falling back to step-by-step path (JAX scan failed): INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
   File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
@@ -104,21 +63,11 @@ BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU bu
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 688, in typeof_pyval
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 70, in _typeof_buffer
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'
   warnings.warn(f"Falling back to step-by-step path (JAX scan failed): {e}")
 ================================================================================
 PHASE 3: SIMPLE HASH OCTREE INTEGRATION TEST
@@ -208,7 +157,7 @@ Loading most refined mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eul
 Mesh: 781466 points, 3050881 cells
 Building coarse octree (levels 0-5)...
 Coarse octree built: 3105 nodes, 0.51 MB
-  Time: 7.0s
+  Time: 6.9s
   Memory: 0.51 MB
 
 Step 3: Building fine octrees with reuse detection...
@@ -229,7 +178,7 @@ Fine octree building complete:
   Unique structures: 1
   Reuse rate: 90.0%
   Memory savings: 10.0x
-  Time: 75.9s
+  Time: 75.7s
 
 ======================================================================
 BUILD COMPLETE
@@ -246,11 +195,12 @@ Reuse Statistics:
   Reuse rate: 90.0%
   Memory savings: 10.0x
 
-Total build time: 101.8s
+Total build time: 101.1s
 ======================================================================
 🔷 Phase 3: Building hash octrees for GPU-native search...
-   Note: Hash octrees are built lazily on first access per timestep
-   This avoids memory overhead for unused timesteps.
+  Built hash octree 1/10
+✅ Built 10 hash octrees for GPU-native search
+   Memory per hash octree: ~0.33 load factor
 📂 Loading reference timestep 150 for mesh structure...
    (Using revolution cycle mesh, not refinement)
    Total files: 160
@@ -277,7 +227,7 @@ Total build time: 101.8s
    Tracking 50 particles for 50 timesteps
    Time span: (150.0, 159.0), dt=0.0025
 
-ERROR:2025-10-29 11:02:18,346:jax._src.callback:441: jax.io_callback failed
+ERROR:2025-10-29 10:05:18,778:jax._src.callback:441: jax.io_callback failed
 Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 439, in io_callback_impl
     return tree_util.tree_map(np.asarray, callback(*args))
@@ -285,63 +235,32 @@ Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
     return tree_util.tree_leaves(self.callback_func(*args, **kwargs))
                                  ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
     return self._sample_cpu_callback(pos_np, t_scalar)
            ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
     result = self._sample_with_two_stage_interpolation(
         jnp.asarray(query_positions_np),
     ...<2 lines>...
         alpha
     )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
     element_ids_left = self._find_elements_with_hash_octree(
         query_positions_np,
         revolution_idx_left
     )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-    self._build_hash_octree_for_timestep(revolution_idx)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-    hash_octree = build_hash_octree_from_mesh_data(
-        positions=mesh_data.points,
-    ...<5 lines>...
-        target_load_factor=self._hash_octree_config['load_factor']
-    )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-    leaf_nodes = subdivide_node(root_center, root_half_size, all_elements, 0)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-    leaves.extend(subdivide_node(child_center, child_half_size, child_elements, depth + 1))
-                  ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-    leaves.extend(subdivide_node(child_center, child_half_size, child_elements, depth + 1))
-                  ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-    morton_code = encode_morton_3d(
-        float(center[0]), float(center[1]), float(center[2]),
-        depth,
-        bbox_min, bbox_max
-    )
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 687, in typeof_pyval
-    tp = typeof(val, Purpose.argument)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-    ty = typeof_impl(val, c)
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-    return dispatch(args[0].__class__)(*args, **kw)
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-    tp = _typeof_buffer(val, c)
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 69, in _typeof_buffer
-    m = memoryview(val)
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
-E1029 11:02:18.375257 3138114 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+    max_fine_level = self.shared_octree_config.n_coarse_levels + self.shared_octree_config.n_fine_levels - 1
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'. Did you mean: 'n_coarse_levels'?
+E1029 10:05:18.779191 3100513 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: INTERNAL: CpuCallback error calling callback: Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
   File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 340, in main
   File "/home/arhashemi/Workspace/welding/JAXTrace/example_workflow.py", line 1027, in execute_particle_tracking
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 395, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
@@ -358,21 +277,11 @@ E1029 11:02:18.375257 3138114 pjrt_stream_executor_client.cc:2974] Execution of 
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 688, in typeof_pyval
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 70, in _typeof_buffer
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'
 Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/test_phase3_simple.py", line 78, in <module>
     main(config=config)
@@ -401,7 +310,7 @@ Traceback (most recent call last):
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
     field_fn = lambda positions, t: field.sample_at_positions(positions, t)
                                     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 395, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
     result = io_callback(
         callback_wrapper,
     ...<3 lines>...
@@ -434,7 +343,7 @@ jax.errors.JaxRuntimeError: INTERNAL: CpuCallback error calling callback: Traceb
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 395, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
@@ -451,21 +360,11 @@ jax.errors.JaxRuntimeError: INTERNAL: CpuCallback error calling callback: Traceb
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 688, in typeof_pyval
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 70, in _typeof_buffer
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'
 --------------------
 For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
 
@@ -480,7 +379,7 @@ Error: INTERNAL: CpuCallback error calling callback: Traceback (most recent call
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 356, in track_particles
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 437, in _track_single_batch
   File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/tracking/tracker.py", line 837, in <lambda>
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 395, in sample_at_positions
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 408, in sample_at_positions
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 578, in io_callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 632, in bind
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/core.py", line 648, in _true_bind
@@ -497,20 +396,10 @@ Error: INTERNAL: CpuCallback error calling callback: Traceback (most recent call
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 496, in _callback
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 442, in io_callback_impl
   File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/callback.py", line 70, in __call__
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 393, in callback_wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 338, in _sample_cpu_callback
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 818, in _sample_with_two_stage_interpolation
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 591, in _find_elements_with_hash_octree
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 554, in _build_hash_octree_for_timestep
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 730, in build_hash_octree_from_mesh_data
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 721, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/hash_octree.py", line 689, in subdivide_node
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/dispatcher.py", line 688, in typeof_pyval
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 33, in typeof
-  File "/usr/lib/python3.13/functools.py", line 934, in wrapper
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 46, in typeof_impl
-  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numba/core/typing/typeof.py", line 70, in _typeof_buffer
-BufferError: INVALID_ARGUMENT: Python buffer protocol is only defined for CPU buffers.
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 406, in callback_wrapper
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 351, in _sample_cpu_callback
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 789, in _sample_with_two_stage_interpolation
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/fields/shared_octree_fem_field.py", line 571, in _find_elements_with_hash_octree
+AttributeError: 'SharedOctreeConfig' object has no attribute 'n_fine_levels'
 
 Full traceback:

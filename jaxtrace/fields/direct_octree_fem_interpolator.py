@@ -283,16 +283,19 @@ def create_direct_octree_fem_interpolator(
 
     # Get coarse octree data
     coarse = shared_octree.coarse_levels
-    coarse_node_centers = coarse.node_centers
-    coarse_node_sizes = coarse.node_sizes
+    coarse_node_centers = coarse.node_centers  # Uses property
+    coarse_node_sizes = coarse.node_sizes      # Uses property
     coarse_node_children = coarse.node_children
     coarse_node_element_lists = coarse.node_element_lists
     coarse_node_element_counts = coarse.node_element_counts
 
     # Get fine octree data for this timestep
+    # Phase 2: Fine octree needs domain bounds to decode Morton codes
     fine = shared_octree.get_fine_level_for_timestep(timestep_idx)
-    fine_node_centers = fine.node_centers
-    fine_node_sizes = fine.node_sizes
+    domain_min = np.asarray(coarse.bbox_min, dtype=np.float32)
+    domain_max = np.asarray(coarse.bbox_max, dtype=np.float32)
+    fine_node_centers = fine.decode_node_centers(domain_min, domain_max)
+    fine_node_sizes = fine.decode_node_sizes(domain_min, domain_max)
     fine_node_children = fine.node_children
     fine_node_element_lists = fine.node_element_lists
     fine_node_element_counts = fine.node_element_counts

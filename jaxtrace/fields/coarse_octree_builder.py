@@ -8,6 +8,8 @@ during the revolution cycle.
 
 Key insight: The coarse structure represents the basic tetrahedral mesh
 before elements start splitting. It remains stable during tool rotation.
+
+Phase 2 Update: Uses Morton codes for 3× memory reduction.
 """
 
 import jax.numpy as jnp
@@ -17,6 +19,7 @@ from dataclasses import dataclass
 import vtk
 
 from .shared_coarse_octree import OctreeCoarseLevels
+from .morton_code import encode_morton_3d  # Phase 2: Morton code encoding
 
 
 @dataclass
@@ -227,17 +230,26 @@ def build_coarse_octree(
     n_nodes = len(nodes)
     max_elements = max_cells_per_node
 
-    node_centers = np.zeros((n_nodes, 3), dtype=np.float32)
-    node_sizes = np.zeros(n_nodes, dtype=np.float32)
-    node_levels = np.zeros(n_nodes, dtype=np.int32)
+    # Phase 2: Encode nodes as Morton codes instead of center + size
+    node_morton_codes = np.zeros(n_nodes, dtype=np.uint64)
     node_children = np.full((n_nodes, 8), -1, dtype=np.int32)
     node_element_lists = np.full((n_nodes, max_elements), -1, dtype=np.int32)
     node_element_counts = np.zeros(n_nodes, dtype=np.int32)
 
+    # Domain bounds for Morton encoding
+    domain_min = np.array(mesh.bbox_min, dtype=np.float32)
+    domain_max = np.array(mesh.bbox_max, dtype=np.float32)
+
     for i, node in enumerate(nodes):
-        node_centers[i] = node['center']
-        node_sizes[i] = node['size']
-        node_levels[i] = node['level']
+        # Phase 2: Encode center and level as Morton code
+        center = node['center']
+        level = node['level']
+        node_morton_codes[i] = encode_morton_3d(
+            center[0], center[1], center[2],
+            level,
+            domain_min, domain_max
+        )
+
         node_children[i] = node['children']
 
         # Store cell indices
@@ -249,9 +261,7 @@ def build_coarse_octree(
     return OctreeCoarseLevels(
         bbox_min=jnp.array(mesh.bbox_min),
         bbox_max=jnp.array(mesh.bbox_max),
-        node_centers=jnp.array(node_centers),
-        node_sizes=jnp.array(node_sizes),
-        node_levels=jnp.array(node_levels),
+        node_morton_codes=jnp.array(node_morton_codes),  # Phase 2: Morton codes
         node_children=jnp.array(node_children),
         node_element_lists=jnp.array(node_element_lists),
         node_element_counts=jnp.array(node_element_counts),
@@ -294,7 +304,7 @@ def build_coarse_octree_from_refinement_steps(
         max_cells_per_node=max_cells_per_node
     )
 
-    n_nodes = len(coarse_octree.node_centers)
+    n_nodes = len(coarse_octree.node_morton_codes)  # Phase 2: Use Morton codes
     memory_mb = coarse_octree.get_memory_size() / (1024 ** 2)
 
     print(f"Coarse octree built: {n_nodes} nodes, {memory_mb:.2f} MB")
