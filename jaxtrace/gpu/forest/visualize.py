@@ -127,6 +127,10 @@ def _plot_blocks_2d(
     labels: Tuple[str, str]
 ):
     """Plot blocks in 2D projection."""
+    # Track bounds for axis limits
+    all_xmin, all_xmax = float('inf'), float('-inf')
+    all_ymin, all_ymax = float('inf'), float('-inf')
+
     for block in blocks:
         b = block.bounds
         ax0, ax1 = proj_axes
@@ -142,6 +146,18 @@ def _plot_blocks_2d(
             fill=False, edgecolor='blue', linewidth=1.0, alpha=0.6
         )
         ax.add_patch(rect)
+
+        # Update bounds
+        all_xmin = min(all_xmin, xmin)
+        all_xmax = max(all_xmax, xmax)
+        all_ymin = min(all_ymin, ymin)
+        all_ymax = max(all_ymax, ymax)
+
+    # Set axis limits with small margin
+    margin_x = (all_xmax - all_xmin) * 0.05
+    margin_y = (all_ymax - all_ymin) * 0.05
+    ax.set_xlim(all_xmin - margin_x, all_xmax + margin_x)
+    ax.set_ylim(all_ymin - margin_y, all_ymax + margin_y)
 
     # Overlay particles if provided
     if particles is not None:
