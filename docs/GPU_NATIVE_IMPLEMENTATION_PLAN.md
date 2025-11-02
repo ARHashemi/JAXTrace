@@ -5,8 +5,11 @@
 
 **Branch**: `gpu_native_implementation`
 **Created**: 2025-11-02
-**Status**: Planning Phase
+**Updated**: 2025-11-02 (after mesh analysis)
+**Status**: Ready for Implementation
 **Estimated Duration**: 6-10 weeks (MVP in 4-5 weeks)
+
+**📊 IMPORTANT**: See [ThreadedA Mesh Analysis](THREADEDA_MESH_ANALYSIS.md) for critical findings that informed this plan (3.5M cells, not 1.3K!)
 
 ---
 
@@ -38,8 +41,8 @@ Implement GPU-native particle tracking using the forest-of-octrees architecture 
 
 ### Key Constraints
 - **Hardware**: NVIDIA T1000 with 4GB VRAM (primary constraint)
-- **Mesh**: ThreadedA reference mesh (64 pieces, ~1300 cells, 160 timesteps)
-- **Memory**: Must fit 100K particles + forest structure in 4GB
+- **Mesh**: ThreadedA reference mesh (64 pieces, **3.5M cells**, 900K nodes, 160 timesteps)
+- **Memory**: Must fit 100K particles + forest structure (~500 MB mesh) in 4GB
 - **Accuracy**: <1% interpolation error vs CPU tracker
 
 ### Timeline
@@ -357,7 +360,7 @@ class GPUForestConfig:
     """Configuration for GPU forest-of-octrees particle tracking."""
 
     # Block configuration (user-tunable)
-    block_grid: Tuple[int, int, int] = (2, 2, 2)  # Start conservative
+    block_grid: Tuple[int, int, int] = (4, 4, 2)  # 32 blocks for production mesh (see mesh analysis)
     max_octree_depth: int = 12
 
     # Field configuration
@@ -1918,15 +1921,18 @@ def test_100k_particles_full_mesh():
 
 ---
 
-### PHASE 9: Hash Octree Integration (Optional)
+### PHASE 9: Hash Octree Integration (Highly Recommended)
 **Duration**: 5-7 days
 **Depends On**: Phase 8
+**Status**: **HIGHLY RECOMMENDED** for production meshes (3.5M cells = ~110K cells/block)
 
 #### Objectives
 1. Integrate `hash_octree.py` from previous implementation
 2. Build per-block hash octrees
 3. Replace hierarchical search with O(1) hash lookup
 4. Benchmark hash vs tree search
+
+**Note**: With 110K cells per block (ThreadedA mesh), hash octrees provide significant O(1) search performance vs O(log 110K) ≈ 17 comparisons. For production-scale meshes, this phase is **essential for optimal performance**.
 
 #### Deliverables
 
@@ -2427,21 +2433,50 @@ Branch `phase1-optimization` (do not merge, reference only for GPU components)
 
 ---
 
-## Appendix C: Questions for User
+## Appendix C: User Decisions & Answers
 
-**Before Starting Implementation**:
+**RESOLVED - Based on critical review and mesh analysis**:
 
-1. Should mesh analysis visualization for ThreadedA be generated now, or defer to Phase 0?
-2. Preferred block grid size to start: 2×2×2 (8 blocks) or 4×4×2 (32 blocks)?
-3. Should Phase 9 (hash octrees) be mandatory or truly optional?
-4. Preferred documentation format: markdown only, or markdown + Jupyter notebooks?
-5. Should integration tests use synthetic meshes or always ThreadedA?
+### Before Implementation
 
-**After Phase 5 (MVP)**:
+1. **Should mesh analysis visualization for ThreadedA be generated now, or defer to Phase 0?**
+   - ✅ **ANSWER**: Generated NOW (see [THREADEDA_MESH_ANALYSIS.md](THREADEDA_MESH_ANALYSIS.md))
+   - **Result**: Revealed mesh is 3.5M cells (not 1.3K!), informing all subsequent design decisions
 
-1. Is performance acceptable, or proceed with optimization phases?
-2. Should block count be adjusted based on GPU utilization?
-3. Are there specific trajectory export formats needed beyond VTK/HDF5?
+2. **Preferred block grid size to start: 2×2×2 (8 blocks) or 4×4×2 (32 blocks)?**
+   - ✅ **ANSWER**: **4×4×2 (32 blocks)** for production mesh
+   - **Rationale**: Better load balancing, GPU occupancy, and ~110K cells/block is manageable
+   - **Updated in**: Configuration default (line 360)
+
+3. **Should Phase 9 (hash octrees) be mandatory or truly optional?**
+   - ✅ **ANSWER**: **HIGHLY RECOMMENDED** (effectively mandatory for 3.5M cell mesh)
+   - **Rationale**: O(1) vs O(log 110K) search is critical for production performance
+   - **Updated in**: Phase 9 description (line 1921-1932)
+
+4. **Preferred documentation format: markdown only, or markdown + Jupyter notebooks?**
+   - ✅ **ANSWER**: **Both** - markdown for architecture, Jupyter for examples/tests
+   - **Implementation**: Markdown docs in `docs/`, Jupyter in `examples/gpu/`
+
+5. **Should integration tests use synthetic meshes or always ThreadedA?**
+   - ✅ **ANSWER**: **Both**
+   - Synthetic (1K-10K cells): Unit tests, edge cases, fast CI
+   - ThreadedA (3.5M cells): Integration tests, real-world validation, performance benchmarks
+
+### After Phase 5 (MVP)
+
+1. **Is performance acceptable, or proceed with optimization phases?**
+   - ⏳ **DECISION POINT**: Profile GPU utilization, memory usage, throughput
+   - **Criteria**: If <60% GPU utilization or >50% slower than target, proceed to Phase 6-9
+   - **Action**: Benchmark 50K particles × 40 timesteps, measure particle-timesteps/second
+
+2. **Should block count be adjusted based on GPU utilization?**
+   - ⏳ **DECISION POINT**: Measure actual GPU occupancy
+   - **If <70% utilization**: Increase to 8×8×4 (256 blocks) for better parallelism
+   - **If >3× load imbalance**: Implement block splitting (adaptive partitioning)
+
+3. **Are there specific trajectory export formats needed beyond VTK/HDF5?**
+   - ✅ **ANSWER**: VTK/HDF5 sufficient for scientific workflows
+   - **Optional**: Add CSV/Parquet if ML/data pipeline integration needed later
 
 ---
 
