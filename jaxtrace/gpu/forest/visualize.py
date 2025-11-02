@@ -143,9 +143,16 @@ def _plot_blocks_2d(
 
         rect = plt.Rectangle(
             (xmin, ymin), xmax - xmin, ymax - ymin,
-            fill=False, edgecolor='blue', linewidth=1.0, alpha=0.6
+            fill=False, edgecolor='blue', linewidth=1.5, alpha=0.8
         )
         ax.add_patch(rect)
+
+        # Add block ID label at center
+        center_x = (xmin + xmax) / 2
+        center_y = (ymin + ymax) / 2
+        ax.text(center_x, center_y, str(block.block_id),
+               fontsize=6, ha='center', va='center',
+               color='blue', alpha=0.7)
 
         # Update bounds
         all_xmin = min(all_xmin, xmin)
