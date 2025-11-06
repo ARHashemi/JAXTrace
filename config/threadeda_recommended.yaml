@@ -1,0 +1,53 @@
+# ThreadedA Reference Mesh Configuration
+# Based on mesh analysis: 3.5M elements, 900K nodes
+
+mesh:
+  name: "ThreadedA"
+  path: "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule"
+  pattern: "threadedAvtk_*.pvtu"
+  n_elements: 3500000  # Approximate
+  n_nodes: 900000      # Approximate
+  domain_bounds:
+    x: [-0.030, 0.030]  # 60 mm
+    y: [-0.023, 0.023]  # 46 mm
+    z: [-0.010, 0.000]  # 10 mm
+
+forest:
+  grid_size: [4, 4, 2]  # 32 blocks (recommended from analysis)
+  n_blocks: 32
+  max_elements_per_block: 1300000  # 95th percentile (859K) × 1.5 padding
+  expected_mean_elements: 110000
+  expected_imbalance: 8.6
+
+  # Heavy block detection
+  heavy_block_threshold: 10000  # Elements - triggers hash bucket search
+  target_bucket_size: 200  # Elements per hash bucket
+
+storage:
+  field_storage: "nodes"  # NOT "elements" (6× memory savings)
+  octree_storage: "padded"  # Required for JAX JIT
+  block_storage: "padded"  # Required for JAX JIT
+
+capacity:
+  max_neighbors: 4  # Tetrahedral faces
+  max_octree_neighbors: 26  # 3D (6 faces + 12 edges + 8 corners)
+  max_elements_per_octree_node: 1000
+
+particles:
+  target_count: 1000000
+  max_particles_per_block: 100000
+
+precision:
+  position_dtype: "float64"  # Accuracy for particle positions
+  velocity_dtype: "float32"  # Sufficient for fields
+  mesh_dtype: "float32"      # Sufficient for mesh
+
+memory_budget:
+  static_data_mb: 340
+  particle_data_mb: 33  # For 1M particles
+  total_target_mb: 500
+
+performance:
+  enable_jit: true
+  morton_code_bits: 21  # 2^21 cells/dim
+  particles_per_vmap_batch: 10000
