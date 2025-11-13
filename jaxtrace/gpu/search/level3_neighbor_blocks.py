@@ -68,26 +68,30 @@ def search_level3_neighbor_blocks(
     This implementation uses simplified L2a for all neighbors.
     Full implementation would integrate hash bucket search for heavy neighbors.
     """
-    # Check each of 26 neighbors
-    for i in range(26):
-        neighbor_id = block_neighbors_26[i]
+    # Create mask for valid neighbors (>= 0)
+    valid_mask = block_neighbors_26 >= 0
 
-        # Skip invalid neighbors
-        if neighbor_id < 0:
-            continue
-
-        # For now, use L2a for all (simplified)
-        # TODO: Dispatch to L2b for heavy blocks
-        elem_id = search_level2a_light_block(
+    # Helper function to search a single neighbor
+    def search_neighbor(neighbor_id):
+        # Use safe indexing (replace -1 with 0 for invalid neighbors)
+        safe_id = jnp.where(neighbor_id >= 0, neighbor_id, 0)
+        return search_level2a_light_block(
             position,
-            neighbor_id,
-            padded_block_elements[neighbor_id],
-            padded_block_counts[neighbor_id],
+            safe_id,
+            padded_block_elements[safe_id],
+            padded_block_counts[safe_id],
             node_positions,
             connectivity
         )
 
-        if elem_id >= 0:
-            return elem_id
+    # Vectorized search over all 26 neighbors
+    results = jax.vmap(search_neighbor)(block_neighbors_26)
 
-    return -1
+    # Mask out results from invalid neighbors
+    results = jnp.where(valid_mask, results, -1)
+
+    # Find first valid result (>= 0), or return -1
+    found_indices = jnp.where(results >= 0, jnp.arange(26), 26)
+    first_match_idx = jnp.min(found_indices)
+
+    return jnp.where(first_match_idx < 26, results[first_match_idx], -1)

@@ -1,0 +1,103 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+/home/arhashemi/Workspace/welding/JAXTrace/utils/resource_monitor.py:153: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+V5 COMPREHENSIVE PERFORMANCE TEST
+================================================================================
+✅ GPU monitoring enabled
+✅ NVIDIA GPU utilization monitoring enabled
+✅ CPU monitoring enabled
+
+================================================================================
+🚀 Starting: 1. Mesh Loading
+================================================================================
+  Found 160 .pvtu files
+  Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_0.pvtu
+  Mesh: 2,301 nodes, 1,296 elements
+
+✅ Completed: 1. Mesh Loading
+   Duration: 0.03s
+   GPU Memory: 0.0 MB (+0.0 MB)
+   GPU Peak: 0.0 MB
+   GPU Util: 1%
+   CPU Memory: 788.3 MB (+11.4 MB)
+   CPU Util: 116.8%
+================================================================================
+
+================================================================================
+🚀 Starting: 2. Block Infrastructure
+================================================================================
+  Domain bounds: [-0.0300, 0.0300] × [-0.0230, 0.0230] × [-0.0100, 0.0000]
+  Grid size: (4, 4, 2)
+  Created 32 blocks
+Computing centroids for 1,296 elements...
+Assigning elements to 32 blocks...
+
+📊 Element Distribution Across Blocks:
+  Total elements: 1,296
+  Non-empty blocks: 32 / 32
+  Elements per block:
+    Min: 36
+    Max: 42
+    Mean: 40
+    Std: 3
+  Load imbalance factor: 1.04× (max/mean)
+  ✅ Good load balance for GPU execution
+
+✅ Completed: 2. Block Infrastructure
+   Duration: 0.03s
+   GPU Memory: 0.0 MB (+0.0 MB)
+   GPU Peak: 0.0 MB
+   GPU Util: 1%
+   CPU Memory: 788.9 MB (+0.5 MB)
+   CPU Util: 88.9%
+================================================================================
+
+================================================================================
+🚀 Starting: 3. Octree Building
+================================================================================
+
+✅ Completed: 3. Octree Building
+   Duration: 0.00s
+   GPU Memory: 0.0 MB (+0.0 MB)
+   GPU Peak: 0.0 MB
+   GPU Util: 1%
+   CPU Memory: 788.9 MB (+0.0 MB)
+   CPU Util: 0.0%
+================================================================================
+
+❌ Test failed with exception:
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_v5_comprehensive_performance.py", line 521, in main
+    octrees = build_octrees(mesh_data, block_data, monitor)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_v5_comprehensive_performance.py", line 135, in build_octrees
+    from jaxtrace.fields.shared_coarse_octree import build_shared_coarse_octrees
+ModuleNotFoundError: No module named 'jaxtrace.fields.shared_coarse_octree'
+
+
+================================================================================
+📊 RESOURCE USAGE SUMMARY
+================================================================================
+
+Total Time: 0.06s
+Number of Stages: 3
+
+Stage                                    Time (s)   GPU MB       CPU MB      
+--------------------------------------------------------------------------------
+1. Mesh Loading                          0.03       0.0          788.3       
+2. Block Infrastructure                  0.03       0.0          788.9       
+3. Octree Building                       0.00       0.0          788.9       
+--------------------------------------------------------------------------------
+
+Peak Resource Usage:
+  GPU Memory: 0.0 MB
+  CPU Memory: 788.9 MB
+
+Slowest Stages:
+  1. 2. Block Infrastructure: 0.03s (55.0%)
+  2. 1. Mesh Loading: 0.03s (43.2%)
+  3. 3. Octree Building: 0.00s (1.7%)
+================================================================================

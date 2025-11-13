@@ -1,0 +1,44 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+============================= test session starts ==============================
+platform linux -- Python 3.13.3, pytest-8.4.2, pluggy-1.6.0 -- /home/arhashemi/Workspace/welding/JAXTrace/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/arhashemi/Workspace/welding/JAXTrace
+configfile: pyproject.toml
+collecting ... collected 1 item
+
+tests/gpu/test_threadeda_phase1.py::TestThreadedAPhase1::test_assign_elements_threadeda   🔍 Using parallel VTU files (.pvtu): 160 found
+VTKUnstructuredTimeSeriesReader initialized:
+  📁 Pattern: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_*.pvtu
+  📊 Time steps: 160
+  🗄️ Cache limit: 3
+  💾 Memory limit: 8.0 GB
+FAILED
+
+=================================== FAILURES ===================================
+______________ TestThreadedAPhase1.test_assign_elements_threadeda ______________
+
+self = <tests.gpu.test_threadeda_phase1.TestThreadedAPhase1 object at 0x706bc04596e0>
+
+    def test_assign_elements_threadeda(self):
+        """Test element-to-block assignment for ThreadedA."""
+        # Load mesh
+        reader = VTKUnstructuredTimeSeriesReader(THREADEDA_PATTERN)
+>       t0 = reader.get_timesteps()[0]
+             ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'VTKUnstructuredTimeSeriesReader' object has no attribute 'get_timesteps'. Did you mean: 'max_time_steps'?
+
+tests/gpu/test_threadeda_phase1.py:62: AttributeError
+=============================== warnings summary ===============================
+jaxtrace/utils/memory_tracker.py:32
+  /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/utils/memory_tracker.py:32: DeprecationWarning: jax.lib.xla_bridge module will be removed in JAX v0.9.0; all its APIs were deprecated and removed by JAX v0.8.0.
+    from jax.lib import xla_bridge
+
+jaxtrace/io/registry.py:41
+  /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+    from .hdf5_io import H5Series
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/gpu/test_threadeda_phase1.py::TestThreadedAPhase1::test_assign_elements_threadeda
+======================== 1 failed, 2 warnings in 0.06s =========================

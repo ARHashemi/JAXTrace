@@ -39,6 +39,12 @@ from .monitoring import (
     print_performance_report,
     save_performance_log,
 )
+from .initial_assignment import (
+    InitialSearchStats,
+    find_containing_block_jax,
+    initial_search_single,
+    initial_search_batch,
+)
 
 __all__ = [
     'BlockClassification',
@@ -56,4 +62,8 @@ __all__ = [
     'multi_level_search_batch',
     'print_performance_report',
     'save_performance_log',
+    'InitialSearchStats',
+    'find_containing_block_jax',
+    'initial_search_single',
+    'initial_search_batch',
 ]

@@ -1,0 +1,111 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Phase 1: ThreadedA Element-to-Block Assignment Test
+================================================================================
+
+Loading ThreadedA mesh...
+Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Element type: 4 nodes/element
+
+Creating block grid: 4×4×2 = 32 blocks
+  Block 0 bounds: [-0.03   -0.015  -0.023  -0.0115 -0.01   -0.005 ]
+  Block 0 volume: 8.624999e-07
+
+Assigning 3,512,279 elements to 32 blocks...
+
+Assigning 3,512,279 elements to 32 blocks...
+Grid size: (4, 4, 2)
+Domain: [-0.0300, 0.0300] × [-0.0230, 0.0230] × [-0.0100, 0.0000]
+Computing element centroids...
+Assigning elements to blocks...
+  Processed 500,000/3,512,279 elements...
+  Processed 1,000,000/3,512,279 elements...
+  Processed 1,500,000/3,512,279 elements...
+  Processed 2,000,000/3,512,279 elements...
+  Processed 2,500,000/3,512,279 elements...
+  Processed 3,000,000/3,512,279 elements...
+  Processed 3,500,000/3,512,279 elements...
+Computing statistics...
+
+BlockAssignmentStats(
+  Total elements: 3,512,279
+  Blocks: 32/32 used, 0 empty
+  Elements per block: min=36, max=949,632, mean=109,758.7, median=52.5
+  Std dev: 289,704.3
+  Imbalance ratio: 8.65x
+  Heavy blocks (>10000): 4
+)
+
+Heavy blocks (>10,000 elements): [21, 22, 25, 26]
+  Block 21: 828,125 elements
+  Block 22: 889,590 elements
+  Block 25: 949,632 elements
+  Block 26: 832,000 elements
+
+================================================================================
+PHASE 1 RESULTS: Element-to-Block Assignment Statistics
+================================================================================
+BlockAssignmentStats(
+  Total elements: 3,512,279
+  Blocks: 32/32 used, 0 empty
+  Elements per block: min=36, max=949,632, mean=109,758.7, median=52.5
+  Std dev: 289,704.3
+  Imbalance ratio: 8.65x
+  Heavy blocks (>10000): 4
+)
+
+--------------------------------------------------------------------------------
+Comparison with Phase 0 Predictions:
+--------------------------------------------------------------------------------
+  Phase 0 predicted ~110K elements/block
+  Actual mean: 109,759
+  Actual median: 52
+  Phase 0 predicted 8.6x imbalance
+  Actual imbalance: 8.65x
+
+  Elements outside domain: 0 (0.0000%)
+  ✅ Good: <0.1% elements outside domain
+
+--------------------------------------------------------------------------------
+Heavy Block Analysis (>10,000 elements):
+--------------------------------------------------------------------------------
+  Found 4 heavy blocks:
+    Block 21: 828,125 elements
+    Block 22: 889,590 elements
+    Block 25: 949,632 elements
+    Block 26: 832,000 elements
+
+  ⚡ These blocks will use hash bucket search in Phase 4
+
+--------------------------------------------------------------------------------
+Validation:
+--------------------------------------------------------------------------------
+  Checking element centroid containment (1000 samples)...
+
+Validation PASSED: All 1000 sampled elements correctly assigned
+  ✅ VALIDATION PASSED
+
+--------------------------------------------------------------------------------
+Memory Estimation:
+--------------------------------------------------------------------------------
+  Max elements per block: 949,632
+  Padded array size: (32, 949,632)
+  Memory for element IDs: 115.9 MB
+  Target: <500 MB total
+  ✅ Good: 115.9 MB < 500 MB target
+
+================================================================================
+PHASE 1: SUCCESS
+================================================================================
+✅ Block grid created (32 blocks)
+✅ Elements assigned (3,512,279 elements)
+✅ Statistics computed (imbalance: 8.65x)
+✅ Heavy blocks identified (4 blocks)
+✅ Assignment validated
+
+Ready to proceed to Phase 2: Element Neighbors & Padded Block Arrays

@@ -1,0 +1,183 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Phase 2 COMPLETE: ThreadedA Integration Test
+================================================================================
+
+================================================================================
+TASK 0: Load ThreadedA Mesh
+================================================================================
+Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Load time: 5.56 s
+
+================================================================================
+TASK 1: Element-to-Block Assignment (Phase 1)
+================================================================================
+
+Assigning 3,512,279 elements to 32 blocks...
+Grid size: (4, 4, 2)
+Domain: [-0.0300, 0.0300] × [-0.0230, 0.0230] × [-0.0100, 0.0000]
+Computing element centroids...
+Assigning elements to blocks...
+  Processed 500,000/3,512,279 elements...
+  Processed 1,000,000/3,512,279 elements...
+  Processed 1,500,000/3,512,279 elements...
+  Processed 2,000,000/3,512,279 elements...
+  Processed 2,500,000/3,512,279 elements...
+  Processed 3,000,000/3,512,279 elements...
+  Processed 3,500,000/3,512,279 elements...
+Computing statistics...
+
+BlockAssignmentStats(
+  Total elements: 3,512,279
+  Blocks: 32/32 used, 0 empty
+  Elements per block: min=36, max=949,632, mean=109,758.7, median=52.5
+  Std dev: 289,704.3
+  Imbalance ratio: 8.65x
+  Heavy blocks (>10000): 4
+)
+
+Heavy blocks (>10,000 elements): [21, 22, 25, 26]
+  Block 21: 828,125 elements
+  Block 22: 889,590 elements
+  Block 25: 949,632 elements
+  Block 26: 832,000 elements
+
+  Assignment time: 7.1 s
+  ✅ 3,512,279 elements assigned
+
+================================================================================
+TASK 2: Face-Adjacency Neighbor Extraction
+================================================================================
+
+Extracting element neighbors for 3,512,279 elements...
+Building face-to-element map for 3,512,279 elements...
+  Processed 500,000/3,512,279 elements...
+  Processed 1,000,000/3,512,279 elements...
+  Processed 1,500,000/3,512,279 elements...
+  Processed 2,000,000/3,512,279 elements...
+  Processed 2,500,000/3,512,279 elements...
+  Processed 3,000,000/3,512,279 elements...
+  Processed 3,500,000/3,512,279 elements...
+  Total unique faces: 7,408,752
+Building neighbor lists...
+  Processed 500,000/3,512,279 elements...
+  Processed 1,000,000/3,512,279 elements...
+  Processed 1,500,000/3,512,279 elements...
+  Processed 2,000,000/3,512,279 elements...
+  Processed 2,500,000/3,512,279 elements...
+  Processed 3,000,000/3,512,279 elements...
+  Processed 3,500,000/3,512,279 elements...
+
+AdjacencyStats(
+  Elements: 3,512,279
+  Total faces: 7,408,752
+  Internal faces: 6,640,364
+  Boundary faces: 768,388
+  Neighbors per element: min=0, max=4, avg=3.78
+)
+
+  Neighbor extraction time: 60.7 s
+  ✅ Neighbors extracted for 3,512,279 elements
+
+  Validating neighbor symmetry...
+
+Validation PASSED: All 1000 sampled elements have symmetric neighbors
+  ✅ Neighbor symmetry validated
+
+================================================================================
+TASK 3: Build Padded 2D Block Arrays (V5 Solution)
+================================================================================
+
+Building padded block arrays...
+  Blocks: 32
+  Max elements/block: 949,632
+  Array shape: (32, 949,632)
+  Counting elements per block...
+  Filling padded array...
+    Processed 500,000/3,512,279 elements...
+    Processed 1,000,000/3,512,279 elements...
+    Processed 1,500,000/3,512,279 elements...
+    Processed 2,000,000/3,512,279 elements...
+    Processed 2,500,000/3,512,279 elements...
+    Processed 3,000,000/3,512,279 elements...
+    Processed 3,500,000/3,512,279 elements...
+
+PaddedArrays(
+  Shape: (32, 949632)
+  Total elements: 3,512,279
+  Memory: 115.9 MB
+  Padding waste: 88.4%
+)
+
+  Padded array build time: 1.4 s
+  ✅ Padded arrays created
+
+  Validating padded arrays...
+
+Validation PASSED: All 32 sampled blocks correct
+  ✅ Padded arrays validated
+
+================================================================================
+TASK 4: Memory Profiling
+================================================================================
+
+Memory Breakdown:
+  Padded element arrays: 115.9 MB
+  Neighbor arrays: 50.7 MB
+  Node positions: 10.3 MB
+  --------------------------------------------------
+  TOTAL: 176.9 MB
+
+  ✅ Memory under target: 176.9 MB < 500 MB
+  Headroom: 323.1 MB (64.6%)
+
+================================================================================
+MEMORY COMPARISON: V4 vs V5
+================================================================================
+
+❌ V4: Global Flattening Approach
+  Strategy: Flatten all elements into single array
+  Memory for 1M particles: 13084.3 GB
+  Problem: O(N_particles × N_elements) memory explosion
+  Result: 13084 GB → Out of memory!
+
+✅ V5: Padded 2D Arrays (Current)
+  Strategy: Block-local padded arrays (n_blocks, max_elem)
+  Memory: 115.9 MB
+  Padding waste: 88.4%
+  Improvement: 115580× smaller
+
+--------------------------------------------------------------------------------
+💡 V5 is 115580× more memory efficient than V4
+================================================================================
+
+================================================================================
+PHASE 2: SUCCESS - ALL TASKS COMPLETE
+================================================================================
+
+✅ Task 1: Element-to-block assignment
+    - 3,512,279 elements → 32 blocks
+    - Imbalance: 8.65x
+
+✅ Task 2: Face-adjacency neighbors
+    - 3,512,279 elements
+    - Avg 3.78 neighbors/element
+    - Memory: 50.7 MB
+
+✅ Task 3: Padded 2D arrays (V5 solution)
+    - Shape: (32, 949,632)
+    - Memory: 115.9 MB
+    - Padding waste: 88.4%
+
+✅ Task 4: Memory profiling
+    - Total: 176.9 MB / 500 MB (35.4%)
+    - V4→V5 improvement: 123x
+
+--------------------------------------------------------------------------------
+Ready for Phase 3: Particle Seeding & Initial Assignment
+================================================================================

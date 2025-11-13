@@ -1,0 +1,77 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py:111: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+COMPREHENSIVE INTEGRATION TEST - THREADEDA MESH
+================================================================================
+Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_0.pvtu
+Grid size: (8, 8, 4)
+Test particles: 10,000
+Output directory: logs/threadeda_comprehensive_test
+
+================================================================================
+PHASE: Phase 1: Forest Structure
+================================================================================
+
+[BEFORE]
+  CPU: 0.0% | RAM: 0.83 GB (2.7%)
+  GPU: 1.0% | VRAM: 0.44/4.00 GB
+
+[EXECUTING] Phase 1: Forest Structure...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_0.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_0.pvtu
+  Nodes: 2,301
+  Elements: 1,296
+  Nodes: 2,301
+  Elements: 1,296
+
+Bounding box:
+  X: [-0.030, 0.030]
+  Y: [-0.023, 0.023]
+  Z: [-0.010, 0.000]
+
+Creating block grid (8, 8, 4)...
+  Total blocks: 256
+
+Assigning elements to blocks...
+
+Assigning 1,296 elements to 256 blocks...
+Grid size: (8, 8, 4)
+Domain: [-0.0300, 0.0300] × [-0.0230, 0.0230] × [-0.0100, 0.0000]
+Computing element centroids...
+Assigning elements to blocks...
+Computing statistics...
+
+BlockAssignmentStats(
+  Total elements: 1,296
+  Blocks: 256/256 used, 0 empty
+  Elements per block: min=2, max=10, mean=5.1, median=5.0
+  Std dev: 2.1
+  Imbalance ratio: 1.98x
+  Heavy blocks (>10000): 0
+)
+
+[PHASE 1 STATISTICS]
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 630, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 626, in main
+    test.run_all()
+    ~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 595, in run_all
+    phase1_data, _ = self.test_phase1_forest_structure()
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 298, in test_phase1_forest_structure
+    return self.run_phase("Phase 1: Forest Structure", run)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 209, in run_phase
+    result = func(*args, **kwargs)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_threadeda_comprehensive.py", line 284, in run
+    print(f"  Elements assigned: {stats.n_elements_assigned:,}")
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'BlockAssignmentStats' object has no attribute 'n_elements_assigned'
