@@ -22,8 +22,43 @@ from .validation import (
     MeshValidationResult,
 )
 
+from .memory_utils import (
+    get_gpu_memory_info,
+    calculate_safe_batch_size,
+    GPUMemoryInfo,
+)
+
+from .block_grouping import (
+    group_particles_by_block,
+    batch_light_blocks,
+    ParticleGrouping,
+)
+
+from .batch_config import (
+    BatchConfig,
+    create_default_config,
+    validate_config,
+    print_config_summary,
+    suggest_config_improvements,
+)
+
 __all__ = [
+    # Validation
     'validate_mesh_for_gpu',
     'detect_block_imbalance',
     'MeshValidationResult',
+    # Memory
+    'get_gpu_memory_info',
+    'calculate_safe_batch_size',
+    'GPUMemoryInfo',
+    # Grouping
+    'group_particles_by_block',
+    'batch_light_blocks',
+    'ParticleGrouping',
+    # Config
+    'BatchConfig',
+    'create_default_config',
+    'validate_config',
+    'print_config_summary',
+    'suggest_config_improvements',
 ]
