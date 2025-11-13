@@ -42,6 +42,14 @@ from .batch_config import (
     suggest_config_improvements,
 )
 
+from .batch_processor import (
+    process_batch,
+    track_particles_batched,
+    print_batch_statistics,
+    BatchStatistics,
+    ProcessorStatistics,
+)
+
 __all__ = [
     # Validation
     'validate_mesh_for_gpu',
@@ -61,4 +69,10 @@ __all__ = [
     'validate_config',
     'print_config_summary',
     'suggest_config_improvements',
+    # Processor
+    'process_batch',
+    'track_particles_batched',
+    'print_batch_statistics',
+    'BatchStatistics',
+    'ProcessorStatistics',
 ]
