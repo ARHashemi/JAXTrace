@@ -233,16 +233,16 @@ def validate_neighbor_symmetry(
 ) -> bool:
     """
     Validate that neighbor relationships are symmetric.
-    
+
     If element A is a neighbor of element B, then B must be a neighbor of A.
-    
+
     Parameters
     ----------
     neighbors : Dict[int, np.ndarray]
         Neighbor dictionary
     n_samples : int, optional
         Number of random elements to check (default: 1000)
-        
+
     Returns
     -------
     valid : bool
@@ -250,10 +250,10 @@ def validate_neighbor_symmetry(
     """
     element_ids = list(neighbors.keys())
     n_samples = min(n_samples, len(element_ids))
-    
+
     np.random.seed(42)
     sample_ids = np.random.choice(element_ids, size=n_samples, replace=False)
-    
+
     n_errors = 0
     for elem_id in sample_ids:
         for neighbor_id in neighbors[elem_id]:
@@ -262,10 +262,92 @@ def validate_neighbor_symmetry(
                 n_errors += 1
                 print(f"ERROR: Element {elem_id} has neighbor {neighbor_id}, "
                       f"but {neighbor_id} does not have {elem_id} as neighbor")
-    
+
     if n_errors > 0:
         print(f"\nValidation FAILED: {n_errors} asymmetric relationships found")
         return False
     else:
         print(f"\nValidation PASSED: All {n_samples} sampled elements have symmetric neighbors")
         return True
+
+
+def build_element_neighbors_array(
+    connectivity: np.ndarray,
+    verbose: bool = False
+) -> np.ndarray:
+    """
+    Build element face-neighbors array in fixed-size padded format.
+
+    This is a convenience wrapper around extract_element_neighbors() that
+    returns a padded array suitable for GPU processing and incremental search.
+
+    Parameters
+    ----------
+    connectivity : np.ndarray
+        Element connectivity, shape (N_elements, 4), int32
+    verbose : bool, optional
+        Print progress messages (default: False)
+
+    Returns
+    -------
+    element_neighbors : np.ndarray
+        Element face neighbors, shape (N_elements, 4), int32
+        Each row contains up to 4 neighbor element IDs, -1 for missing neighbors
+
+    Notes
+    -----
+    - Tetrahedral elements have at most 4 face neighbors (one per face)
+    - Boundary elements have fewer neighbors (padded with -1)
+    - Interior elements typically have 4 neighbors
+    - This format is compatible with L1 neighbor search (level1_neighbors.py)
+
+    Examples
+    --------
+    >>> # Element 42 has 3 neighbors: [15, 108, 201]
+    >>> # Row 42: [15, 108, 201, -1]
+
+    >>> # Element 7 is fully interior with 4 neighbors: [3, 9, 12, 18]
+    >>> # Row 7: [3, 9, 12, 18]
+    """
+    n_elements = connectivity.shape[0]
+
+    if verbose:
+        print(f"\nBuilding element neighbors array for {n_elements:,} elements...")
+
+    # Extract neighbors as dictionary
+    neighbors_dict, stats = extract_element_neighbors(connectivity, verbose=verbose)
+
+    # Determine max neighbors (should be 4 for tets, but check stats to be safe)
+    max_neighbors = stats.max_neighbors_per_element
+    if max_neighbors > 4:
+        if verbose:
+            print(f"  WARNING: Found element with {max_neighbors} neighbors (expected ≤4 for tets)")
+
+    # Use 4 as fixed size (standard for tetrahedral elements)
+    padded_neighbors = np.full((n_elements, 4), -1, dtype=np.int32)
+
+    # Fill array from dictionary
+    if verbose:
+        print(f"  Converting to padded array ({n_elements}, 4)...")
+
+    for elem_id in range(n_elements):
+        neighbors_list = neighbors_dict[elem_id]
+        n_neighbors = len(neighbors_list)
+
+        if n_neighbors > 4:
+            # Truncate to first 4 neighbors
+            if verbose:
+                print(f"  WARNING: Element {elem_id} has {n_neighbors} neighbors, truncating to 4")
+            neighbors_list = neighbors_list[:4]
+            n_neighbors = 4
+
+        padded_neighbors[elem_id, :n_neighbors] = neighbors_list
+
+    if verbose:
+        n_boundary = np.sum(np.any(padded_neighbors == -1, axis=1))
+        n_interior = n_elements - n_boundary
+        print(f"  Boundary elements (< 4 neighbors): {n_boundary:,} ({100*n_boundary/n_elements:.1f}%)")
+        print(f"  Interior elements (4 neighbors): {n_interior:,} ({100*n_interior/n_elements:.1f}%)")
+        print(f"  Element neighbors array built successfully!")
+
+    return padded_neighbors

@@ -321,61 +321,232 @@ def initial_search_batch(
     block_ids = np.full(n_particles, -1, dtype=np.int32)
 
     if verbose:
-        print(f"GPU Initial Search: {n_particles:,} particles...")
+        print(f"GPU Initial Search (VECTORIZED): {n_particles:,} particles...")
 
     start_time = time.time()
 
-    # Search each particle
-    for i in range(n_particles):
-        if verbose and (i + 1) % 100 == 0:
+    # STEP 1: Vectorized block finding for ALL particles at once
+    if verbose:
+        print(f"  Finding containing blocks...")
+
+    positions_jax = jnp.array(particle_positions, dtype=jnp.float32)
+    bounds_jax = jnp.array(domain_bounds, dtype=jnp.float32)
+
+    # Vectorize over all particles using vmap
+    find_blocks_vmap = jax.vmap(
+        lambda pos: find_containing_block_jax(pos, bounds_jax, grid_size)
+    )
+    particle_block_ids = np.array(find_blocks_vmap(positions_jax), dtype=np.int32)
+
+    n_outside = np.sum(particle_block_ids < 0)
+    if verbose:
+        print(f"  ✓ Blocks found: {n_particles - n_outside:,}/{n_particles:,}")
+        if n_outside > 0:
+            print(f"    ⚠️  {n_outside:,} particles outside domain")
+
+    # STEP 2: Group particles by block for batched processing
+    if verbose:
+        print(f"  Grouping particles by block...")
+
+    # Create dictionary: block_id -> list of particle indices
+    particles_per_block = {}
+    for i, block_id in enumerate(particle_block_ids):
+        if block_id >= 0:
+            if block_id not in particles_per_block:
+                particles_per_block[block_id] = []
+            particles_per_block[block_id].append(i)
+
+    n_blocks_with_particles = len(particles_per_block)
+    if verbose:
+        print(f"  ✓ Particles distributed across {n_blocks_with_particles} blocks")
+
+    # Convert mesh arrays ONCE to JAX (shared across all searches)
+    node_pos_jax = jnp.array(node_positions, dtype=jnp.float32)
+    connectivity_jax = jnp.array(connectivity, dtype=jnp.int32)
+
+    # STEP 3: Process each block with batched L2 search
+    if verbose:
+        print(f"  Running L2 block search (batched)...")
+
+    l2_hits = 0
+    processed = 0
+
+    # Batch size to avoid OOM (tune based on GPU memory)
+    BATCH_SIZE = 1000  # Process 1000 particles at a time
+
+    for block_id, particle_indices in particles_per_block.items():
+        n_in_block = len(particle_indices)
+        is_heavy = block_classification.is_heavy(block_id)
+
+        # Get block data
+        if is_heavy and hash_bucket_data and block_id in hash_bucket_data:
+            # L2b: Heavy block with hash buckets
+            hash_arrays = hash_bucket_data[block_id]
+            bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
+            bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
+            bucket_neighbors_jax = jnp.array(hash_arrays.bucket_neighbors_6, dtype=jnp.int32)
+            block_bounds_jax = jnp.array(hash_arrays.block_bounds, dtype=jnp.float32)
+        else:
+            # L2a: Light block - get block elements
+            block_elems_cpu = padded_arrays.block_elements[block_id]
+            block_count = int(padded_arrays.block_sizes[block_id])
+            block_elems_jax = jnp.array(block_elems_cpu[:block_count], dtype=jnp.int32)
+
+        # Process particles in batches to avoid OOM
+        for batch_start in range(0, n_in_block, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, n_in_block)
+            batch_indices = particle_indices[batch_start:batch_end]
+            particle_batch = particle_positions[batch_indices]
+            particle_batch_jax = jnp.array(particle_batch, dtype=jnp.float32)
+
+            # L2: Search within primary block (vectorized over batch)
+            if is_heavy and hash_bucket_data and block_id in hash_bucket_data:
+                # Vectorize hash bucket search over batch
+                search_hash_vmap = jax.vmap(
+                    lambda pos: search_level2b_hash_bucket(
+                        pos,
+                        block_id,
+                        bucket_elements_jax,
+                        bucket_counts_jax,
+                        bucket_neighbors_jax,
+                        hash_arrays.n_buckets,
+                        hash_arrays.morton_bits,
+                        block_bounds_jax,
+                        node_pos_jax,
+                        connectivity_jax
+                    )
+                )
+                found_elem_ids = np.array(search_hash_vmap(particle_batch_jax), dtype=np.int32)
+            else:
+                # L2a: Light block search
+                search_light_vmap = jax.vmap(
+                    lambda pos: search_level2a_light_block(
+                        pos,
+                        block_id,
+                        block_elems_jax,
+                        block_count,
+                        node_pos_jax,
+                        connectivity_jax
+                    )
+                )
+                found_elem_ids = np.array(search_light_vmap(particle_batch_jax), dtype=np.int32)
+
+            # Update results for particles found in L2 (batch)
+            for i, elem_id in enumerate(found_elem_ids):
+                particle_idx = batch_indices[i]
+                if elem_id >= 0:
+                    element_ids[particle_idx] = elem_id
+                    block_ids[particle_idx] = block_id
+                    l2_hits += 1
+
+        processed += n_in_block
+
+        if verbose and processed % 10000 < n_in_block:
             elapsed = time.time() - start_time
-            rate = (i + 1) / elapsed if elapsed > 0 else 0
-            print(f"  Progress: {i+1:,}/{n_particles:,} ({100*(i+1)/n_particles:.1f}%) - {rate:.0f} p/s", end='\r')
-
-        elem_id, block_id = initial_search_single(
-            particle_positions[i],
-            domain_bounds,
-            grid_size,
-            block_classification,
-            padded_arrays,
-            block_neighbors_26,
-            hash_bucket_data,
-            node_positions,
-            connectivity
-        )
-
-        element_ids[i] = elem_id
-        block_ids[i] = block_id
-
-    total_time = time.time() - start_time
+            rate = processed / elapsed if elapsed > 0 else 0
+            print(f"    Progress: {processed:,}/{n_particles:,} ({100*processed/n_particles:.1f}%) - {rate:.0f} p/s", end='\r')
 
     if verbose:
-        print()  # New line after progress
+        print(f"\n  ✓ L2 search complete: {l2_hits:,}/{n_particles:,} found ({100*l2_hits/n_particles:.1f}%)")
+
+    # STEP 4: L3 fallback for particles not found in primary block
+    not_found_indices = np.where(element_ids < 0)[0]
+    n_not_found_l2 = len(not_found_indices)
+
+    l3_hits = 0
+
+    if n_not_found_l2 > 0:
+        if verbose:
+            print(f"  Running L3 fallback for {n_not_found_l2:,} particles...")
+
+        # Create heavy block flags for L3 search
+        n_blocks = len(padded_arrays.block_sizes)
+        heavy_flags = jnp.zeros(n_blocks, dtype=jnp.bool_)
+        for hb_id in block_classification.heavy_blocks:
+            heavy_flags = heavy_flags.at[hb_id].set(True)
+
+        # L3: Sequential search (cannot vectorize due to memory constraints)
+        # L3 searches 26 neighbor blocks with full padded arrays - vmap would cause OOM
+        # Since L3 is only needed for <5% of particles, sequential is acceptable
+        #
+        # IMPORTANT: Don't upload full padded_arrays to GPU! Process one particle at a time
+        # to avoid memory explosion (OOM with 10k particles)
+        for idx in not_found_indices:
+            block_id = particle_block_ids[idx]
+            if block_id < 0:
+                continue  # Outside domain
+
+            pos = particle_positions[idx]  # Use CPU array, not JAX
+            neighbors_26 = block_neighbors_26[block_id]
+
+            # Search in neighbor blocks one at a time (avoids OOM)
+            for neighbor_id in neighbors_26:
+                if neighbor_id < 0:
+                    continue
+
+                # Get neighbor block data
+                neighbor_block_elements = padded_arrays.block_elements[neighbor_id]
+                neighbor_block_size = int(padded_arrays.block_sizes[neighbor_id])
+
+                # Only search valid elements in this neighbor block
+                if neighbor_block_size == 0:
+                    continue
+
+                # Upload only this block's data to GPU
+                pos_jax = jnp.array(pos, dtype=jnp.float32)
+                block_elem_jax = jnp.array(neighbor_block_elements[:neighbor_block_size], dtype=jnp.int32)
+
+                # Check if heavy block - use hash bucket search
+                is_heavy = neighbor_id in block_classification.heavy_blocks
+
+                if is_heavy and hash_bucket_data and neighbor_id in hash_bucket_data:
+                    # L2b: Heavy block search
+                    hash_arrays = hash_bucket_data[neighbor_id]
+                    bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
+                    bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
+                    bucket_neighbors_jax = jnp.array(hash_arrays.bucket_neighbors_6, dtype=jnp.int32)
+                    block_bounds_jax = jnp.array(hash_arrays.block_bounds, dtype=jnp.float32)
+
+                    elem_id = search_level2b_hash_bucket(
+                        pos_jax,
+                        neighbor_id,
+                        bucket_elements_jax,
+                        bucket_counts_jax,
+                        bucket_neighbors_jax,
+                        hash_arrays.n_buckets,
+                        hash_arrays.morton_bits,
+                        block_bounds_jax,
+                        node_pos_jax,
+                        connectivity_jax
+                    )
+                else:
+                    # L2a: Light block search
+                    elem_id = search_level2a_light_block(
+                        pos_jax,
+                        neighbor_id,
+                        block_elem_jax,
+                        neighbor_block_size,
+                        node_pos_jax,
+                        connectivity_jax
+                    )
+
+                if int(elem_id) >= 0:
+                    element_ids[idx] = int(elem_id)
+                    block_ids[idx] = int(neighbor_id)
+                    l3_hits += 1
+                    break
+
+        if verbose:
+            print(f"  ✓ L3 search complete: {l3_hits:,} additional particles found")
+
+    total_time = time.time() - start_time
 
     # Compute statistics
     n_found = np.sum(element_ids >= 0)
     n_not_found = n_particles - n_found
 
-    # Count where found
-    n_found_in_primary = 0
-    n_found_in_neighbor = 0
-
-    for i in range(n_particles):
-        if element_ids[i] < 0:
-            continue
-
-        # Check if found in primary block
-        pos_jax = jnp.array(particle_positions[i], dtype=jnp.float32)
-        bounds_jax = jnp.array(domain_bounds, dtype=jnp.float32)
-        primary_block = int(find_containing_block_jax(pos_jax, bounds_jax, grid_size))
-
-        if block_ids[i] == primary_block:
-            n_found_in_primary += 1
-        else:
-            n_found_in_neighbor += 1
-
-    l2_hits = n_found_in_primary
-    l3_hits = n_found_in_neighbor
+    n_found_in_primary = l2_hits
+    n_found_in_neighbor = l3_hits
 
     stats = InitialSearchStats(
         n_particles=n_particles,

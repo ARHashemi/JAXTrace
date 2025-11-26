@@ -44,6 +44,7 @@ This is the **executable implementation plan** for JAX GPU-native particle track
 - Extreme imbalance: 4 heavy blocks contain 91% of elements
 - Heaviest block: 948,960 elements (444 MB padded array)
 - Current memory: 660 MB static data on GPU
+- Detals of mesh analysis [docs/mesh_analysis_threadedA.md](mesh_analysis_threadedA.md)
 
 ---
 

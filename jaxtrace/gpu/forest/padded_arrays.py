@@ -17,67 +17,95 @@ from .block_mapper import BlockAssignmentStats
 @dataclass
 class PaddedArrays:
     """Padded 2D arrays for block-local element storage."""
-    
+
     # Core arrays
     block_elements: np.ndarray  # (n_blocks, max_elem), int32, -1 padding
     block_sizes: np.ndarray     # (n_blocks,), int32, actual element counts
-    
+
     # Dimensions
     n_blocks: int
     max_elements_per_block: int
     total_elements: int
-    
+
     # Memory statistics
     memory_bytes: int
     memory_mb: float
     padding_waste_pct: float
-    
+
+    # Optional: Full mesh data per block (for Phase 2 batch processor)
+    # These are None by default (V5 minimal), but can be populated for Phase 2
+    connectivity: np.ndarray = None  # (n_blocks, max_elem, 4), int32, -1 padding
+    node_positions: np.ndarray = None  # (n_blocks, max_nodes, 3), float32
+    element_neighbors: np.ndarray = None  # (n_blocks, max_elem, 4), int32, -1 padding
+    max_block_size: int = None  # Alias for max_elements_per_block
+
+    def __post_init__(self):
+        """Set max_block_size alias if not provided."""
+        if self.max_block_size is None:
+            self.max_block_size = self.max_elements_per_block
+
     def __repr__(self) -> str:
-        return (
+        base = (
             f"PaddedArrays(\n"
             f"  Shape: ({self.n_blocks}, {self.max_elements_per_block})\n"
             f"  Total elements: {self.total_elements:,}\n"
             f"  Memory: {self.memory_mb:.1f} MB\n"
             f"  Padding waste: {self.padding_waste_pct:.1f}%\n"
-            f")"
         )
+        if self.connectivity is not None:
+            base += f"  Extended: Yes (connectivity, positions, neighbors)\n"
+        return base + ")"
 
 
 def build_padded_block_arrays(
     element_to_block: np.ndarray,
     stats: BlockAssignmentStats,
+    node_positions: np.ndarray = None,
+    connectivity: np.ndarray = None,
+    element_neighbors: np.ndarray = None,
     verbose: bool = False
 ) -> PaddedArrays:
     """
     Build padded 2D arrays for block-local element storage.
-    
+
     This is the V5 solution that avoids V4's global flattening problem.
-    
+
     Parameters
     ----------
     element_to_block : np.ndarray
         Block ID for each element, shape (N_elements,), int32
     stats : BlockAssignmentStats
         Block assignment statistics from Phase 1
+    node_positions : np.ndarray, optional
+        Node positions [n_nodes, 3], float32. If provided, builds extended arrays.
+    connectivity : np.ndarray, optional
+        Element connectivity [n_elements, 4], int32. If provided, builds extended arrays.
+    element_neighbors : np.ndarray, optional
+        Element neighbors [n_elements, 4], int32. If provided, builds extended arrays.
     verbose : bool, optional
         Print progress messages (default: False)
-        
+
     Returns
     -------
     padded : PaddedArrays
-        Padded 2D arrays with -1 padding
-        
+        Padded 2D arrays with -1 padding.
+        If mesh data provided, includes connectivity, node_positions, element_neighbors.
+
     Notes
     -----
     **Why Padded Arrays?**
-    
+
     V4 Problem:
     - Dictionary `octrees[block_id]` fails in JAX JIT
     - Global flattening → O(N_particles × N_elements) = 45 GB
-    
+
     V5 Solution:
     - Padded 2D array: `(n_blocks, max_elem_per_block)`
     - Static shape → JAX JIT compatible
+
+    **Extended Mode (Phase 2)**:
+    If node_positions, connectivity, and element_neighbors are provided,
+    builds full mesh data per block for Phase 2 batch processor.
     - Memory: 115.9 MB (120× better than V4)
     
     **Example**:
@@ -134,15 +162,65 @@ def build_padded_block_arrays(
     
     # Verify counts match
     assert np.array_equal(block_indices, block_sizes), "Element count mismatch!"
-    
+
+    # Build extended arrays if mesh data provided (Phase 2)
+    padded_connectivity = None
+    padded_node_positions = None
+    padded_neighbors = None
+
+    if connectivity is not None and node_positions is not None and element_neighbors is not None:
+        if verbose:
+            print("  Building extended arrays (connectivity, positions, neighbors)...")
+
+        # Padded connectivity: (n_blocks, max_elem, 4)
+        padded_connectivity = np.full((n_blocks, max_elem, 4), -1, dtype=np.int32)
+
+        # Padded neighbors: (n_blocks, max_elem, 4)
+        padded_neighbors = np.full((n_blocks, max_elem, 4), -1, dtype=np.int32)
+
+        # Determine max nodes needed per block (assume 4 nodes per element as upper bound)
+        n_nodes = node_positions.shape[0]
+        max_nodes_per_block = min(n_nodes, max_elem * 4)  # Conservative estimate
+
+        # Padded node positions: (n_blocks, max_nodes, 3)
+        # Strategy: Store ALL node positions in each block (wasteful but simple)
+        # TODO: Optimize to only store nodes used by block elements
+        padded_node_positions = np.tile(node_positions, (n_blocks, 1, 1)).astype(np.float32)
+
+        # Fill padded arrays block-by-block
+        for block_id in range(n_blocks):
+            block_size = block_sizes[block_id]
+            if block_size == 0:
+                continue
+
+            # Get element IDs in this block
+            elem_ids = block_elements[block_id, :block_size].astype(np.int64)
+
+            # Copy connectivity for these elements
+            padded_connectivity[block_id, :block_size] = connectivity[elem_ids]
+
+            # Copy neighbors for these elements
+            padded_neighbors[block_id, :block_size] = element_neighbors[elem_ids]
+
+        if verbose:
+            conn_mb = padded_connectivity.nbytes / (1024**2)
+            pos_mb = padded_node_positions.nbytes / (1024**2)
+            neigh_mb = padded_neighbors.nbytes / (1024**2)
+            print(f"  Extended arrays memory:")
+            print(f"    Connectivity: {conn_mb:.1f} MB")
+            print(f"    Node positions: {pos_mb:.1f} MB")
+            print(f"    Neighbors: {neigh_mb:.1f} MB")
+
     # Compute memory statistics
     memory_bytes = block_elements.nbytes + block_sizes.nbytes
+    if padded_connectivity is not None:
+        memory_bytes += padded_connectivity.nbytes + padded_node_positions.nbytes + padded_neighbors.nbytes
     memory_mb = memory_bytes / (1024**2)
-    
+
     total_valid = np.sum(block_sizes)
     total_slots = n_blocks * max_elem
     padding_waste_pct = 100 * (1 - total_valid / total_slots)
-    
+
     padded = PaddedArrays(
         block_elements=block_elements,
         block_sizes=block_sizes,
@@ -152,11 +230,15 @@ def build_padded_block_arrays(
         memory_bytes=memory_bytes,
         memory_mb=memory_mb,
         padding_waste_pct=padding_waste_pct,
+        connectivity=padded_connectivity,
+        node_positions=padded_node_positions,
+        element_neighbors=padded_neighbors,
+        max_block_size=max_elem,
     )
-    
+
     if verbose:
         print(f"\n{padded}")
-    
+
     return padded
 
 

@@ -16,6 +16,7 @@ Key functions:
 
 import time
 import numpy as np
+import jax.numpy as jnp
 from typing import Optional, Dict, Tuple, Callable
 from dataclasses import dataclass, field
 
@@ -24,6 +25,12 @@ from .block_grouping import group_particles_by_block, ParticleGrouping
 from .memory_utils import monitor_batch_memory_usage
 from ..particles import ParticleData
 from ..forest import PaddedArrays
+from ..search import (
+    search_particles_in_block,
+    search_particles_in_block_with_hash,
+    batch_search_light_blocks,
+    BlockSearchResult
+)
 
 
 @dataclass
@@ -51,6 +58,12 @@ class BatchStatistics:
     # Block-wise timing
     time_per_block: Dict[int, float] = field(default_factory=dict)
     particles_per_block: Dict[int, int] = field(default_factory=dict)
+
+    # Search level statistics
+    level0_hits: int = 0
+    level1_hits: int = 0
+    level2_hits: int = 0
+    not_found: int = 0
 
     def throughput_particles_per_sec(self) -> float:
         """Calculate batch throughput in particles/second."""
@@ -270,20 +283,64 @@ def process_batch(
             n_elem = padded_arrays.block_sizes[block_id]
             print(f"  Block {block_id} (heavy, {n_elem:,} elem): {n_particles_in_block:,} particles", end="")
 
+        # Extract particles for this block
+        block_positions = jnp.array(batch_particles.positions[particle_indices], dtype=jnp.float32)
+        block_element_ids = jnp.array(batch_particles.element_ids[particle_indices], dtype=jnp.int32)
+        block_ids_array = jnp.full(n_particles_in_block, block_id, dtype=jnp.int32)
+        block_active = jnp.array(batch_particles.active_mask[particle_indices], dtype=jnp.bool_)
+
+        # Get block data from padded arrays
+        block_size = padded_arrays.block_sizes[block_id]
+        block_connectivity = jnp.array(padded_arrays.connectivity[block_id, :block_size], dtype=jnp.int32)
+        block_node_positions = jnp.array(padded_arrays.node_positions[block_id], dtype=jnp.float32)
+        block_neighbors = jnp.array(padded_arrays.element_neighbors[block_id, :block_size], dtype=jnp.int32)
+
         # Call search kernel for this block
-        # NOTE: Phase 1 placeholder - actual kernel implementation in Phase 2
-        # For now, this is a stub that demonstrates the interface
-        # Real implementation will use JAX JIT-compiled search
         if config.use_hash_buckets:
-            # Heavy blocks use hash bucket search
-            pass  # Placeholder for hash bucket kernel
+            # Heavy blocks use hash bucket search (Strategy 1)
+            # TODO: Pass hash bucket data when preprocessing is implemented
+            result = search_particles_in_block_with_hash(
+                particle_positions=block_positions,
+                particle_element_ids=block_element_ids,
+                particle_block_ids=block_ids_array,
+                particle_active=block_active,
+                block_id=block_id,
+                block_connectivity=block_connectivity,
+                block_node_positions=block_node_positions,
+                block_element_neighbors=block_neighbors,
+                block_size=block_size,
+                hash_bucket_data=None  # Falls back to standard search for now
+            )
+        else:
+            # Standard 3-level search
+            result = search_particles_in_block(
+                particle_positions=block_positions,
+                particle_element_ids=block_element_ids,
+                particle_block_ids=block_ids_array,
+                particle_active=block_active,
+                block_id=block_id,
+                block_connectivity=block_connectivity,
+                block_node_positions=block_node_positions,
+                block_element_neighbors=block_neighbors,
+                block_size=block_size
+            )
+
+        # Update batch particles with search results
+        batch_particles.element_ids[particle_indices] = np.array(result.new_element_ids)
+
+        # Accumulate statistics
+        stats.level0_hits += int(result.level0_hits)
+        stats.level1_hits += int(result.level1_hits)
+        stats.level2_hits += int(result.level2_hits)
+        stats.not_found += int(result.not_found)
 
         t_block_end = time.time()
         stats.time_per_block[block_id] = t_block_end - t_block_start
         stats.particles_per_block[block_id] = n_particles_in_block
 
         if verbose and n_particles_in_block > 100:
-            print(f" -> {(t_block_end - t_block_start)*1000:.1f}ms")
+            print(f" -> {(t_block_end - t_block_start)*1000:.1f}ms "
+                  f"[L0:{result.level0_hits} L1:{result.level1_hits} L2:{result.level2_hits}]")
 
     # Process medium blocks
     for block_id in grouping.medium_blocks:
@@ -291,27 +348,143 @@ def process_batch(
         particle_indices = grouping.groups[block_id]
         n_particles_in_block = len(particle_indices)
 
-        # Call search kernel for this block
-        # NOTE: Phase 1 placeholder
-        pass
+        # Extract particles for this block
+        block_positions = jnp.array(batch_particles.positions[particle_indices], dtype=jnp.float32)
+        block_element_ids = jnp.array(batch_particles.element_ids[particle_indices], dtype=jnp.int32)
+        block_ids_array = jnp.full(n_particles_in_block, block_id, dtype=jnp.int32)
+        block_active = jnp.array(batch_particles.active_mask[particle_indices], dtype=jnp.bool_)
+
+        # Get block data from padded arrays
+        block_size = padded_arrays.block_sizes[block_id]
+        block_connectivity = jnp.array(padded_arrays.connectivity[block_id, :block_size], dtype=jnp.int32)
+        block_node_positions = jnp.array(padded_arrays.node_positions[block_id], dtype=jnp.float32)
+        block_neighbors = jnp.array(padded_arrays.element_neighbors[block_id, :block_size], dtype=jnp.int32)
+
+        # Standard 3-level search (medium blocks don't need hash buckets)
+        result = search_particles_in_block(
+            particle_positions=block_positions,
+            particle_element_ids=block_element_ids,
+            particle_block_ids=block_ids_array,
+            particle_active=block_active,
+            block_id=block_id,
+            block_connectivity=block_connectivity,
+            block_node_positions=block_node_positions,
+            block_element_neighbors=block_neighbors,
+            block_size=block_size
+        )
+
+        # Update batch particles with search results
+        batch_particles.element_ids[particle_indices] = np.array(result.new_element_ids)
+
+        # Accumulate statistics
+        stats.level0_hits += int(result.level0_hits)
+        stats.level1_hits += int(result.level1_hits)
+        stats.level2_hits += int(result.level2_hits)
+        stats.not_found += int(result.not_found)
 
         t_block_end = time.time()
         stats.time_per_block[block_id] = t_block_end - t_block_start
         stats.particles_per_block[block_id] = n_particles_in_block
 
-    # Process light blocks (Phase 2: batch them together for efficiency)
-    for block_id in grouping.light_blocks:
-        t_block_start = time.time()
-        particle_indices = grouping.groups[block_id]
-        n_particles_in_block = len(particle_indices)
+    # Process light blocks
+    # Phase 2 optimization: batch them together if enabled (config.batch_light_blocks)
+    # Otherwise fall back to individual processing (Phase 1 baseline)
+    if len(grouping.light_blocks) > 0:
+        if config.batch_light_blocks:
+            # Phase 2: Batched light block processing (experimental - may be slower)
+            t_light_batch_start = time.time()
 
-        # Call search kernel for this block
-        # NOTE: Phase 1 placeholder
-        pass
+            # Collect all particles in light blocks
+            light_particle_indices = []
+            for block_id in grouping.light_blocks:
+                light_particle_indices.extend(grouping.groups[block_id])
 
-        t_block_end = time.time()
-        stats.time_per_block[block_id] = t_block_end - t_block_start
-        stats.particles_per_block[block_id] = n_particles_in_block
+            if len(light_particle_indices) > 0:
+                # Convert to numpy array
+                light_particle_indices = np.array(light_particle_indices)
+
+                # Extract all light block particles
+                light_positions = jnp.array(batch_particles.positions[light_particle_indices], dtype=jnp.float32)
+                light_element_ids = jnp.array(batch_particles.element_ids[light_particle_indices], dtype=jnp.int32)
+                light_block_ids = jnp.array(batch_particles.block_ids[light_particle_indices], dtype=jnp.int32)
+                light_active = jnp.array(batch_particles.active_mask[light_particle_indices], dtype=jnp.bool_)
+
+                if verbose:
+                    print(f"  Processing {len(grouping.light_blocks)} light blocks (BATCHED MODE): {len(light_particle_indices)} particles")
+
+                # Use batched light block search (Phase 2 optimization)
+                result = batch_search_light_blocks(
+                    particle_positions=light_positions,
+                    particle_element_ids=light_element_ids,
+                    particle_block_ids=light_block_ids,
+                    particle_active=light_active,
+                    light_block_ids=np.array(grouping.light_blocks),
+                    padded_arrays=padded_arrays,
+                    batch_size=16  # Process 16 blocks per iteration
+                )
+
+                # Update batch particles with search results
+                batch_particles.element_ids[light_particle_indices] = np.array(result.element_ids)
+
+                # Accumulate statistics
+                stats.level0_hits += result.n_level0_hits
+                stats.level1_hits += result.n_level1_hits
+                stats.level2_hits += result.n_level2_hits
+                stats.not_found += result.n_not_found
+
+                t_light_batch_end = time.time()
+
+                if verbose:
+                    print(f"    Light blocks (batched): {(t_light_batch_end - t_light_batch_start)*1000:.1f}ms "
+                          f"[L0:{result.n_level0_hits} L1:{result.n_level1_hits} L2:{result.n_level2_hits}]")
+        else:
+            # Phase 1: Individual light block processing (baseline - better performance)
+            for block_id in grouping.light_blocks:
+                particle_indices = grouping.groups[block_id]
+                n_particles_in_block = len(particle_indices)
+
+                if n_particles_in_block == 0:
+                    continue
+
+                t_block_start = time.time()
+
+                # Extract particles for this block
+                block_positions = jnp.array(batch_particles.positions[particle_indices], dtype=jnp.float32)
+                block_element_ids = jnp.array(batch_particles.element_ids[particle_indices], dtype=jnp.int32)
+                block_ids_array = jnp.full(n_particles_in_block, block_id, dtype=jnp.int32)
+                block_active = jnp.array(batch_particles.active_mask[particle_indices], dtype=jnp.bool_)
+
+                # Get block data from padded arrays
+                block_size = padded_arrays.block_sizes[block_id]
+                block_connectivity = padded_arrays.connectivity[block_id, :block_size]
+                block_node_positions = padded_arrays.node_positions[block_id]
+                block_neighbors = padded_arrays.element_neighbors[block_id, :block_size]
+
+                # Search particles in this light block
+                result = search_particles_in_block(
+                    particle_positions=block_positions,
+                    particle_element_ids=block_element_ids,
+                    particle_block_ids=block_ids_array,
+                    particle_active=block_active,
+                    block_id=block_id,
+                    block_connectivity=block_connectivity,
+                    block_node_positions=block_node_positions,
+                    block_element_neighbors=block_neighbors,
+                    block_size=block_size
+                )
+
+                # Update batch particles
+                batch_particles.element_ids[particle_indices] = np.array(result.element_ids)
+
+                # Accumulate statistics
+                stats.level0_hits += int(result.n_level0_hits)
+                stats.level1_hits += int(result.n_level1_hits)
+                stats.level2_hits += int(result.n_level2_hits)
+                stats.not_found += int(result.n_not_found)
+
+                t_block_end = time.time()
+                stats.time_per_block[block_id] = t_block_end - t_block_start
+                stats.particles_per_block[block_id] = n_particles_in_block
 
     stats.time_block_processing = time.time() - t_blocks_start
 
@@ -492,6 +665,12 @@ def track_particles_batched(
             # Accumulate statistics
             stats.batch_stats.append(batch_stats)
             stats.total_batches += 1
+
+            # Accumulate search level statistics
+            stats.total_level0_hits += batch_stats.level0_hits
+            stats.total_level1_hits += batch_stats.level1_hits
+            stats.total_level2_hits += batch_stats.level2_hits
+            stats.total_not_found += batch_stats.not_found
 
         stats.time_per_timestep = time.time() - t_timestep_start
 

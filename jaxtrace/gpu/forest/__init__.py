@@ -29,6 +29,7 @@ from .element_adjacency import (
     build_face_to_element_map,
     extract_element_neighbors,
     validate_neighbor_symmetry,
+    build_element_neighbors_array,
 )
 from .padded_arrays import (
     PaddedArrays,
@@ -59,6 +60,7 @@ __all__ = [
     "build_face_to_element_map",
     "extract_element_neighbors",
     "validate_neighbor_symmetry",
+    "build_element_neighbors_array",
     # Padded arrays (Phase 2)
     "PaddedArrays",
     "build_padded_block_arrays",

@@ -14,8 +14,19 @@ from .seeding import (
     compute_particle_density,
 )
 
+# Import ParticleData from parent's standalone particles.py using importlib
+import importlib.util
+import os
+
+_particles_py_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'particles.py')
+_spec = importlib.util.spec_from_file_location("_particles_standalone", _particles_py_path)
+_particles_standalone = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_particles_standalone)
+ParticleData = _particles_standalone.ParticleData
+
 __all__ = [
     "ParticleState",
+    "ParticleData",  # Add ParticleData to exports
     "SeedingConfig",
     "seed_particles",
     "seed_particles_uniform",
