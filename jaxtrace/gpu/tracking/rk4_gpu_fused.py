@@ -365,7 +365,7 @@ def rk4_step_gpu_fused_wrapper(
     element_ids: np.ndarray,
     dt: float,
     mesh_gpu: MeshDataGPU,
-    velocity_field: np.ndarray,
+    velocity_field,  # Can be np.ndarray OR jax.Array
     n_hops: int = 3
 ) -> Tuple[np.ndarray, np.ndarray, dict]:
     """
@@ -386,8 +386,9 @@ def rk4_step_gpu_fused_wrapper(
         Time step size
     mesh_gpu : MeshDataGPU
         GPU-resident mesh data
-    velocity_field : np.ndarray
-        Velocity field (will be uploaded to GPU)
+    velocity_field : np.ndarray or jax.Array
+        Velocity field at nodes. If numpy array, will be uploaded to GPU.
+        If jax.Array, assumes already on GPU (avoids repeated uploads).
     n_hops : int, default=3
         Number of hops for L1 neighbor search (2-4)
 
@@ -499,11 +500,17 @@ def rk4_step_gpu_fused_wrapper(
         return positions_final_gpu, element_ids_final_gpu
     t_total = time.time()
 
-    # Upload initial state to GPU (ONE upload)
+    # Upload initial state to GPU (ONE upload per timestep)
     t_upload = time.time()
     positions_gpu = jax.device_put(positions.astype(np.float32))
     element_ids_gpu = jax.device_put(element_ids.astype(np.int32))
-    velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+
+    # Only upload velocity field if it's a numpy array (not already on GPU)
+    if isinstance(velocity_field, np.ndarray):
+        velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+    else:
+        # Already a jax.Array on GPU, no upload needed
+        velocity_field_gpu = velocity_field
     t_upload = time.time() - t_upload
 
     # Execute GPU-fused RK4 (all on GPU, no transfers)

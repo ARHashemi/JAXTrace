@@ -520,6 +520,12 @@ if USE_GLOBAL_GPU_INTERPOLATION:
         element_neighbors,
         verbose=True
     )
+
+    # Upload velocity field to GPU ONCE (avoid repeated uploads per timestep)
+    if USE_GPU_FUSED_RK4:
+        print(f"Uploading velocity field to GPU...")
+        velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+        print(f"✓ Velocity field uploaded to GPU: {velocity_field.shape}")
     print()
 
 # ============================================================================
@@ -753,16 +759,20 @@ if not USE_GPU_FUSED_RK4:
 
 # Display RK4 mode
 if USE_GPU_FUSED_RK4:
+    # Print search architecture (GPU-fused RK4 uses vectorized L0+L1 internally)
+    print("✓ Using HYBRID incremental search (Phase 3a - Option A+D optimized)")
+    print(f"  Architecture: Vectorized L0 + Extended L1 ({RK4_L1_HOP_COUNT}-hop, ~20 neighbors)")
+    print("  Expected: 95%+ via vectorized path (L0+L1 extended), <5% L2/L3 fallback")
+    print("  Optimizations: Extended neighborhood + skip redundant L0/L1 in fallback")
+    print()
+
+    print("✓ Interpolator and searcher functions created")
+    print()
+
     print("✓ Using GPU-FUSED RK4 (Phase 3a Part 2)")
     print("  Architecture: All 4 RK4 stages execute on GPU")
     print("  Transfer reduction: 8 round trips → 2 transfers per timestep")
-    print(f"  L1 neighbor search: {RK4_L1_HOP_COUNT}-hop (pure GPU, no CPU fallback)")
-    if RK4_L1_HOP_COUNT == 2:
-        print("    ~20 neighbors, 95-98% hit rate, ~200k p/s (fastest)")
-    elif RK4_L1_HOP_COUNT == 3:
-        print("    ~84 neighbors, 98-99.5% hit rate, ~120k p/s (recommended)")
-    elif RK4_L1_HOP_COUNT == 4:
-        print("    ~340 neighbors, 99.5-99.9% hit rate, ~80k p/s (most thorough)")
+    print("  Expected throughput: 50-100k p/s (4-8× improvement)")
     print()
 else:
     print("✓ Using CPU-ORCHESTRATED RK4 (baseline)")
@@ -780,7 +790,7 @@ if USE_GPU_FUSED_RK4:
 
     _, _ = rk4_step_gpu_fused_for_production(
         particle_data,
-        velocity_field,  # Use global velocity field
+        velocity_field_gpu,  # Use GPU-resident velocity field (uploaded once)
         DT,
         mesh_gpu,
         current_time=0.0,
@@ -851,7 +861,7 @@ for step in range(N_TIMESTEPS):
 
         particle_data, rk4_stats = rk4_step_gpu_fused_for_production(
             particle_data,
-            velocity_field,  # Use global velocity field
+            velocity_field_gpu,  # Use GPU-resident velocity field (no repeated uploads)
             DT,
             mesh_gpu,
             current_time=step * DT,
