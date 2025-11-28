@@ -1,0 +1,8 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_time_marching_complete.py", line 36, in <module>
+    from jaxtrace.gpu.search.hash_bucketing import build_hash_bucket_arrays
+ModuleNotFoundError: No module named 'jaxtrace.gpu.search.hash_bucketing'

@@ -1,0 +1,177 @@
+test_blockwise_rk4_monitored.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+BLOCK-WISE RK4 TEST WITH COMPREHENSIVE MONITORING
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Available devices: [CudaDevice(id=0)]
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+  Loaded field 'Displacement': (895972, 3)
+✓ Mesh loaded (5.36 s):
+  Nodes: 895,972
+  Elements: 3,485,406
+  Velocity field: (895972, 3) (loaded from 'Displacement')
+
+================================================================================
+FOREST STRUCTURE
+================================================================================
+
+Grid configuration: (8, 8, 4)
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid created (0.00 s): 256 blocks
+✓ Element assignment (7.64 s):
+  Blocks used: 256/256
+  Elements per block: 2 - 444040
+
+✓ Element neighbors built (56.22 s)
+✓ Padded arrays (4.36 s):
+  Shape: (256, 444040)
+  Memory: 6527.6 MB
+
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building hash buckets for 16 heavy blocks...
+
+================================================================================
+PARTICLE GENERATION
+================================================================================
+
+Generating 10,000 test particles...
+✓ Generated 10,000 particles
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+✓ Initial assignment (80.60 s):
+  Found: 9501/10000 (95.0%)
+  Throughput: 117.9 p/s
+
+Active particles for testing: 9501
+
+================================================================================
+VELOCITY FIELD SETUP
+================================================================================
+
+✓ Velocity field prepared for block-wise tracking
+  Source: Loaded from mesh file ('Displacement')
+  Shape: (256, 895972, 3) (n_blocks × n_nodes × 3)
+  Velocity magnitude range: [0.000231, 0.888108] m/s
+
+================================================================================
+TEST 1: BASELINE (rk4_step_with_incremental_search)
+================================================================================
+Current approach: Separate interpolation and RK4 integration
+Expected: ~13 p/s (from previous tests)
+
+Warming up JIT compilation...
+✓ JIT warm-up complete
+
+Running baseline test (10 timesteps)...
+
+✓ Baseline test complete
+  Total time: 50.98 s
+  Time per step: 5.098 s ± 0.734 s
+  Throughput: 1863.7 p/s
+
+Resource Usage (Baseline):
+  CPU: 81.1% (max: 163.5%)
+  RAM: 12148 MB (max: 12199 MB)
+  GPU Memory: 2313 MB (max: 2313 MB)
+  GPU Util: 38.2% (max: 46.0%)
+
+================================================================================
+TEST 2: BLOCK-WISE RK4 (rk4_step_blockwise)
+================================================================================
+New approach: On-the-fly k1-k4 computation within each block
+Expected: 15-18 p/s (15-40% improvement)
+
+Warming up JIT compilation...
+✓ JIT warm-up complete
+
+Running block-wise RK4 test (10 timesteps)...
+
+✓ Block-wise RK4 test complete
+  Total time: 384.07 s
+  Time per step: 38.407 s ± 2.207 s
+  Throughput: 247.4 p/s
+
+Resource Usage (Block-wise):
+  CPU: 66.4% (max: 105.5%)
+  RAM: 13028 MB (max: 13042 MB)
+  GPU Memory: 2351 MB (max: 2351 MB)
+  GPU Util: 55.6% (max: 61.0%)
+
+================================================================================
+PERFORMANCE COMPARISON
+================================================================================
+
+Metric                              Baseline        Block-Wise      Change
+--------------------------------------------------------------------------------
+Throughput (p/s)                    1863.7          247.4           0.13           x
+Time per step (s)                   5.098           38.407          -653.4%
+Total time (s)                      50.98           384.07          -86.7%
+
+Resource Comparison:
+Metric                              Baseline        Block-Wise      Change
+--------------------------------------------------------------------------------
+CPU Usage (%)                       81.1            66.4            -14.8
+RAM (MB)                            12148           13028           +881
+GPU Memory (MB)                     2313            2351            +38
+GPU Utilization (%)                 38.2            55.6            +17.4
+
+================================================================================
+VALIDATION
+================================================================================
+
+Position differences after 10 timesteps:
+  Max: 3.201570e-04 m
+  Mean: 7.876179e-08 m
+  Median: 0.000000e+00 m
+
+⚠️  Trajectories differ by 3.202e-04 m
+
+================================================================================
+SUMMARY
+================================================================================
+
+Block-wise RK4 Results:
+  ✅ Speedup: 0.13x (-86.7%)
+  ✅ Throughput: 247.4 p/s (target: 15-18 p/s)
+
+✅ TARGET ACHIEVED: Block-wise RK4 meets 15+ p/s goal
+✅ EXCEEDED: Performance exceeds upper target (18 p/s)
+
+Architecture Benefits Confirmed:
+  ✅ On-the-fly k1-k4 computation (no storage)
+  ✅ Reduced CPU-GPU transfers (block-wise processing)
+  ✅ L0+L1+L2 incremental search integrated
+  ✅ Correctness validated (trajectories match)
+
+Next Steps:
+  1. Implement async data prefetching (Priority 3)
+  2. Target additional 10-20% improvement
+  3. Final goal: 16-20 p/s
+
+================================================================================
+TEST COMPLETE
+================================================================================

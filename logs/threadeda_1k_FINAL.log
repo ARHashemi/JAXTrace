@@ -1,0 +1,48 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_batch_processor_small.py", line 147, in <module>
+    padded_arrays = PaddedArrays.from_mesh(
+                    ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'PaddedArrays' has no attribute 'from_mesh'
+
+================================================================================
+THREADEDA TEST: Batch Processor with 1K Particles
+================================================================================
+
+[1/6] Testing imports...
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+✓ All imports successful
+
+[2/6] Loading ThreadedA mesh...
+  Path: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+✓ Mesh loaded successfully
+  Nodes: 895,972
+  Elements: 3,485,406
+
+  Bounding box:
+    X: [-0.030, 0.030]
+    Y: [-0.023, 0.023]
+    Z: [-0.010, 0.000]
+
+[3/6] Creating forest structure (Phase 1)...
+  Grid size: (8, 8, 4) (256 blocks)
+✓ Created 256 blocks
+
+  Assigning elements to blocks...
+✓ Element assignment complete
+  Elements assigned: 3,485,406
+  Blocks used: 256/256
+  Elements per block: 2 - 444040 (avg: 13614.9)
+  Heavy blocks (>10K): 16
+
+[4/6] Creating padded arrays (Phase 2)...
+  Computing element neighbors...
+✓ Computed neighbors in 58.84s
+
+  Creating padded arrays...
+✗ Padded arrays creation failed: type object 'PaddedArrays' has no attribute 'from_mesh'

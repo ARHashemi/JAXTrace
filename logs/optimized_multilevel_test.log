@@ -1,0 +1,170 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+OPTIMIZED MULTI-LEVEL SEARCH TEST
+Comparing: Sequential vs Original Vectorized vs Optimized Vectorized
+================================================================================
+
+📁 Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+✓ Mesh loaded:
+  Nodes:    895,972
+  Elements: 3,485,406
+
+📦 Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+🌳 Creating forest structure (grid: (8, 8, 4))...
+✓ Total blocks: 256
+
+📍 Assigning elements to blocks...
+✓ Element assignment complete:
+  Elements assigned: 3,485,406
+  Blocks used: 256/256
+
+📊 Building padded arrays (V5 extended mode)...
+✓ Padded arrays created:
+  Shape: (256, 444040)
+  Memory: 433.6 MB
+
+🔗 Building element adjacency (face neighbors)...
+Building element adjacency for 3,485,406 elements...
+  Step 1/2: Extracting faces...
+  Step 2/2: Building neighbor lists...
+    Processed 500,000 / 3,485,406 elements (14.3%)
+    Processed 1,000,000 / 3,485,406 elements (28.7%)
+    Processed 1,500,000 / 3,485,406 elements (43.0%)
+    Processed 2,000,000 / 3,485,406 elements (57.4%)
+    Processed 2,500,000 / 3,485,406 elements (71.7%)
+    Processed 3,000,000 / 3,485,406 elements (86.1%)
+
+📊 Element Neighbor Statistics:
+  Total elements: 3,485,406
+  Neighbors per element:
+    Min: 0
+    Max: 4
+    Mean: 3.78
+  Boundary elements: 733,942 (21.1%)
+  Interior elements: 2,751,464 (78.9%)
+✓ Adjacency complete (30.72 s)
+
+🏷️  Classifying blocks (threshold: 10K elements)...
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+🗂️  Building hash buckets for 16 heavy blocks...
+✓ Hash buckets built: 16 in 0.77 s
+
+================================================================================
+SCALING TESTS: Sequential vs Original Vectorized vs Optimized Vectorized
+================================================================================
+
+================================================================================
+TEST: 1,000 particles
+================================================================================
+
+🌱 Seeding 1,000 particles...
+✓ Seeded 1,000 particles
+
+🔍 Running initial assignment...
+✓ Initial assignment complete:
+  Found: 943/1000 (94.3%)
+
+⚡ Applying small perturbation (0.1mm)...
+
+🧹 Clearing GPU memory before tests...
+   Baseline GPU memory: 0.0 MB
+
+────────────────────────────────────────────────────────────────────────────────
+TEST 1: Sequential multi-level search (baseline)
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Sequential Results:
+  Throughput: 213 p/s
+  Duration:   4.69 s
+  Found:      935/1000 (93.5%)
+
+  Hit Rates:
+    L0:    851 ( 85.1%)
+    L1:     76 (  7.6%)
+    L2:      4 (  0.4%)
+    L3:      4 (  0.4%)
+
+🧹 Clearing GPU memory...
+   GPU memory after cleanup: 0.0 MB
+
+────────────────────────────────────────────────────────────────────────────────
+TEST 2: Original Vectorized multi-level search (nested JIT)
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Original Vectorized Results:
+  Throughput: 181 p/s
+  Duration:   5.54 s
+  Found:      935/1000 (93.5%)
+
+  Hit Rates:
+    L0:    851 ( 85.1%)
+    L1:     76 (  7.6%)
+    L2:      4 (  0.4%)
+    L3:      4 (  0.4%)
+
+🧹 Clearing GPU memory...
+   GPU memory after cleanup: 0.0 MB
+
+────────────────────────────────────────────────────────────────────────────────
+TEST 3: Optimized Vectorized multi-level search (pre-compiled)
+────────────────────────────────────────────────────────────────────────────────
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_optimized_multilevel.py", line 469, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_optimized_multilevel.py", line 315, in main
+    vec_opt_elem_ids, vec_opt_block_ids, vec_opt_stats = multi_level_search_batch_optimized(
+                                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        perturbed_positions,
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        verbose=False
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/multi_level_search_optimized.py", line 487, in multi_level_search_batch_optimized
+    search_l2a_batch_optimized(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        particle_batch_jax, block_elems, block_count,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        node_pos_jax, connectivity_jax
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ),
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/multi_level_search_optimized.py", line 160, in search_l2a_batch_optimized
+    return jax.vmap(search_single)(positions)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/multi_level_search_optimized.py", line 142, in search_single
+    valid_elements = block_elements[:block_count]
+                     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 1141, in op
+    return getattr(self.aval, f"_{name}")(self, *args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 678, in _getitem
+    return indexing.rewriting_take(self, item)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 665, in rewriting_take
+    return internal_gather(arr, dynamic_idx)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 674, in _gather
+    indexer = index_to_gather(
+        np.shape(arr), idx, core.typeof(arr).sharding,
+        normalize_indices=normalize_indices)  # shared with _scatter_update
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 956, in index_to_gather
+    raise IndexError(msg)
+IndexError: Array slice indices must have static start/stop/step to be used with NumPy indexing syntax. Found slice(None, JitTracer<~int64[]>, None). To index a statically sized array at a dynamic position, try lax.dynamic_slice/dynamic_update_slice (JAX does not support dynamically sized arrays within JIT compiled functions).
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

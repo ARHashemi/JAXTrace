@@ -1,0 +1,111 @@
+test_blockwise_rk4_monitored.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+BLOCK-WISE RK4 TEST WITH COMPREHENSIVE MONITORING
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Available devices: [CudaDevice(id=0)]
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+  Loaded field 'Displacement': (895972, 3)
+✓ Mesh loaded (5.32 s):
+  Nodes: 895,972
+  Elements: 3,485,406
+  Velocity field: (895972, 3) (loaded from 'Displacement')
+
+================================================================================
+FOREST STRUCTURE
+================================================================================
+
+Grid configuration: (8, 8, 4)
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid created (0.00 s): 256 blocks
+✓ Element assignment (7.63 s):
+  Blocks used: 256/256
+  Elements per block: 2 - 444040
+
+✓ Element neighbors built (57.48 s)
+✓ Padded arrays (7.49 s):
+  Shape: (256, 444040)
+  Memory: 6527.6 MB
+
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building hash buckets for 16 heavy blocks...
+
+================================================================================
+PARTICLE GENERATION
+================================================================================
+
+Generating 30,000 test particles...
+✓ Generated 30,000 particles
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+✓ Initial assignment (148.19 s):
+  Found: 28493/30000 (95.0%)
+  Throughput: 192.3 p/s
+
+Active particles for testing: 28493
+
+================================================================================
+VELOCITY FIELD SETUP
+================================================================================
+
+✓ Velocity field prepared for block-wise tracking
+  Source: Loaded from mesh file ('Displacement')
+  Shape: (256, 895972, 3) (n_blocks × n_nodes × 3)
+  Velocity magnitude range: [0.000231, 0.888108] m/s
+
+================================================================================
+TEST 1: BASELINE (rk4_step_with_incremental_search)
+================================================================================
+Current approach: Separate interpolation and RK4 integration
+Expected: ~13 p/s (from previous tests)
+
+Warming up JIT compilation...
+✓ JIT warm-up complete
+
+Running baseline test (10 timesteps)...
+
+✓ Baseline test complete
+  Total time: 74.43 s
+  Time per step: 7.443 s ± 1.802 s
+  Throughput: 3828.4 p/s
+
+Resource Usage (Baseline):
+  CPU: 91.7% (max: 176.0%)
+  RAM: 12032 MB (max: 12098 MB)
+  GPU Memory: 1035 MB (max: 1037 MB)
+  GPU Util: 27.8% (max: 43.0%)
+
+================================================================================
+TEST 2: BLOCK-WISE RK4 (rk4_step_blockwise)
+================================================================================
+New approach: On-the-fly k1-k4 computation within each block
+Expected: 15-18 p/s (15-40% improvement)
+
+Warming up JIT compilation...
+✓ JIT warm-up complete
+
+Running block-wise RK4 test (10 timesteps)...

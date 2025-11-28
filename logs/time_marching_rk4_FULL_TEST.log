@@ -1,0 +1,284 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+TIME-MARCHING PIPELINE TEST
+Using initialization from test_phase1_batched_threadeda.py
+================================================================================
+
+================================================================================
+PHASE 1: MESH LOADING AND FOREST STRUCTURE
+================================================================================
+
+📁 Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+✓ Mesh loaded:
+  Nodes:    895,972
+  Elements: 3,485,406
+
+📦 Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+🌳 Creating forest structure (grid: (8, 8, 4))...
+✓ Total blocks: 256
+
+📍 Assigning elements to blocks...
+✓ Element assignment complete:
+  Elements assigned: 3,485,406
+  Blocks used: 256/256
+  Elements per block: 2 - 444040 (avg: 13614.9)
+  Imbalance ratio: 32.61×
+  Heavy blocks (>10K): 16
+
+📊 Building padded arrays (V5 extended mode)...
+
+Building padded block arrays...
+  Blocks: 256
+  Max elements/block: 444,040
+  Array shape: (256, 444,040)
+  Counting elements per block...
+  Filling padded array...
+    Processed 500,000/3,485,406 elements...
+    Processed 1,000,000/3,485,406 elements...
+    Processed 1,500,000/3,485,406 elements...
+    Processed 2,000,000/3,485,406 elements...
+    Processed 2,500,000/3,485,406 elements...
+    Processed 3,000,000/3,485,406 elements...
+
+PaddedArrays(
+  Shape: (256, 444040)
+  Total elements: 3,485,406
+  Memory: 433.6 MB
+  Padding waste: 96.9%
+)
+✓ Padded arrays created:
+  Shape: (256, 444040)
+  Memory: 433.6 MB
+  Max elements per block: 444040
+
+🏷️  Classifying blocks (threshold: 10K elements)...
+✓ Block classification:
+  Light blocks (<10000):  240
+  Heavy blocks (≥10000): 16
+
+🗂️  Building hash buckets for 16 heavy blocks...
+✓ Hash buckets built: 16 in 0.79 s
+
+✅ Mesh preparation complete
+
+================================================================================
+TEST: 100 PARTICLES
+================================================================================
+
+🌱 Seeding 100 test particles...
+✓ Seeded 100 particles
+  Active: 100
+
+🔍 Running initial assignment...
+✓ Initial assignment complete (11.59 s)
+  Found: 98/100 (98.0%)
+  Throughput: 8 p/s
+
+================================================================================
+VELOCITY INTERPOLATION TEST
+================================================================================
+
+🌊 Creating constant velocity field...
+✓ Velocity field created: (256, 895972, 3)
+  Constant velocity: [1.0, 0.0, 0.0] mm/s
+
+📊 Creating time marcher...
+✓ Time marcher created
+
+🔄 Interpolating velocities for 98 active particles...
+✓ Velocity interpolation complete (0.96 s)
+  Throughput: 103 p/s
+  Velocities shape: (100, 3)
+  Mean velocity: [1.000, 0.000, 0.000]
+  Expected:      [1.000, 0.000, 0.000]
+
+✅ Velocity interpolation PASSED
+
+================================================================================
+SINGLE TIMESTEP TEST (dt=0.001)
+================================================================================
+
+⏱️  Testing Forward Euler integration...
+  Active particles: 98
+  Time step: 0.001 s
+✓ Timestep complete (9.71 s)
+  Throughput: 10 p/s
+  Time breakdown:
+    Interpolation: 320.2 ms (3.3%)
+    Integration:   51.1 ms (0.5%)
+    Search:        9335.1 ms (96.2%)
+
+📏 Particle displacement:
+  Mean: [0.000980, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+⚠️  Particle motion may be incorrect
+
+================================================================================
+SINGLE RK4 TIMESTEP TEST (dt=0.001, Simplified (single search))
+================================================================================
+
+🔄 Testing RK4 integration...
+  Active particles: 98
+  Time step: 0.001 s
+  Mode: Simplified (single search)
+✓ RK4 timestep complete (10.72 s)
+  Throughput: 9 p/s
+  Total searches: 1
+
+📏 Particle displacement:
+  Mean: [0.001000, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+✅ Particle motion CORRECT
+
+================================================================================
+SINGLE RK4 TIMESTEP TEST (dt=0.001, Full (intermediate searches))
+================================================================================
+
+🔄 Testing RK4 integration...
+  Active particles: 98
+  Time step: 0.001 s
+  Mode: Full (intermediate searches)
+✓ RK4 timestep complete (35.05 s)
+  Throughput: 3 p/s
+  Total searches: 4
+
+📏 Particle displacement:
+  Mean: [0.001000, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+✅ Particle motion CORRECT
+
+📊 Integration Method Comparison:
+  Forward Euler:         10 p/s  (1 search/step)
+  RK4 Simplified:         9 p/s  (1 search/step)
+  RK4 Full:               3 p/s  (4 searches/step)
+
+✓ GPU memory cleared
+
+================================================================================
+TEST: 1,000 PARTICLES
+================================================================================
+
+🌱 Seeding 1,000 test particles...
+✓ Seeded 1,000 particles
+  Active: 1000
+
+🔍 Running initial assignment...
+✓ Initial assignment complete (83.44 s)
+  Found: 960/1000 (96.0%)
+  Throughput: 12 p/s
+
+================================================================================
+VELOCITY INTERPOLATION TEST
+================================================================================
+
+🌊 Creating constant velocity field...
+✓ Velocity field created: (256, 895972, 3)
+  Constant velocity: [1.0, 0.0, 0.0] mm/s
+
+📊 Creating time marcher...
+✓ Time marcher created
+
+🔄 Interpolating velocities for 960 active particles...
+✓ Velocity interpolation complete (3.55 s)
+  Throughput: 270 p/s
+  Velocities shape: (1000, 3)
+  Mean velocity: [1.000, 0.000, 0.000]
+  Expected:      [1.000, 0.000, 0.000]
+
+✅ Velocity interpolation PASSED
+
+================================================================================
+SINGLE TIMESTEP TEST (dt=0.001)
+================================================================================
+
+⏱️  Testing Forward Euler integration...
+  Active particles: 960
+  Time step: 0.001 s
+✓ Timestep complete (73.63 s)
+  Throughput: 14 p/s
+  Time breakdown:
+    Interpolation: 793.3 ms (1.1%)
+    Integration:   69.0 ms (0.1%)
+    Search:        72770.6 ms (98.8%)
+
+📏 Particle displacement:
+  Mean: [0.000960, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+⚠️  Particle motion may be incorrect
+
+================================================================================
+SINGLE RK4 TIMESTEP TEST (dt=0.001, Simplified (single search))
+================================================================================
+
+🔄 Testing RK4 integration...
+  Active particles: 960
+  Time step: 0.001 s
+  Mode: Simplified (single search)
+✓ RK4 timestep complete (81.19 s)
+  Throughput: 12 p/s
+  Total searches: 1
+
+📏 Particle displacement:
+  Mean: [0.001000, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+✅ Particle motion CORRECT
+
+================================================================================
+SINGLE RK4 TIMESTEP TEST (dt=0.001, Full (intermediate searches))
+================================================================================
+
+🔄 Testing RK4 integration...
+  Active particles: 960
+  Time step: 0.001 s
+  Mode: Full (intermediate searches)
+✓ RK4 timestep complete (275.47 s)
+  Throughput: 4 p/s
+  Total searches: 4
+
+📏 Particle displacement:
+  Mean: [0.001000, 0.000000, 0.000000]
+  Expected: [0.001000, 0.000000, 0.000000]
+✅ Particle motion CORRECT
+
+📊 Integration Method Comparison:
+  Forward Euler:         14 p/s  (1 search/step)
+  RK4 Simplified:        12 p/s  (1 search/step)
+  RK4 Full:               4 p/s  (4 searches/step)
+
+✓ GPU memory cleared
+
+================================================================================
+✅ ALL TESTS COMPLETE
+================================================================================
+
+Tested components:
+  ✅ Mesh loading (from test_phase1)
+  ✅ Forest structure creation (from test_phase1)
+  ✅ Block classification (from test_phase1)
+  ✅ Hash bucket construction (from test_phase1)
+  ✅ Initial particle search (from test_phase1)
+  ✅ Velocity interpolation (NEW - GPU JAX native)
+  ✅ Forward Euler integration (NEW - GPU JAX native)
+  ✅ RK4 integration (NEW - GPU JAX native, both simplified and full modes)
+  ✅ Element search after timestep (NEW)
+
+Integration methods tested:
+  ✅ Forward Euler: 1st order, 1 search/step
+  ✅ RK4 Simplified: 4th order*, 1 search/step (~2-3× slower than Euler)
+  ✅ RK4 Full: 4th order, 4 searches/step (most accurate, ~4× slower)
+
+Next steps:
+  - Test multi-timestep marching
+  - Test with larger particle counts (10K, 100K)
+  - Validate particle trajectories over time
+

@@ -1,0 +1,93 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+W1127 13:34:40.311807 3017768 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.47GiB (2648699596 bytes) by rematerialization; only reduced to 35.28GiB (37877118016 bytes), down from 40.89GiB (43903289768 bytes) originally
+W1127 13:34:51.896032 3017768 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 40.88GiB (rounded to 43889241088)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1127 13:34:51.896360 3017768 bfc_allocator.cc:512] *********************_____________________________*********************xxxx*****_______*****x******x
+E1127 13:34:51.896392 3017768 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 43889240864 bytes. [tf-allocator-allocation-error='']
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+BLOCK-LOCAL FALLBACK TEST (1k particles)
+================================================================================
+Particles: 1000
+Timesteps: 100
+dt: 1e-05 s
+L1 hops: 3
+
+Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Mesh loaded (5.35 s)
+  Nodes: 900,671
+  Elements: 3,512,384
+
+Creating forest structure...
+✓ Forest created (71.40 s)
+  Blocks: 256
+  Elements per block: 2 - 450004
+
+Building block element lists...
+✓ Block element lists built (0.25 s)
+  Total elements: 3,512,384
+  Max elements per block: 450,004
+  Memory (flat): 13.4 MB
+  Memory (padded): 6593.8 MB
+  Savings: 492.1×
+
+Classifying blocks...
+  Light blocks: 240
+  Heavy blocks: 16
+
+Generating particles...
+✓ Generated 1000 particles
+
+Performing initial assignment...
+✓ Initial assignment (52.03 s)
+  Found: 956/1000 (95.6%)
+
+✓ Particle data created
+  Active particles: 956
+
+Uploading mesh to GPU...
+✓ Mesh uploaded (0.03 s)
+  GPU memory: 117.50 MB
+
+Warming up JIT compilation...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_block_fallback_1k.py", line 251, in <module>
+    _, _ = rk4_step_gpu_fused_for_production_with_block_fallback(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        particle_data, velocity_field_gpu, DT, mesh_gpu,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        block_lists=block_lists, current_time=0.0, n_hops=RK4_L1_HOP_COUNT
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_gpu_fused.py", line 947, in rk4_step_gpu_fused_for_production_with_block_fallback
+    positions_new, element_ids_new, stats = rk4_step_gpu_fused_with_block_fallback(
+                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        particle_data.positions,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+        block_lists=block_lists
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_gpu_fused.py", line 797, in rk4_step_gpu_fused_with_block_fallback
+    positions_final_gpu, element_ids_final_gpu = rk4_func(
+                                                 ~~~~~~~~^
+        positions_gpu,
+        ^^^^^^^^^^^^^^
+    ...<6 lines>...
+        velocity_field_gpu
+        ^^^^^^^^^^^^^^^^^^
+    )
+    ^
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 43889240864 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

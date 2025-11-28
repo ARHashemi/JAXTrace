@@ -1,0 +1,124 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+COMPLETE TIME-MARCHING PIPELINE TEST
+================================================================================
+
+📁 Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+✓ Mesh loaded: 895,972 nodes, 3,485,406 elements
+
+📦 Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+🌳 Creating block grid...
+✓ Grid created: 256 blocks
+
+📍 Assigning elements to blocks...
+✓ Element assignment complete:
+  Elements assigned: 3,485,406
+  Blocks used: 256/256
+
+📊 Building padded arrays...
+
+Building padded block arrays...
+  Blocks: 256
+  Max elements/block: 444,040
+  Array shape: (256, 444,040)
+  Counting elements per block...
+  Filling padded array...
+    Processed 500,000/3,485,406 elements...
+    Processed 1,000,000/3,485,406 elements...
+    Processed 1,500,000/3,485,406 elements...
+    Processed 2,000,000/3,485,406 elements...
+    Processed 2,500,000/3,485,406 elements...
+    Processed 3,000,000/3,485,406 elements...
+
+PaddedArrays(
+  Shape: (256, 444040)
+  Total elements: 3,485,406
+  Memory: 433.6 MB
+  Padding waste: 96.9%
+)
+✓ Padded arrays created
+  Shape: (256, 444040)
+  Memory: 433.6 MB
+
+🌊 Creating velocity field...
+✓ Velocity field created: (256, 895972, 3)
+  Constant velocity: [1.0, 0.0, 0.0] mm/s
+
+🏷️  Classifying blocks...
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+🗂️  Building hash buckets for 16 heavy blocks...
+✓ Hash buckets built: 16 blocks
+
+🔗 Building block neighbors...
+✓ Block neighbors built
+
+================================================================================
+TEST: 100 particles
+================================================================================
+
+🌱 Seeding 100 particles...
+✓ Particles seeded
+
+🔍 Running initial element search...
+✓ Initial search complete (11.77 s)
+  Found: 98 / 100 (98.0%)
+
+⏰ Testing velocity interpolation only (no time-marching yet)...
+📊 Transferring mesh to GPU...
+✅ Mesh on GPU
+✓ Velocity interpolation complete (0.95 s)
+  Throughput: 105 p/s
+  Velocities shape: (100, 3)
+  Mean velocity: [1. 0. 0.]
+
+✓ GPU memory cleared
+================================================================================
+TEST: 1,000 particles
+================================================================================
+
+🌱 Seeding 1,000 particles...
+✓ Particles seeded
+
+🔍 Running initial element search...
+✓ Initial search complete (83.66 s)
+  Found: 960 / 1,000 (96.0%)
+
+⏰ Testing velocity interpolation only (no time-marching yet)...
+📊 Transferring mesh to GPU...
+✅ Mesh on GPU
+✓ Velocity interpolation complete (3.86 s)
+  Throughput: 259 p/s
+  Velocities shape: (1000, 3)
+  Mean velocity: [1. 0. 0.]
+
+✓ GPU memory cleared
+================================================================================
+✅ BASIC PIPELINE TEST COMPLETE
+================================================================================
+
+Tested components:
+  ✅ Mesh loading
+  ✅ Forest structure creation
+  ✅ Padded array construction
+  ✅ Velocity field creation
+  ✅ Initial particle search
+  ✅ Velocity interpolation
+
+TODO - Full time-marching with element search:
+  - Integrate search function into pipeline
+  - Test Forward Euler timesteps
+  - Validate particle motion
+

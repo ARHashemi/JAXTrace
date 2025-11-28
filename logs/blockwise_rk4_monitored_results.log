@@ -1,0 +1,73 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+BLOCK-WISE RK4 TEST WITH COMPREHENSIVE MONITORING
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Available devices: [CudaDevice(id=0)]
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_20.pvtu
+  Nodes: 895,972
+  Elements: 3,485,406
+✓ Mesh loaded (5.39 s):
+  Nodes: 895,972
+  Elements: 3,485,406
+
+================================================================================
+FOREST STRUCTURE
+================================================================================
+
+Grid configuration: (8, 8, 4)
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid created (0.00 s): 256 blocks
+✓ Element assignment (7.79 s):
+  Blocks used: 256/256
+  Elements per block: 2 - 444040
+
+✓ Element neighbors built (60.26 s)
+✓ Padded arrays (6.65 s):
+  Shape: (256, 444040)
+  Memory: 6527.6 MB
+
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building hash buckets for 16 heavy blocks...
+
+================================================================================
+PARTICLE GENERATION
+================================================================================
+
+Generating 1,000 test particles...
+✓ Generated 1,000 particles
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+✓ Initial assignment (82.90 s):
+  Found: 960/1000 (96.0%)
+  Throughput: 11.6 p/s
+
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_blockwise_rk4_monitored.py", line 350, in <module>
+    particle_data = ParticleData(
+        positions=particle_positions[found_mask],
+    ...<2 lines>...
+        is_active=np.ones(n_found, dtype=bool)
+    )
+TypeError: ParticleData.__init__() got an unexpected keyword argument 'is_active'

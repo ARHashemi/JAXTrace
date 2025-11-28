@@ -1,0 +1,8 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_blockwise_interpolation.py", line 20, in <module>
+    from jaxtrace.gpu.search.initial_assignment import assign_particles_to_mesh_optimized
+ImportError: cannot import name 'assign_particles_to_mesh_optimized' from 'jaxtrace.gpu.search.initial_assignment' (/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/initial_assignment.py)

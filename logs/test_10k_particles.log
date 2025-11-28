@@ -1,0 +1,8 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_10k_particles.py", line 12, in <module>
+    from jaxtrace.io import load_mesh_from_pvtu
+ImportError: cannot import name 'load_mesh_from_pvtu' from 'jaxtrace.io' (/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/__init__.py)

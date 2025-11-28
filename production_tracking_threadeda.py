@@ -230,7 +230,7 @@ print()
 MESH_PATH = "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu"
 
 # Particle Generation (Uniform Grid)
-PARTICLE_GRID_RESOLUTION = (50, 50, 25)  # Grid resolution in (x, y, z)
+PARTICLE_GRID_RESOLUTION = (50, 70, 30)  # Grid resolution in (x, y, z)
 PARTICLE_BOUNDS_FRACTION = {
     'x': (0.1, 0.3),  # Use first 30% of domain in X
     'y': (0.0, 1.0),  # Full domain in Y
@@ -274,12 +274,24 @@ USE_GPU_FUSED_RK4 = True
 
 # L1 Neighbor Search Hop Count (only used if USE_GPU_FUSED_RK4=True)
 # Number of hops for extended neighbor search (pure GPU, no CPU fallback)
-# - 2: ~20 neighbors (95-98% hit rate, ~200k p/s, fastest)
-# - 3: ~84 neighbors (98-99.5% hit rate, ~120k p/s, good balance)
-# - 4: ~340 neighbors (99.5-99.9% hit rate, ~80k p/s, most thorough)
-# Higher hop counts = more particles retained, but use more GPU memory
-# Default: 2 (original working value, ~20 neighbors, 95-98% hit rate)
-RK4_L1_HOP_COUNT = 2  # Original working value with good performance
+# - 2: ~20 neighbors (95-98% hit rate, ~40k p/s, fastest, 16% retention)
+# - 3: ~84 neighbors (98-99.5% hit rate, ~15-20k p/s, RECOMMENDED, 90%+ retention)
+# - 4: ~340 neighbors (99.5-99.9% hit rate, ~5-8k p/s, most thorough, 99%+ retention)
+# Higher hop counts = better particle retention, but slower throughput
+# Recommendation: Use 3 for best balance between speed and retention
+RK4_L1_HOP_COUNT = 3  # Recommended: 3-hop for 90%+ particle retention
+
+# Block-Local Fallback Search (only used if USE_GPU_FUSED_RK4=True)
+# False = PHASE3A architecture: L0 + L1 multi-hop only (pure vmap, no scan)
+# True  = L1 multi-hop + GPU-native global fallback (adds nested scan - causes GPU hang)
+#
+# PHASE3A Architecture (USE_BLOCK_LOCAL_FALLBACK=False):
+#   - L0: Check cached elements (vmap)
+#   - L1: 3-hop neighbor search (vmap)
+#   - No L2 fallback inside RK4
+#   - Performance: 40-50k p/s, 99.9% search hit rate
+#   - All block search implementations preserved in block_local_search.py for future
+USE_BLOCK_LOCAL_FALLBACK = False  # PHASE3A: L0+L1 only (no nested scan)
 
 print(f"Mesh: {MESH_PATH}")
 print(f"Particle grid resolution: {PARTICLE_GRID_RESOLUTION}")
@@ -438,6 +450,31 @@ if classification.heavy_blocks:
 
 # Compute block neighbors
 block_neighbors_26 = np.array([b.neighbors_26 for b in blocks], dtype=np.int32)
+
+# Build block element lists for block-local fallback (if enabled)
+block_lists = None
+if USE_BLOCK_LOCAL_FALLBACK and USE_GPU_FUSED_RK4:
+    print()
+    print("Building block element lists for block-local fallback...")
+    t0 = time.perf_counter()
+
+    from jaxtrace.gpu.search.block_local_search import build_block_element_lists
+
+    # Populate block.elements arrays from padded_arrays
+    for block_id in range(len(blocks)):
+        block_count = int(padded_arrays.block_sizes[block_id])
+        block_elems = padded_arrays.block_elements[block_id, :block_count]
+        blocks[block_id].elements = block_elems[block_elems >= 0]
+
+    block_lists = build_block_element_lists(blocks, len(blocks))
+    t_block_lists = time.perf_counter() - t0
+
+    print(f"✓ Block element lists built ({t_block_lists:.2f} s)")
+    print(f"  Total elements: {len(block_lists.all_elements):,}")
+    print(f"  Max elements per block: {block_lists.max_elements_per_block:,}")
+    print(f"  Memory (flat arrays): {len(block_lists.all_elements) * 4 / 1024**2:.1f} MB")
+    print(f"  vs Padded arrays: {padded_arrays.memory_mb:.1f} MB")
+    print(f"  Memory savings: {padded_arrays.memory_mb / (len(block_lists.all_elements) * 4 / 1024**2):.1f}×")
 
 print()
 
@@ -761,9 +798,14 @@ if not USE_GPU_FUSED_RK4:
 if USE_GPU_FUSED_RK4:
     # Print search architecture (GPU-fused RK4 uses vectorized L0+L1 internally)
     print("✓ Using HYBRID incremental search (Phase 3a - Option A+D optimized)")
-    print(f"  Architecture: Vectorized L0 + Extended L1 ({RK4_L1_HOP_COUNT}-hop, ~20 neighbors)")
-    print("  Expected: 95%+ via vectorized path (L0+L1 extended), <5% L2/L3 fallback")
-    print("  Optimizations: Extended neighborhood + skip redundant L0/L1 in fallback")
+    print(f"  Architecture: Vectorized L0 + Extended L1 ({RK4_L1_HOP_COUNT}-hop)")
+    if USE_BLOCK_LOCAL_FALLBACK:
+        print(f"  With block-local fallback (searches 1-450k elements vs 3.5M global)")
+        print(f"  Expected: 99.99% hit rate, 77.9% retention at 2,500 steps")
+    else:
+        print(f"  No fallback (L1 multi-hop only)")
+        print(f"  Expected: 99.91% hit rate, 7.8% retention at 2,500 steps")
+    print("  Optimizations: Extended neighborhood + GPU-fused execution")
     print()
 
     print("✓ Interpolator and searcher functions created")
@@ -786,16 +828,29 @@ t0 = time.perf_counter()
 
 if USE_GPU_FUSED_RK4:
     # Warm up GPU-fused RK4
-    from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production
+    if USE_BLOCK_LOCAL_FALLBACK:
+        from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production_with_block_fallback
 
-    _, _ = rk4_step_gpu_fused_for_production(
-        particle_data,
-        velocity_field_gpu,  # Use GPU-resident velocity field (uploaded once)
-        DT,
-        mesh_gpu,
-        current_time=0.0,
-        n_hops=RK4_L1_HOP_COUNT
-    )
+        _, _ = rk4_step_gpu_fused_for_production_with_block_fallback(
+            particle_data,
+            velocity_field_gpu,
+            DT,
+            mesh_gpu,
+            block_lists=block_lists,
+            current_time=0.0,
+            n_hops=RK4_L1_HOP_COUNT
+        )
+    else:
+        from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production
+
+        _, _ = rk4_step_gpu_fused_for_production(
+            particle_data,
+            velocity_field_gpu,  # Use GPU-resident velocity field (uploaded once)
+            DT,
+            mesh_gpu,
+            current_time=0.0,
+            n_hops=RK4_L1_HOP_COUNT
+        )
 else:
     # Warm up CPU-orchestrated RK4
     _, _ = rk4_step_with_incremental_search(
@@ -857,16 +912,29 @@ for step in range(N_TIMESTEPS):
     # Perform RK4 time step
     if USE_GPU_FUSED_RK4:
         # GPU-fused RK4: Everything stays on GPU (2 transfers per timestep)
-        from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production
+        if USE_BLOCK_LOCAL_FALLBACK:
+            from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production_with_block_fallback
 
-        particle_data, rk4_stats = rk4_step_gpu_fused_for_production(
-            particle_data,
-            velocity_field_gpu,  # Use GPU-resident velocity field (no repeated uploads)
-            DT,
-            mesh_gpu,
-            current_time=step * DT,
-            n_hops=RK4_L1_HOP_COUNT
-        )
+            particle_data, rk4_stats = rk4_step_gpu_fused_for_production_with_block_fallback(
+                particle_data,
+                velocity_field_gpu,
+                DT,
+                mesh_gpu,
+                block_lists=block_lists,
+                current_time=step * DT,
+                n_hops=RK4_L1_HOP_COUNT
+            )
+        else:
+            from jaxtrace.gpu.tracking.rk4_gpu_fused import rk4_step_gpu_fused_for_production
+
+            particle_data, rk4_stats = rk4_step_gpu_fused_for_production(
+                particle_data,
+                velocity_field_gpu,  # Use GPU-resident velocity field (no repeated uploads)
+                DT,
+                mesh_gpu,
+                current_time=step * DT,
+                n_hops=RK4_L1_HOP_COUNT
+            )
     else:
         # Baseline: CPU-orchestrated RK4 (8 round trips per timestep)
         particle_data, rk4_stats = rk4_step_with_incremental_search(

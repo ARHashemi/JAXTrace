@@ -1,0 +1,187 @@
+production_tracking_threadeda.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+PRODUCTION PARTICLE TRACKING WITH ASYNC VTK EXPORT
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Available devices: [CudaDevice(id=0)]
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Particle densities: (10, 10, 5) particles/unit
+Particle bounds (fraction): {'x': (0.0, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+Timesteps: 2,500
+dt: 0.0025 s
+Total time: 6.250 s
+Grid: (8, 8, 4) (256 blocks)
+Export frequency: every 10 steps
+Store velocities: No
+Output directory: output/threadeda_production_run
+Boundary deactivation: Enabled
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Mesh loaded (5.40 s):
+  Nodes: 900,671
+  Elements: 3,512,384
+  Velocity field: (900671, 3)
+  Velocity magnitude range: [-0.878970, 0.808578] m/s
+
+================================================================================
+FOREST STRUCTURE
+================================================================================
+
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid created (0.00 s): 256 blocks
+✓ Element assignment (7.44 s)
+  Blocks used: 256/256
+  Elements per block: 2 - 450004
+✓ Element neighbors built (58.53 s)
+✓ Padded arrays (4.20 s)
+  Shape: (256, 450004)
+  Memory: 6593.8 MB
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building hash buckets for 16 heavy blocks...
+
+================================================================================
+PARTICLE GENERATION (UNIFORM GRID)
+================================================================================
+
+Domain bounds:
+  X: [-0.0300, 0.0300] (size: 0.0600)
+  Y: [-0.0230, 0.0230] (size: 0.0460)
+  Z: [-0.0100, 0.0000] (size: 0.0100)
+
+Particle region (fractional):
+  X: [-0.0300, -0.0120] (fraction: (0.0, 0.3))
+  Y: [-0.0230, 0.0230] (fraction: (0.0, 1.0))
+  Z: [-0.0100, 0.0000] (fraction: (0.0, 1.0))
+
+Grid resolution: 1 × 1 × 1 = 1 particles
+Densities: (10, 10, 5) particles/unit
+
+Generating uniform grid particles...
+✓ Generated 1 particles on uniform grid
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+✓ Initial assignment (0.47 s):
+  Found: 1/1 (100.0%)
+  Throughput: 2.1 p/s
+
+Active particles: 1
+
+================================================================================
+TRACKING SETUP
+================================================================================
+
+✓ Velocity field prepared for block-wise tracking
+  Source: Loaded from mesh file ('Displacement')
+  Shape: (256, 900671, 3) (n_blocks × n_nodes × 3)
+  Velocity magnitude range: [0.000155, 0.900027] m/s
+
+✓ Interpolator and searcher functions created
+
+Warming up JIT compilation...
+✓ JIT warm-up complete (0.75 s)
+
+================================================================================
+ASYNC VTK EXPORT SETUP
+================================================================================
+
+✓ Async VTK exporter initialized
+  Output directory: output/threadeda_production_run
+  Export frequency: every 10 steps
+  Store velocities: No
+  Expected exports: 250
+
+================================================================================
+TIME MARCHING
+================================================================================
+
+Running 2,500 timesteps with dt=0.0025 s...
+(Export happens in background thread, no blocking)
+
+Step   100/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10862 MB | Exported:   10 | ETA: 5.6 min
+Step   200/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10862 MB | Exported:   20 | ETA: 5.4 min
+Step   300/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   30 | ETA: 5.3 min
+Step   400/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   40 | ETA: 4.9 min
+Step   500/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   50 | ETA: 4.7 min
+Step   600/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   60 | ETA: 4.4 min
+Step   700/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   70 | ETA: 4.2 min
+Step   800/2500 | Active:      1 | Throughput:     7.0 p/s | GPU:   677 MB | RAM:  10864 MB | Exported:   80 | ETA: 4.0 min
+Step   900/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10868 MB | Exported:   90 | ETA: 3.8 min
+Step  1000/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10868 MB | Exported:  100 | ETA: 3.5 min
+Step  1100/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10868 MB | Exported:  110 | ETA: 3.3 min
+Step  1200/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10872 MB | Exported:  120 | ETA: 3.1 min
+Step  1300/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10872 MB | Exported:  130 | ETA: 2.8 min
+Step  1400/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10872 MB | Exported:  140 | ETA: 2.6 min
+Step  1500/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  150 | ETA: 2.3 min
+Step  1600/2500 | Active:      1 | Throughput:     7.3 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  160 | ETA: 2.1 min
+Step  1700/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  170 | ETA: 1.9 min
+Step  1800/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  180 | ETA: 1.6 min
+Step  1900/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  190 | ETA: 1.4 min
+Step  2000/2500 | Active:      1 | Throughput:     7.2 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  200 | ETA: 1.2 min
+Step  2100/2500 | Active:      1 | Throughput:     6.9 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  210 | ETA: 1.0 min
+Step  2200/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  220 | ETA: 0.7 min
+Step  2300/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  230 | ETA: 0.5 min
+Step  2400/2500 | Active:      1 | Throughput:     7.1 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  240 | ETA: 0.2 min
+Step  2500/2500 | Active:      1 | Throughput:     7.0 p/s | GPU:   677 MB | RAM:  10875 MB | Exported:  250 | ETA: 0.0 min
+
+================================================================================
+TRACKING COMPLETE
+================================================================================
+
+Waiting for exports to complete...
+✓ All exports complete
+  Files exported: 250
+  Mean export time: 0.001 s
+  Total export time: 0.3 s
+
+================================================================================
+FINAL STATISTICS
+================================================================================
+
+Tracking Performance:
+  Total time: 352.3 s (5.9 min)
+  Time per step: 0.1407 s ± 0.0123 s
+  Mean throughput: 7.1 p/s
+  Final active particles: 1
+
+Export Performance:
+  Files written: 250
+  Mean write time: 0.001 s
+  Total write time: 0.3 s
+  Tracking overhead: 0.08%
+
+Final Resource Usage:
+  GPU Memory: 677 MB
+  RAM: 10875 MB
+
+================================================================================
+SUCCESS - Production tracking complete!
+================================================================================
+Output files: output/threadeda_production_run

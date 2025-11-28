@@ -1,0 +1,35 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+2025-11-13 15:55:21.850 (   1.373s) [    7D80F1D49380]       vtkXMLReader.cxx:342    ERR| vtkXMLPUnstructuredGridReader (0x6abfed0): Error opening file /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_*.pvtu
+2025-11-13 15:55:21.850 (   1.373s) [    7D80F1D49380]       vtkExecutive.cxx:729    ERR| vtkCompositeDataPipeline (0x6a823e0): Algorithm vtkXMLPUnstructuredGridReader (0x6abfed0) returned failure for request: vtkInformation (0x6daaad0)
+  Debug: Off
+  Modified Time: 190
+  Reference Count: 1
+  Registered Events: (none)
+  Request: REQUEST_INFORMATION
+  ALGORITHM_AFTER_FORWARD: 1
+  FORWARD_DIRECTION: 0
+
+
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_batch_processor_small.py", line 68, in <module>
+    node_positions, connectivity, _ = load_mesh_from_pvtu(Path(MESH_PATH))
+                                      ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/mesh_loader.py", line 63, in load_mesh_from_pvtu
+    positions = numpy_support.vtk_to_numpy(output.GetPoints().GetData())
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'GetData'
+
+================================================================================
+THREADEDA TEST: Batch Processor with 1K Particles
+================================================================================
+
+[1/6] Testing imports...
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+✓ All imports successful
+
+[2/6] Loading ThreadedA mesh...
+  Path: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_*.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_*.pvtu
+✗ Mesh loading failed: 'NoneType' object has no attribute 'GetData'

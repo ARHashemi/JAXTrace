@@ -27,6 +27,10 @@ from jaxtrace.gpu.search.incremental_search_vectorized import (
     search_level1_extended_vectorized,
     search_level1_multihop_vectorized
 )
+from jaxtrace.gpu.search.block_local_search import (
+    BlockElementLists,
+    create_search_with_block_fallback
+)
 
 
 @dataclass
@@ -199,6 +203,100 @@ def create_search_gpu_fused(n_hops: int = 3):
 
 # Default search function (3-hop)
 search_gpu_fused = create_search_gpu_fused(n_hops=3)
+
+
+def create_search_gpu_fused_with_block_fallback(
+    n_hops: int = 3,
+    block_lists: Optional[BlockElementLists] = None
+):
+    """
+    Create a JIT-compiled GPU search function with block-local fallback.
+
+    This provides two-tier search:
+    1. L0 + L1 multi-hop (fast, 99.9% hit rate)
+    2. Block-local fallback (catches remaining failures, pure GPU)
+
+    Parameters
+    ----------
+    n_hops : int, default=3
+        Number of hops for L1 neighbor search
+    block_lists : BlockElementLists, optional
+        Block element lists for fallback. If None, uses standard search without fallback.
+
+    Returns
+    -------
+    search_func : callable
+        JIT-compiled search function with fallback
+    """
+    if block_lists is None:
+        # No fallback, use standard search
+        return create_search_gpu_fused(n_hops=n_hops)
+
+    # Create search with block fallback
+    search_with_fallback = create_search_with_block_fallback(
+        n_hops=n_hops,
+        block_lists=block_lists
+    )
+
+    @jax.jit
+    def search_gpu_fused_with_fallback_impl(
+        positions_gpu: jax.Array,           # (N, 3)
+        cached_element_ids_gpu: jax.Array,  # (N,)
+        block_ids_gpu: jax.Array,           # (N,) - NEW: block assignment
+        mesh_gpu_node_positions: jax.Array,
+        mesh_gpu_connectivity: jax.Array,
+        mesh_gpu_element_neighbors: jax.Array
+    ) -> jax.Array:
+        """
+        Fused GPU search with block-local fallback.
+
+        Three tiers:
+        1. L0: Check cached element (fastest)
+        2. L1: Multi-hop neighbor search (fast, 99.9% success)
+        3. Block-local: Search all elements in particle's block (slow, 100% success in block)
+
+        All operations stay on GPU, no CPU-GPU transfers.
+
+        Parameters
+        ----------
+        positions_gpu : jax.Array, shape (N, 3)
+            Particle positions
+        cached_element_ids_gpu : jax.Array, shape (N,)
+            Cached element IDs from previous step
+        block_ids_gpu : jax.Array, shape (N,)
+            Block ID for each particle
+        mesh_gpu_* : jax.Array
+            GPU-resident mesh data
+
+        Returns
+        -------
+        element_ids_gpu : jax.Array, shape (N,)
+            Updated element IDs
+        """
+        # L0: Check cached elements
+        element_ids_l0 = search_level0_vectorized(
+            positions_gpu,
+            cached_element_ids_gpu,
+            mesh_gpu_node_positions,
+            mesh_gpu_connectivity
+        )
+
+        # L1 + Block fallback: Multi-hop search with automatic fallback
+        element_ids_l1_fallback = search_with_fallback(
+            positions_gpu,
+            cached_element_ids_gpu,
+            block_ids_gpu,
+            mesh_gpu_node_positions,
+            mesh_gpu_connectivity,
+            mesh_gpu_element_neighbors
+        )
+
+        # Merge L0 and L1+fallback results
+        element_ids_gpu = jnp.where(element_ids_l0 >= 0, element_ids_l0, element_ids_l1_fallback)
+
+        return element_ids_gpu
+
+    return search_gpu_fused_with_fallback_impl
 
 
 @jax.jit
@@ -547,6 +645,188 @@ def rk4_step_gpu_fused_wrapper(
     return positions_final, element_ids_final, stats
 
 
+def rk4_step_gpu_fused_with_block_fallback(
+    positions: np.ndarray,
+    element_ids: np.ndarray,
+    block_ids: np.ndarray,        # NEW: block IDs for each particle
+    dt: float,
+    mesh_gpu: MeshDataGPU,
+    velocity_field,               # Can be np.ndarray OR jax.Array
+    n_hops: int = 3,
+    block_lists: Optional[BlockElementLists] = None
+) -> Tuple[np.ndarray, np.ndarray, dict]:
+    """
+    GPU-fused RK4 with block-local fallback support.
+
+    This function adds block-local fallback to catch particles that fail
+    L1 multi-hop search, preventing particle loss in refined regions.
+
+    Parameters
+    ----------
+    positions : np.ndarray, shape (N, 3)
+        Initial particle positions (CPU)
+    element_ids : np.ndarray, shape (N,)
+        Initial element IDs (CPU)
+    block_ids : np.ndarray, shape (N,)
+        Block ID for each particle (CPU)
+    dt : float
+        Time step size
+    mesh_gpu : MeshDataGPU
+        GPU-resident mesh data
+    velocity_field : np.ndarray or jax.Array
+        Velocity field at nodes
+    n_hops : int, default=3
+        Number of hops for L1 neighbor search
+    block_lists : BlockElementLists, optional
+        Block element lists for fallback. If None, no fallback is used.
+
+    Returns
+    -------
+    positions_final : np.ndarray, shape (N, 3)
+        Final particle positions (CPU)
+    element_ids_final : np.ndarray, shape (N,)
+        Final element IDs (CPU)
+    stats : dict
+        Timing statistics
+    """
+    # Create search function with block fallback
+    search_func = create_search_gpu_fused_with_block_fallback(
+        n_hops=n_hops,
+        block_lists=block_lists
+    )
+
+    # Determine if we need block IDs
+    needs_block_ids = block_lists is not None
+
+    # Create RK4 function with this search
+    if needs_block_ids:
+        @jax.jit
+        def rk4_fused_with_search_and_fallback(
+            positions_gpu,
+            element_ids_gpu,
+            block_ids_gpu,        # NEW
+            dt,
+            connectivity_gpu,
+            node_positions_gpu,
+            element_neighbors_gpu,
+            velocity_field_gpu
+        ):
+            """GPU-fused RK4 with block fallback."""
+            # Stage 1: k1 = f(t, y)
+            element_ids_k1 = search_func(
+                positions_gpu,
+                element_ids_gpu,
+                block_ids_gpu,  # NEW
+                node_positions_gpu,
+                connectivity_gpu,
+                element_neighbors_gpu
+            )
+            velocities_k1 = interpolate_velocity_batch_gpu(
+                positions_gpu, element_ids_k1,
+                connectivity_gpu, node_positions_gpu, velocity_field_gpu
+            )
+            positions_k1 = positions_gpu + 0.5 * dt * velocities_k1
+
+            # Stage 2: k2 = f(t + dt/2, y + dt/2 * k1)
+            element_ids_k2 = search_func(
+                positions_k1, element_ids_k1, block_ids_gpu,
+                node_positions_gpu, connectivity_gpu, element_neighbors_gpu
+            )
+            velocities_k2 = interpolate_velocity_batch_gpu(
+                positions_k1, element_ids_k2,
+                connectivity_gpu, node_positions_gpu, velocity_field_gpu
+            )
+            positions_k2 = positions_gpu + 0.5 * dt * velocities_k2
+
+            # Stage 3: k3 = f(t + dt/2, y + dt/2 * k2)
+            element_ids_k3 = search_func(
+                positions_k2, element_ids_k2, block_ids_gpu,
+                node_positions_gpu, connectivity_gpu, element_neighbors_gpu
+            )
+            velocities_k3 = interpolate_velocity_batch_gpu(
+                positions_k2, element_ids_k3,
+                connectivity_gpu, node_positions_gpu, velocity_field_gpu
+            )
+            positions_k3 = positions_gpu + dt * velocities_k3
+
+            # Stage 4: k4 = f(t + dt, y + dt * k3)
+            element_ids_k4 = search_func(
+                positions_k3, element_ids_k3, block_ids_gpu,
+                node_positions_gpu, connectivity_gpu, element_neighbors_gpu
+            )
+            velocities_k4 = interpolate_velocity_batch_gpu(
+                positions_k3, element_ids_k4,
+                connectivity_gpu, node_positions_gpu, velocity_field_gpu
+            )
+
+            # Final position: y_new = y + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+            positions_final_gpu = positions_gpu + (dt / 6.0) * (
+                velocities_k1 + 2.0 * velocities_k2 + 2.0 * velocities_k3 + velocities_k4
+            )
+
+            # Final search at new positions
+            element_ids_final_gpu = search_func(
+                positions_final_gpu, element_ids_gpu, block_ids_gpu,
+                node_positions_gpu, connectivity_gpu, element_neighbors_gpu
+            )
+
+            return positions_final_gpu, element_ids_final_gpu
+
+        rk4_func = rk4_fused_with_search_and_fallback
+    else:
+        # No fallback, use standard RK4 (same as rk4_step_gpu_fused_wrapper)
+        raise ValueError("Block fallback requires block_lists to be provided")
+
+    t_total = time.time()
+
+    # Upload initial state to GPU
+    t_upload = time.time()
+    positions_gpu = jax.device_put(positions.astype(np.float32))
+    element_ids_gpu = jax.device_put(element_ids.astype(np.int32))
+    block_ids_gpu = jax.device_put(block_ids.astype(np.int32))  # NEW
+
+    # Upload velocity field if needed
+    if isinstance(velocity_field, np.ndarray):
+        velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+    else:
+        velocity_field_gpu = velocity_field
+    t_upload = time.time() - t_upload
+
+    # Execute GPU-fused RK4 with fallback (all on GPU, no transfers)
+    t_compute = time.time()
+    positions_final_gpu, element_ids_final_gpu = rk4_func(
+        positions_gpu,
+        element_ids_gpu,
+        block_ids_gpu,  # NEW
+        dt,
+        mesh_gpu.connectivity,
+        mesh_gpu.node_positions,
+        mesh_gpu.element_neighbors,
+        velocity_field_gpu
+    )
+    # Force GPU computation to complete
+    positions_final_gpu.block_until_ready()
+    t_compute = time.time() - t_compute
+
+    # Download final state from GPU
+    t_download = time.time()
+    positions_final = np.array(positions_final_gpu, dtype=np.float32)
+    element_ids_final = np.array(element_ids_final_gpu, dtype=np.int32)
+    t_download = time.time() - t_download
+
+    t_total = time.time() - t_total
+
+    stats = {
+        'time_upload': t_upload,
+        'time_compute': t_compute,
+        'time_download': t_download,
+        'time_total': t_total,
+        'n_particles': len(positions)
+    }
+
+    return positions_final, element_ids_final, stats
+
+
 def rk4_step_gpu_fused_for_production(
     particle_data,
     velocity_field: np.ndarray,
@@ -600,6 +880,79 @@ def rk4_step_gpu_fused_for_production(
         mesh_gpu,
         velocity_field,
         n_hops=n_hops
+    )
+
+    # Update particle data (keep velocities unchanged - will be computed next step)
+    new_particle_data = replace(
+        particle_data,
+        positions=positions_new,
+        element_ids=element_ids_new
+    )
+
+    return new_particle_data, stats
+
+
+def rk4_step_gpu_fused_for_production_with_block_fallback(
+    particle_data,
+    velocity_field: np.ndarray,
+    dt: float,
+    mesh_gpu: MeshDataGPU,
+    block_lists: Optional[BlockElementLists] = None,
+    current_time: float = 0.0,
+    n_hops: int = 3
+):
+    """
+    GPU-fused RK4 wrapper with block-local fallback for production script.
+
+    Same as rk4_step_gpu_fused_for_production() but adds block-local fallback
+    for particles that fail L1 multi-hop search.
+
+    Block-local fallback:
+    - Searches only within particle's assigned block (1-450k elements)
+    - Avoids expensive global search (3.5M elements)
+    - Targets refined regions where 80-90% of failures occur
+    - Expected improvement: 99.91% → 99.99% hit rate (77.9% vs 7.8% retention)
+    - Performance impact: ~7% slower (42k vs 45k p/s)
+
+    Parameters
+    ----------
+    particle_data : ParticleData
+        Current particle state (must have block_ids attribute)
+    velocity_field : np.ndarray
+        Velocity field at nodes
+    dt : float
+        Time step size
+    mesh_gpu : MeshDataGPU
+        GPU-resident mesh
+    block_lists : BlockElementLists, optional
+        Block element lists for fallback. If None, no fallback is used.
+    current_time : float
+        Current time (not used, kept for interface compatibility)
+    n_hops : int, default=3
+        Number of hops for L1 neighbor search:
+        - 2: ~20 neighbors (95-98% hit rate, fastest)
+        - 3: ~84 neighbors (98-99.5% hit rate, recommended)
+        - 4: ~340 neighbors (99.5-99.9% hit rate, most thorough)
+
+    Returns
+    -------
+    new_particle_data : ParticleData
+        Updated particle state
+    rk4_stats : dict
+        Statistics
+    """
+    from dataclasses import replace
+
+    # Call GPU-fused RK4 with block fallback
+    positions_new, element_ids_new, stats = rk4_step_gpu_fused_with_block_fallback(
+        particle_data.positions,
+        particle_data.element_ids,
+        particle_data.block_ids,  # NEW: Pass block IDs
+        dt,
+        mesh_gpu,
+        velocity_field,
+        n_hops=n_hops,
+        block_lists=block_lists
     )
 
     # Update particle data (keep velocities unchanged - will be computed next step)

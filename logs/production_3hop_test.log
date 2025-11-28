@@ -1,0 +1,150 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+W1127 11:49:03.179373 2369104 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 1.07GiB (rounded to 1147819264)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1127 11:49:03.179562 2369104 bfc_allocator.cc:512] ***********_______________________________________*******__________________***********************xx
+E1127 11:49:03.179586 2369104 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 1147819032 bytes. [tf-allocator-allocation-error='']
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+PRODUCTION PARTICLE TRACKING WITH ASYNC VTK EXPORT
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Available devices: [CudaDevice(id=0)]
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Particle grid resolution: (50, 50, 25)
+Particle bounds (fraction): {'x': (0.1, 0.3), 'y': (0.0, 1.0), 'z': (0.0, 1.0)}
+Timesteps: 2,500
+dt: 0.0025 s
+Total time: 6.250 s
+Grid: (8, 8, 4) (256 blocks)
+Export frequency: every 10 steps
+Store velocities: No
+Output directory: output/threadeda_global_optimized
+Boundary deactivation: Enabled
+
+Performance Mode:
+  Mode: GLOBAL GPU MESH (optimized) - Phase 2
+  Expected throughput: 200,000-300,000 p/s
+  Memory: ~2 GB CPU RAM, ~500 MB GPU
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Mesh loaded (5.35 s):
+  Nodes: 900,671
+  Elements: 3,512,384
+  Velocity field: (900671, 3)
+  Velocity magnitude range: [-0.878970, 0.808578] m/s
+
+================================================================================
+FOREST STRUCTURE
+================================================================================
+
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid created (0.00 s): 256 blocks
+✓ Element assignment (7.88 s)
+  Blocks used: 256/256
+  Elements per block: 2 - 450004
+✓ Element neighbors built (61.11 s)
+✓ Padded arrays (7.59 s)
+  Shape: (256, 450004)
+  Memory: 6593.8 MB
+  Note: Used for initial assignment only, not for incremental search
+
+✓ Block classification:
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building hash buckets for 16 heavy blocks...
+
+================================================================================
+PARTICLE GENERATION (UNIFORM GRID)
+================================================================================
+
+Domain bounds:
+  X: [-0.0300, 0.0300] (size: 0.0600)
+  Y: [-0.0230, 0.0230] (size: 0.0460)
+  Z: [-0.0100, 0.0000] (size: 0.0100)
+
+Particle region (fractional):
+  X: [-0.0240, -0.0120] (fraction: (0.1, 0.3))
+  Y: [-0.0230, 0.0230] (fraction: (0.0, 1.0))
+  Z: [-0.0100, 0.0000] (fraction: (0.0, 1.0))
+  Particle region size: [0.012 0.046 0.01 ]
+
+Grid resolution: 50 × 50 × 25 = 62,500 particles
+
+Generating uniform grid particles...
+✓ Generated 62,500 particles on uniform grid
+
+================================================================================
+GPU MESH UPLOAD
+================================================================================
+
+Estimated mesh memory: 117.50 MB
+Uploading mesh to GPU...
+  Elements: 3,512,384
+  Nodes: 900,671
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.59 MB
+  Node positions: 10.31 MB
+  Element neighbors: 53.59 MB
+  Total: 117.50 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 117.50 MB GPU memory (0% waste)
+    Memory reduction: 55.3× smaller
+Uploading velocity field to GPU...
+✓ Velocity field uploaded to GPU: (900671, 3)
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_threadeda.py", line 546, in <module>
+    element_ids, block_ids, search_stats = initial_search_batch(
+                                           ~~~~~~~~~~~~~~~~~~~~^
+        particle_positions,
+        ^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        verbose=False
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/initial_assignment.py", line 419, in initial_search_batch
+    found_elem_ids = np.array(search_hash_vmap(particle_batch_jax), dtype=np.int32)
+                              ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/initial_assignment.py", line 406, in <lambda>
+    lambda pos: search_level2b_hash_bucket(
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pos,
+        ^^^^
+    ...<8 lines>...
+        connectivity_jax
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 1147819032 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
