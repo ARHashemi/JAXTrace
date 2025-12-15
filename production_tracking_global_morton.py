@@ -18,6 +18,8 @@ Architecture:
 """
 
 import os
+# Force CPU-GPU memory management
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 import sys
 import time
 import queue
@@ -34,15 +36,30 @@ from jaxtrace.gpu.particles import ParticleData
 from jaxtrace.gpu.mesh_loader import load_mesh_from_pvtu
 from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
-from jaxtrace.gpu.search.morton_global_builder import build_global_morton_structure
+from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.tracking.rk4_global_morton import create_rk4_step_gpu_fused_global_morton
+from jaxtrace.tracking.seeding import uniform_grid_seeds
 
 
 # Configuration
 MESH_PATH = "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu"
-N_PARTICLES = 105_000
-DT = 1e-5
+
+# Particle Generation (Uniform Grid - from production_tracking_threadeda.py)
+PARTICLE_GRID_RESOLUTION = (50, 70, 30)  # Grid resolution in (x, y, z) = 105,000 particles
+PARTICLE_BOUNDS_FRACTION = {
+    'x': (0.1, 0.3),  # Use first 20% of domain in X (entrance region)
+    'y': (0.0, 1.0),  # Full domain in Y
+    'z': (0.0, 1.0),  # Full domain in Z
+}
+# Use grid resolution directly (not dependent on domain size)
+N_X = max(1, int(PARTICLE_GRID_RESOLUTION[0]))
+N_Y = max(1, int(PARTICLE_GRID_RESOLUTION[1]))
+N_Z = max(1, int(PARTICLE_GRID_RESOLUTION[2]))
+
+N_PARTICLES = N_X * N_Y * N_Z
+
+DT = 0.0025
 N_STEPS = 2_500
 N_HOPS = 3
 L2_SEARCH_RADIUS = 2
@@ -181,10 +198,12 @@ class AsyncVTKExporter:
 
 
 def main():
+    nx, ny, nz = PARTICLE_GRID_RESOLUTION
+
     print("=" * 80)
     print("Production Particle Tracking - Global Morton L2 Search")
     print("=" * 80)
-    print(f"Particles: {N_PARTICLES:,}")
+    print(f"Grid resolution: {nx} × {ny} × {nz} = {N_PARTICLES:,} particles")
     print(f"Timesteps: {N_STEPS:,}")
     print(f"dt: {DT:.2e}")
     print(f"L1 hops: {N_HOPS}")
@@ -215,7 +234,7 @@ def main():
     print("\n[2/5] Building global Morton structure (CPU)...")
     t_morton = time.time()
 
-    morton_struct = build_global_morton_structure(
+    morton_struct = build_global_morton_octree(
         node_positions=node_positions,
         connectivity=connectivity,
         leaf_capacity=256,
@@ -268,24 +287,38 @@ def main():
     # 4. Initialize Particles
     # ========================================================================
 
-    print(f"\n[4/5] Initializing {N_PARTICLES:,} particles...")
-    np.random.seed(SEED)
+    # Compute domain bounds
+    domain_min = node_positions.min(axis=0)
+    domain_max = node_positions.max(axis=0)
+    domain_size = domain_max - domain_min
 
-    # Get domain bounds
-    bbox_min = node_positions.min(axis=0)
-    bbox_max = node_positions.max(axis=0)
+    # Compute particle bounds from fractions
+    par_bounds_min = np.zeros(3, dtype=np.float32)
+    par_bounds_max = np.zeros(3, dtype=np.float32)
+    for i, axis in enumerate(['x', 'y', 'z']):
+        min_frac, max_frac = PARTICLE_BOUNDS_FRACTION[axis]
+        par_bounds_min[i] = domain_min[i] + min_frac * domain_size[i]
+        par_bounds_max[i] = domain_min[i] + max_frac * domain_size[i]
+    par_bounds = [par_bounds_min, par_bounds_max]
 
-    # Generate random positions within domain
-    positions = np.random.uniform(
-        low=bbox_min,
-        high=bbox_max,
-        size=(N_PARTICLES, 3)
-    ).astype(np.float32)
+    # Use grid resolution (already unpacked at top of main())
+    print(f"\n[4/5] Initializing {N_PARTICLES:,} particles (uniform grid {nx}×{ny}×{nz})...")
+    print(f"  Particle bounds:")
+    print(f"    X: [{par_bounds_min[0]:.6f}, {par_bounds_max[0]:.6f}] (domain fraction: {PARTICLE_BOUNDS_FRACTION['x']})")
+    print(f"    Y: [{par_bounds_min[1]:.6f}, {par_bounds_max[1]:.6f}] (domain fraction: {PARTICLE_BOUNDS_FRACTION['y']})")
+    print(f"    Z: [{par_bounds_min[2]:.6f}, {par_bounds_max[2]:.6f}] (domain fraction: {PARTICLE_BOUNDS_FRACTION['z']})")
+
+    # Generate uniform grid
+    particle_positions = uniform_grid_seeds(
+        resolution=(nx, ny, nz),
+        bounds=par_bounds,
+        include_boundaries=True
+    )
 
     # Create particle data with unknown element IDs
-    particle_data = ParticleData.from_positions(positions)
+    particle_data = ParticleData.from_positions(particle_positions)
 
-    print(f"  Created {N_PARTICLES:,} particles")
+    print(f"  Created {N_PARTICLES:,} particles in uniform grid")
 
     # ========================================================================
     # 5. Setup Async VTK Export

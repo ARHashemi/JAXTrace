@@ -14,6 +14,8 @@ Expected Results:
 """
 
 import os
+# Force CPU-GPU memory management
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 import sys
 import time
 import numpy as np
@@ -27,7 +29,7 @@ from jaxtrace.gpu.particles import ParticleData
 from jaxtrace.gpu.mesh_loader import load_mesh_from_pvtu
 from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
-from jaxtrace.gpu.search.morton_global_builder import build_global_morton_structure
+from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import (
     upload_global_morton_to_gpu,
     search_L2_global_morton_single
@@ -38,7 +40,7 @@ from jaxtrace.gpu.search.morton_global_search import (
 MESH_PATH = "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu"
 N_TEST_PARTICLES = 100_000  # Sample elements to test
 L2_SEARCH_RADIUS = 4
-PERTURBATION_SCALE = 1.0  # Fraction of minimum element size
+PERTURBATION_SCALE = 100.0  # Fraction of minimum element size
 SEED = 42
 
 
@@ -101,7 +103,7 @@ def main():
     print("\n[2/6] Building global Morton structure (CPU)...")
     t_morton = time.time()
 
-    morton_struct = build_global_morton_structure(
+    morton_struct = build_global_morton_octree(
         node_positions=node_positions,
         connectivity=connectivity,
         leaf_capacity=256,
