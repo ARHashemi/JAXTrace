@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-Production Particle Tracking - Global Morton L2 Search
+Production Particle Tracking - Fully-Fused RK4 with Global Morton
 
-Full-scale test with 105K particles over 2,500 timesteps using the simplified
-global Morton structure (NO blocks).
+FULLY-FUSED implementation with:
+- Single vmap over particles (all RK4 stages fused)
+- NO CPU-GPU transfers between timesteps (data stays on GPU)
+- Download ONLY at export frequency (every 10 steps)
 
 Target Performance:
 - Initial assignment: >95%
 - Retention at 2,500 steps: >95%
-- Throughput: 40-50K particles/s
+- Throughput: 60-120K particles/s (2-3× improvement over baseline)
 - Memory: ~40-100 MB (global Morton)
 
 Architecture:
 - L0: Cached element (point-in-tet)
 - L1: Multi-hop neighbors (3 hops, ~84 neighbors)
 - L2: Global Morton search (binary search + bounded leaf scan, radius=2)
+- Fully-fused RK4: All 5 stages + 5 searches + 4 interpolations in ONE vmap
 """
 
 import os
@@ -38,7 +41,7 @@ from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
-from jaxtrace.gpu.tracking.rk4_global_morton import create_rk4_step_gpu_fused_global_morton
+from jaxtrace.gpu.tracking.rk4_fully_fused import create_rk4_fully_fused_global_morton
 from jaxtrace.tracking.seeding import uniform_grid_seeds
 
 
@@ -346,30 +349,40 @@ def main():
 
     print(f"\n[6/6] Running time integration ({N_STEPS:,} steps)...")
 
-    # Create RK4 step function
-    rk4_step = create_rk4_step_gpu_fused_global_morton(
+    # Create fully-fused RK4 step function
+    rk4_step = create_rk4_fully_fused_global_morton(
         mesh_gpu_global_morton=mesh_gpu_morton,
         n_hops=N_HOPS,
         l2_search_radius=L2_SEARCH_RADIUS
     )
 
-    # Run first step to trigger JIT compilation
+    # Upload velocity field and particle data to GPU ONCE
+    print("\n  Uploading data to GPU...")
+    t_upload_initial = time.time()
+    velocity_field_gpu = jax.device_put(velocity_field)
+    positions_gpu = jax.device_put(particle_data.positions)
+    element_ids_gpu = jax.device_put(particle_data.element_ids)
+    t_upload_initial = time.time() - t_upload_initial
+    print(f"    Initial upload time: {t_upload_initial:.2f}s")
+
+    # Run first step to trigger JIT compilation (data stays on GPU)
     print("\n  Compiling (first step)...")
     t_compile = time.time()
-    particle_data, stats = rk4_step(
-        particle_data=particle_data,
-        velocity_field=velocity_field,
-        dt=DT,
-        mesh_gpu=mesh_gpu,
-        current_time=0.0
+    positions_gpu, element_ids_gpu = rk4_step(
+        positions_gpu,
+        element_ids_gpu,
+        DT,
+        velocity_field_gpu
     )
+    positions_gpu = jax.block_until_ready(positions_gpu)
+    element_ids_gpu = jax.block_until_ready(element_ids_gpu)
     t_compile = time.time() - t_compile
     print(f"    Compilation time: {t_compile:.2f}s")
 
-    # Check initial assignment
-    initial_found = np.sum(particle_data.element_ids >= 0)
-    initial_success_rate = (initial_found / N_PARTICLES) * 100
-    print(f"    Initial assignment: {initial_found:,}/{N_PARTICLES:,} ({initial_success_rate:.2f}%)")
+    # Check initial assignment (single scalar download)
+    n_active_initial = int(jnp.sum(element_ids_gpu >= 0))
+    initial_success_rate = (n_active_initial / N_PARTICLES) * 100
+    print(f"    Initial assignment: {n_active_initial:,}/{N_PARTICLES:,} ({initial_success_rate:.2f}%)")
 
     if initial_success_rate < 95.0:
         print(f"\n❌ WARNING: Initial assignment <95%. Continuing anyway...")
@@ -386,27 +399,34 @@ def main():
     for step in range(1, N_STEPS + 1):
         t_step = time.time()
 
-        particle_data, stats = rk4_step(
-            particle_data=particle_data,
-            velocity_field=velocity_field,
-            dt=DT,
-            mesh_gpu=mesh_gpu,
-            current_time=step * DT
+        # Run RK4 step (all data stays on GPU)
+        positions_gpu, element_ids_gpu = rk4_step(
+            positions_gpu,
+            element_ids_gpu,
+            DT,
+            velocity_field_gpu
         )
+
+        # Block until computation completes
+        positions_gpu = jax.block_until_ready(positions_gpu)
+        element_ids_gpu = jax.block_until_ready(element_ids_gpu)
 
         t_step = time.time() - t_step
         step_times.append(t_step)
 
-        # Count active particles
-        n_active = np.sum(particle_data.element_ids >= 0)
+        # Count active particles (single scalar download)
+        n_active = int(jnp.sum(element_ids_gpu >= 0))
         retention = (n_active / N_PARTICLES) * 100
         retention_history.append(retention)
 
         throughput = N_PARTICLES / t_step
 
-        # Enqueue export (non-blocking if queue has space)
+        # Download and enqueue export ONLY at export frequency
         if step % EXPORT_FREQUENCY == 0:
-            exporter.enqueue_export(step, particle_data)
+            positions_cpu = np.array(positions_gpu)
+            element_ids_cpu = np.array(element_ids_gpu)
+            particle_data_export = ParticleData(positions_cpu, element_ids_cpu)
+            exporter.enqueue_export(step, particle_data_export)
 
         # Log at intervals
         if step % LOG_INTERVAL == 0 or step == N_STEPS:
@@ -436,12 +456,16 @@ def main():
     print("PRODUCTION RESULTS")
     print("=" * 80)
 
-    # Final retention
-    final_active = np.sum(particle_data.element_ids >= 0)
+    # Final retention (download final state)
+    positions_final_cpu = np.array(positions_gpu)
+    element_ids_final_cpu = np.array(element_ids_gpu)
+    particle_data_final = ParticleData(positions_final_cpu, element_ids_final_cpu)
+
+    final_active = np.sum(element_ids_final_cpu >= 0)
     final_retention = (final_active / N_PARTICLES) * 100
 
     print(f"\n  Initial particles: {N_PARTICLES:,}")
-    print(f"  Initial assignment: {initial_found:,} ({initial_success_rate:.2f}%)")
+    print(f"  Initial assignment: {n_active_initial:,} ({initial_success_rate:.2f}%)")
     print(f"  Final active: {final_active:,}")
     print(f"  Final retention: {final_retention:.2f}%")
 
