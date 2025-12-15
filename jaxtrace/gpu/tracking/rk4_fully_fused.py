@@ -35,6 +35,9 @@ from jaxtrace.gpu.search.morton_global_search import (
 
 
 def create_rk4_fully_fused_global_morton(
+    mesh_gpu_connectivity: jax.Array,
+    mesh_gpu_node_positions: jax.Array,
+    mesh_gpu_element_neighbors: jax.Array,
     mesh_gpu_global_morton: MeshGPUGlobalMorton,
     n_hops: int = 3,
     l2_search_radius: int = 2
@@ -51,6 +54,12 @@ def create_rk4_fully_fused_global_morton(
 
     Parameters
     ----------
+    mesh_gpu_connectivity : jax.Array
+        Element connectivity array (n_elements, 4)
+    mesh_gpu_node_positions : jax.Array
+        Node position array (n_nodes, 3)
+    mesh_gpu_element_neighbors : jax.Array
+        Element neighbors array (n_elements, 4)
     mesh_gpu_global_morton : MeshGPUGlobalMorton
         GPU-resident global Morton structure
     n_hops : int, default=3
@@ -66,9 +75,9 @@ def create_rk4_fully_fused_global_morton(
     """
 
     # Pre-extract mesh arrays for direct access
-    connectivity = mesh_gpu_global_morton.connectivity
-    node_positions = mesh_gpu_global_morton.node_positions
-    element_neighbors = mesh_gpu_global_morton.element_neighbors
+    connectivity = mesh_gpu_connectivity
+    node_positions = mesh_gpu_node_positions
+    element_neighbors = mesh_gpu_element_neighbors
 
     # ============================================================================
     # Single-Particle Helper Functions
@@ -143,8 +152,11 @@ def create_rk4_fully_fused_global_morton(
 
         # Search neighbor leaves (radius search)
         def search_neighbor_leaf(offset):
+            # Skip center leaf (offset=0, already searched)
+            skip_center = offset == 0
+
             neighbor_leaf = leaf_id + offset
-            valid = (neighbor_leaf >= 0) & (neighbor_leaf < mesh_gpu_global_morton.n_leaves)
+            valid = (neighbor_leaf >= 0) & (neighbor_leaf < mesh_gpu_global_morton.n_leaves) & (~skip_center)
             result = jnp.where(
                 valid,
                 search_in_leaf_global(pos, neighbor_leaf, mesh_gpu_global_morton),
@@ -152,9 +164,8 @@ def create_rk4_fully_fused_global_morton(
             )
             return result
 
-        # Search ±radius leaves
+        # Search ±radius leaves (including 0, but search_neighbor_leaf will skip it)
         offsets = jnp.arange(-l2_search_radius, l2_search_radius + 1)
-        offsets = offsets[offsets != 0]  # Exclude center (already searched)
         neighbor_results = jax.vmap(search_neighbor_leaf)(offsets)
 
         # Find first valid neighbor result

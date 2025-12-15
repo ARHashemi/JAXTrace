@@ -29,6 +29,7 @@ import queue
 import threading
 import numpy as np
 import jax
+import jax.numpy as jnp
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict
@@ -351,6 +352,9 @@ def main():
 
     # Create fully-fused RK4 step function
     rk4_step = create_rk4_fully_fused_global_morton(
+        mesh_gpu_connectivity=mesh_gpu.connectivity,
+        mesh_gpu_node_positions=mesh_gpu.node_positions,
+        mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
         mesh_gpu_global_morton=mesh_gpu_morton,
         n_hops=N_HOPS,
         l2_search_radius=L2_SEARCH_RADIUS
@@ -423,9 +427,17 @@ def main():
 
         # Download and enqueue export ONLY at export frequency
         if step % EXPORT_FREQUENCY == 0:
-            positions_cpu = np.array(positions_gpu)
-            element_ids_cpu = np.array(element_ids_gpu)
-            particle_data_export = ParticleData(positions_cpu, element_ids_cpu)
+            positions_cpu = np.array(positions_gpu, dtype=np.float32)
+            element_ids_cpu = np.array(element_ids_gpu, dtype=np.int32)
+
+            # Create minimal ParticleData for export (only positions matter)
+            particle_data_export = ParticleData(
+                positions=positions_cpu,
+                velocities=np.zeros((N_PARTICLES, 3), dtype=np.float32),
+                element_ids=element_ids_cpu,
+                block_ids=np.zeros(N_PARTICLES, dtype=np.int32),
+                active_mask=(element_ids_cpu >= 0)
+            )
             exporter.enqueue_export(step, particle_data_export)
 
         # Log at intervals
