@@ -1,0 +1,123 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+W1201 10:13:02.597307 1354503 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.53GiB (2712554891 bytes) by rematerialization; only reduced to 911.34GiB (978547574800 bytes), down from 911.34GiB (978547574800 bytes) originally
+W1201 10:13:13.322820 1354503 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 911.46GiB (rounded to 978673308928)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1201 10:13:13.323221 1354503 bfc_allocator.cc:512] ********____________________________________________________________________________________________
+E1201 10:13:13.323264 1354503 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 978673308696 bytes. [tf-allocator-allocation-error='']
+================================================================================
+OCTREE CORRECTNESS AND PERFORMANCE TEST
+================================================================================
+
+Configuration:
+  Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule
+  Particles: 10,000
+  Perturbation: 0.001
+  Validation samples: 100
+  Octree threshold: 0.012
+  Octree max depth: 10
+
+================================================================================
+STEP 1: LOAD MESH
+================================================================================
+
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_12.pvtu
+  Nodes: 898,502
+  Elements: 3,494,800
+  Loaded field 'Displacement': (898502, 3)
+✓ Mesh loaded (5.38 s)
+  Elements: 3,494,800
+  Nodes: 898,502
+  Memory: 84.2 MB
+
+================================================================================
+STEP 2: BUILD ELEMENT ADJACENCY
+================================================================================
+
+✓ Element neighbors built (60.54 s)
+  Memory: 53.3 MB
+
+================================================================================
+STEP 3: COMPUTE ELEMENT CENTROIDS AND LEVEL FIELD
+================================================================================
+
+✓ Element centroids computed (12.07 s)
+  Memory: 40.0 MB
+
+Extracting LEVEL field from mesh...
+  Loading from: threadedAvtk_12.pvtu
+✓ Found LEVEL in point data: 898,502 nodes
+  Node levelset range: [-0.003523, 0.030511]
+  Computing per-element levelset (max of element's nodes)...
+✓ Computed element levelset
+  Level field range: [-0.002623, 0.030511]
+  Mean: 0.000213, Std: 0.000549
+
+================================================================================
+STEP 4: BUILD OCTREE
+================================================================================
+
+✓ Octree built (7.43 s)
+  Filtered elements: 3,493,751/3,494,800 (100.0%)
+  Total nodes: 413,467
+  Leaf nodes: 361,216
+  Max depth: 8
+
+Flattening octree to fixed-size arrays...
+  Metadata array: (413467, 15) (24226.6 KB)
+  Elements array: (413467, 50) (80755.3 KB)
+  Total memory: 102.5 MB
+
+================================================================================
+STEP 5: UPLOAD TO GPU
+================================================================================
+
+Uploading mesh to GPU...
+  Elements: 3,494,800
+  Nodes: 898,502
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.33 MB
+  Node positions: 10.28 MB
+  Element neighbors: 53.33 MB
+  Total: 116.94 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 116.94 MB GPU memory (0% waste)
+    Memory reduction: 55.6× smaller
+✓ Data uploaded to GPU (0.18 s)
+  GPU memory used: 219.5 MB
+  Total GPU memory: 219.5 MB
+
+================================================================================
+STEP 6: GENERATE PARTICLES
+================================================================================
+
+Domain bounds:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+Generating 10,000 particles...
+  Grid resolution: (22, 22, 22)
+✓ Generated 10,000 particles
+
+================================================================================
+STEP 7: INITIAL PARTICLE ASSIGNMENT
+================================================================================
+
+Using brute-force point-in-tet search for initialization...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_correctness.py", line 352, in <module>
+    element_ids_gpu = initial_search_brute_force(
+        positions_gpu,
+        mesh_gpu.connectivity,
+        mesh_gpu.node_positions
+    )
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 978673308696 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

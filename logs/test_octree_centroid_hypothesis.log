@@ -1,0 +1,160 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+OCTREE CENTROID ASSIGNMENT HYPOTHESIS TEST
+================================================================================
+
+Loading mesh: threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded: 900,671 nodes, 3,512,384 elements
+
+Building octree...
+✓ Built octree
+  Nodes: 240,227
+  Leaves: 209,309
+  Max depth: 8
+
+Generating test particles...
+✓ Generated 1000 test particles
+  Perturbation scale: 3.124997e-06
+
+================================================================================
+TEST: Check if true elements are in reached octree leaves
+================================================================================
+
+  Tested 100/1000 particles...
+  Tested 200/1000 particles...
+  Tested 300/1000 particles...
+  Tested 400/1000 particles...
+  Tested 500/1000 particles...
+  Tested 600/1000 particles...
+  Tested 700/1000 particles...
+  Tested 800/1000 particles...
+  Tested 900/1000 particles...
+  Tested 1000/1000 particles...
+
+================================================================================
+RESULTS
+================================================================================
+
+True element in reached leaf:     9/1000 (0.90%)
+True element NOT in reached leaf: 991/1000 (99.10%)
+
+✗ HYPOTHESIS CONFIRMED!
+  Elements are assigned to wrong octree leaves due to centroid-based assignment.
+
+  This explains the 99.97% inaccuracy:
+  - Particle navigates to leaf A based on its position
+  - True element is in leaf B (based on element's centroid)
+  - Particle searches in leaf A, finds wrong element (or nothing)
+
+================================================================================
+MISMATCH EXAMPLES
+================================================================================
+
+Mismatch 1:
+  Particle position:        [ 0.00050998  0.00151459 -0.00332141]
+  True element ID:          606482
+  True element centroid:    [ 0.00050781  0.00151736 -0.00332031]
+  Particle navigated to leaf:  201403 (path: 0 -> 183513 -> 183514 -> 201403)
+  True centroid navigates to:  201403 (path: 0 -> 183513 -> 183514 -> 201403)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 3.686704e-06
+
+Mismatch 2:
+  Particle position:        [-0.00488511 -0.00185874 -0.00032959]
+  True element ID:          2923897
+  True element centroid:    [-0.00488281 -0.00185677 -0.00033203]
+  Particle navigated to leaf:  122696 (path: 0 -> 122226 -> 122696)
+  True centroid navigates to:  122696 (path: 0 -> 122226 -> 122696)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 3.879666e-06
+
+Mismatch 3:
+  Particle position:        [-0.00347916 -0.00205673 -0.00271602]
+  True element ID:          2834900
+  True element centroid:    [-0.00347656 -0.00205643 -0.00271484]
+  Particle navigated to leaf:  122696 (path: 0 -> 122226 -> 122696)
+  True centroid navigates to:  122696 (path: 0 -> 122226 -> 122696)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 2.868246e-06
+
+Mismatch 4:
+  Particle position:        [-0.00441598 -0.00121526 -0.00033222]
+  True element ID:          2902207
+  True element centroid:    [-0.00441406 -0.00121788 -0.00033203]
+  Particle navigated to leaf:  122696 (path: 0 -> 122226 -> 122696)
+  True centroid navigates to:  122696 (path: 0 -> 122226 -> 122696)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 3.261753e-06
+
+Mismatch 5:
+  Particle position:        [ 0.00338011  0.00089831 -0.00410126]
+  True element ID:          432571
+  True element centroid:    [ 0.00337891  0.00089844 -0.00410156]
+  Particle navigated to leaf:  186237 (path: 0 -> 183513 -> 183514 -> 183515 -> 183516 -> 185672 -> 186184 -> 186230 -> 186237)
+  True centroid navigates to:  186237 (path: 0 -> 183513 -> 183514 -> 183515 -> 183516 -> 185672 -> 186184 -> 186230 -> 186237)
+  Elements in particle's leaf: 12
+  Distance particle to centroid: 1.247072e-06
+
+Mismatch 6:
+  Particle position:        [-0.00189638 -0.00289465 -0.00105692]
+  True element ID:          3058274
+  True element centroid:    [-0.00189453 -0.00289497 -0.00105469]
+  Particle navigated to leaf:  122696 (path: 0 -> 122226 -> 122696)
+  True centroid navigates to:  122696 (path: 0 -> 122226 -> 122696)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 2.912893e-06
+
+Mismatch 7:
+  Particle position:        [ 0.00464602 -0.00134021 -0.00013868]
+  True element ID:          1802065
+  True element centroid:    [ 0.00464844 -0.00133768 -0.00013672]
+  Particle navigated to leaf:  182906 (path: 0 -> 122698 -> 182906)
+  True centroid navigates to:  182906 (path: 0 -> 122698 -> 182906)
+  Elements in particle's leaf: 24
+  Distance particle to centroid: 4.013440e-06
+
+Mismatch 8:
+  Particle position:        [-0.0034948   0.00281326 -0.00089951]
+  True element ID:          334308
+  True element centroid:    [-0.00349609  0.00281511 -0.00089844]
+  Particle navigated to leaf:  183509 (path: 0 -> 182908 -> 183509)
+  True centroid navigates to:  183509 (path: 0 -> 182908 -> 183509)
+  Elements in particle's leaf: 27
+  Distance particle to centroid: 2.498354e-06
+
+Mismatch 9:
+  Particle position:        [-0.00410097  0.00455382 -0.0007408 ]
+  True element ID:          8700
+  True element centroid:    [-0.00410156  0.00455209 -0.00074219]
+  Particle navigated to leaf:  183509 (path: 0 -> 182908 -> 183509)
+  True centroid navigates to:  183509 (path: 0 -> 182908 -> 183509)
+  Elements in particle's leaf: 27
+  Distance particle to centroid: 2.301361e-06
+
+Mismatch 10:
+  Particle position:        [-0.00361092  0.00219897 -0.00404083]
+  True element ID:          2176030
+  True element centroid:    [-0.00361328  0.00219618 -0.00404297]
+  Particle navigated to leaf:  183509 (path: 0 -> 182908 -> 183509)
+  True centroid navigates to:  183509 (path: 0 -> 182908 -> 183509)
+  Elements in particle's leaf: 27
+  Distance particle to centroid: 4.229214e-06
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The centroid-based element assignment is causing particles to search
+in the wrong octree leaves, leading to wrong or missing element assignments.
+
+RECOMMENDED FIX:
+1. Implement multi-octant search (check neighboring leaves)
+2. Or: Assign elements to ALL overlapping leaves (bounding-box based)
+

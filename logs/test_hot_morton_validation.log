@@ -1,0 +1,40 @@
+INFO:2025-12-12 10:45:41,041:jax._src.xla_bridge:808: Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+2025-12-12 10:45:41,041 - INFO - Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+2025-12-12 10:45:41,766 - INFO - ================================================================================
+2025-12-12 10:45:41,766 - INFO - HOT Morton Validation Test - 1-Step Quick Test
+2025-12-12 10:45:41,766 - INFO - ================================================================================
+2025-12-12 10:45:41,766 - INFO - 
+[1/7] Loading mesh...
+2025-12-12 10:45:41.767 (   1.266s) [    7254FFB7A380]       vtkXMLReader.cxx:342    ERR| vtkXMLPUnstructuredGridReader (0x18440940): Error opening file /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/step0/step0.pvtu
+2025-12-12 10:45:41.767 (   1.266s) [    7254FFB7A380]       vtkExecutive.cxx:729    ERR| vtkCompositeDataPipeline (0x1ac44210): Algorithm vtkXMLPUnstructuredGridReader (0x18440940) returned failure for request: vtkInformation (0x1b12c290)
+  Debug: Off
+  Modified Time: 190
+  Reference Count: 1
+  Registered Events: (none)
+  Request: REQUEST_INFORMATION
+  ALGORITHM_AFTER_FORWARD: 1
+  FORWARD_DIRECTION: 0
+
+
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/step0/step0.pvtu
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_hot_morton_validation.py", line 309, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_hot_morton_validation.py", line 83, in main
+    node_positions, connectivity, velocity_field = load_mesh_from_pvtu(
+                                                   ~~~~~~~~~~~~~~~~~~~^
+        Path(MESH_PATH),
+        ^^^^^^^^^^^^^^^^
+        field_name='Displacement'
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/mesh_loader.py", line 63, in load_mesh_from_pvtu
+    positions = numpy_support.vtk_to_numpy(output.GetPoints().GetData())
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'GetData'

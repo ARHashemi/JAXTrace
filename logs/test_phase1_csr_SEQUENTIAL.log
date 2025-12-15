@@ -1,0 +1,198 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+E1209 17:51:38.898865 2119958 gpu_hlo_schedule.cc:817] The byte size of input/output arguments (14105734144) exceeds the base limit (2922135552). This indicates an error in the calculation!
+W1209 17:51:48.920276 2119958 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 13.08GiB (rounded to 14049536000)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1209 17:51:48.920472 2119958 bfc_allocator.cc:512] **************************____________________________******_____________**********___***********x**
+E1209 17:51:48.920492 2119958 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 14049536000 bytes. [tf-allocator-allocation-error='']
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+OCTREE vs BLOCKWISE INITIALIZATION COMPARISON TEST
+================================================================================
+
+Configuration:
+  Mesh: threadedAvtk_120.pvtu
+  Grid size: (8, 8, 4)
+  Octree max depth: 15
+  Octree max leaf size: 50
+  Octree level threshold: 1.1
+  Number of particles: 50,000
+
+================================================================================
+LOADING MESH AND INITIALIZING STRUCTURES
+================================================================================
+
+Loading mesh from: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded mesh: 900,671 nodes, 3,512,384 elements
+  Time: 5.47 s
+
+Building element neighbors...
+✓ Element neighbors built (59.32 s)
+
+--------------------------------------------------------------------------------
+INITIALIZING OCTREE
+--------------------------------------------------------------------------------
+
+Loading LEVEL field from mesh...
+✓ Found LEVEL in point data
+✓ Computed element levelset: 3,512,384 elements
+
+Computing element centroids...
+✓ Computed 3,512,384 centroids
+
+Building octree (max_depth=15, max_leaf_size=50)...
+✓ Built octree (3.39 s)
+  Filtered elements: 3,512,384/3,512,384
+  Total nodes: 240,227
+  Max depth: 8
+
+Uploading octree to GPU...
+✓ Octree uploaded to GPU
+
+--------------------------------------------------------------------------------
+INITIALIZING BLOCKWISE STRUCTURE
+--------------------------------------------------------------------------------
+
+Creating regular grid (8, 8, 4)...
+✓ Created 8×8×4 grid (0.00 s)
+  Total blocks: 256
+
+Assigning elements to blocks...
+✓ Element assignment (7.53 s)
+  Blocks used: 256/256
+  Elements per block: 2 - 450004
+
+Building padded block arrays...
+✓ Built padded arrays (6.62 s)
+  Shape: (256, 450004)
+  Memory: 6593.80 MB
+
+Classifying blocks...
+✓ Classified blocks (0.00 s)
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building block 26-connectivity...
+✓ Built 26-connectivity (0.00 s)
+
+Building hash buckets...
+✓ Built hash buckets (2.55 s)
+  Heavy blocks processed: 16
+
+--------------------------------------------------------------------------------
+UPLOADING MESH TO GPU
+--------------------------------------------------------------------------------
+
+Uploading mesh to GPU...
+  Elements: 3,512,384
+  Nodes: 900,671
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.59 MB
+  Node positions: 10.31 MB
+  Element neighbors: 53.59 MB
+  Total: 117.50 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 117.50 MB GPU memory (0% waste)
+    Memory reduction: 55.3× smaller
+✓ Uploaded mesh to GPU (0.03 s)
+
+================================================================================
+GENERATING 50,000 TEST PARTICLES
+================================================================================
+
+Computing minimum element size...
+✓ Minimum element size: 3.124997e-04
+✓ Perturbation scale: 3.124997e-06 (1% of min size)
+
+Placing particles at element centroids with perturbations...
+✓ Generated 50,000 particles
+  Position shape: (50000, 3)
+  True element IDs shape: (50000,)
+
+================================================================================
+TESTING OCTREE SEARCH
+================================================================================
+
+Uploading particle positions to GPU...
+✓ Uploaded 50,000 particle positions
+
+Warming up JIT compilation...
+✓ JIT compilation complete
+
+Running octree search...
+✓ Octree search complete
+  Time: 0.5125 s
+  Throughput: 97,567.4 p/s
+
+OCTREE RESULTS:
+  Found: 49734/50000 (99.47%)
+  Correct: 2832/50000 (5.66%)
+  Mismatches: 46902
+
+================================================================================
+TESTING BLOCKWISE SEARCH
+================================================================================
+
+Running blockwise search...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 709, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 630, in main
+    blockwise_results = test_blockwise_search(
+        particle_positions,
+    ...<8 lines>...
+        true_element_ids
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 525, in test_blockwise_search
+    found_element_ids, block_ids, search_stats = initial_search_batch(
+                                                 ~~~~~~~~~~~~~~~~~~~~^
+        particle_positions,
+        ^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        verbose=False
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/initial_assignment.py", line 428, in initial_search_batch
+    found_elem_ids = np.array(search_hash_vmap(particle_batch_jax), dtype=np.int32)
+                              ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/initial_assignment.py", line 414, in <lambda>
+    lambda pos: search_level2b_hash_bucket_csr(
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        pos,
+        ^^^^
+    ...<9 lines>...
+        connectivity_jax
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/level2b_heavy_csr.py", line 196, in search_level2b_hash_bucket_csr
+    elem_id_primary = search_bucket_elements_csr(
+        position,
+    ...<5 lines>...
+        connectivity
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/level2b_heavy_csr.py", line 117, in search_bucket_elements_csr
+    return jax.lax.cond(
+           ~~~~~~~~~~~~^
+        actual_size > 0,
+        ^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        None
+        ^^^^
+    )
+    ^
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 14049536000 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

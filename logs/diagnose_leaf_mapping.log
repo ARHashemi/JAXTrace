@@ -1,0 +1,47 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)
+Building Morton structure...
+
+Morton structure:
+  n_leaves: 13720
+  morton_min: 11257744933191661
+  morton_max: 9148420525763058557
+
+Test element 1000:
+  Centroid: [-0.00539063  0.00087847 -0.00109375]
+  Morton code: 7728549144947587951
+  Element index in sorted list: 2227991
+  Actual leaf ID: 8703
+  Predicted leaf ID (linear): 11587
+  Difference: 2884
+  Found in predicted leaf: -1
+  Found in actual leaf: 1000
+
+================================================================================
+Morton Distribution Analysis
+================================================================================
+
+Morton code spacing:
+  Expected span per leaf: 6.66e+14
+  Mean Morton diff: 2.60e+12
+  Median Morton diff: 9.64e+09
+  Std Morton diff: 2.17e+14
+  Max Morton diff: 8.50e+16
+  Min Morton diff: 4.43e+08
+
+Linear approximation error:
+  Mean deviation: 0.2703
+  Max deviation: 0.5532
+
+================================================================================
+❌ Morton codes are NOT uniformly distributed!
+   Linear approximation is not suitable.
+   Need to implement binary search or prefix table lookup.
+================================================================================

@@ -1,0 +1,567 @@
+INFO:2025-12-12 10:48:53,795:jax._src.xla_bridge:808: Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+2025-12-12 10:48:53,795 - INFO - Unable to initialize backend 'tpu': INTERNAL: Failed to open libtpu.so: libtpu.so: cannot open shared object file: No such file or directory
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+2025-12-12 10:48:54,547 - INFO - ================================================================================
+2025-12-12 10:48:54,547 - INFO - HOT Morton Validation Test - 1-Step Quick Test
+2025-12-12 10:48:54,547 - INFO - ================================================================================
+2025-12-12 10:48:54,547 - INFO - 
+[1/7] Loading mesh...
+2025-12-12 10:49:00,001 - INFO -   Mesh: 3,512,279 elements, 900,658 nodes
+2025-12-12 10:49:00,001 - INFO -   Load time: 5.45s
+2025-12-12 10:49:00,037 - INFO -   Domain: X=[-0.030, 0.030], Y=[-0.023, 0.023], Z=[-0.010, 0.000]
+2025-12-12 10:49:00,037 - INFO - 
+[2/7] Building element neighbors...
+2025-12-12 10:49:58,487 - INFO -   Element neighbors: (3512279, 4)
+2025-12-12 10:49:58,534 - INFO -   Build time: 58.45s
+2025-12-12 10:49:58,534 - INFO - 
+[3/7] Building HOT Morton structures (CPU preprocessing)...
+2025-12-12 10:49:58,534 - INFO -   This is the critical step that extracts local connectivity per leaf
+2025-12-12 10:49:58,534 - INFO - ================================================================================
+2025-12-12 10:49:58,534 - INFO - HOT Morton Preprocessing Pipeline
+2025-12-12 10:49:58,534 - INFO - ================================================================================
+2025-12-12 10:49:58,534 - INFO - Mesh: 3512279 elements, 900658 nodes
+2025-12-12 10:49:58,534 - INFO - Grid: 256 blocks (8×8×4)
+2025-12-12 10:49:58,534 - INFO - 
+[1/5] Building cube-aligned blocks...
+2025-12-12 10:49:58,565 - INFO - Building 256 cube-aligned blocks (8×8×4)
+2025-12-12 10:49:58,566 - INFO - Domain: [-0.03  -0.023 -0.01 ] → [0.03  0.023 0.   ]
+2025-12-12 10:49:58,566 - INFO - Block size: [0.0075, 0.0058, 0.0025]
+2025-12-12 10:52:51,224 - INFO - Block element counts: min=24, max=474247, avg=14820.1
+2025-12-12 10:52:51,224 - WARNING - Max elements (474247) exceeds limit (50000)
+2025-12-12 10:52:51,336 - INFO - 
+[2/5] Computing global Morton codes...
+2025-12-12 10:53:18,580 - INFO - 
+[3/5] Building octree leaves per block...
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,580 - INFO -   Block 0/256: 1 leaves, 24 elements
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 37 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=37, max=37, avg=37.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 69 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=69, max=69, avg=69.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 45 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=45, max=45, avg=45.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,580 - INFO -   Created 1 leaves for 54 elements
+2025-12-12 10:53:18,580 - INFO -   Leaf sizes: min=54, max=54, avg=54.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 149 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=149, max=149, avg=149.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 210 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=210, max=210, avg=210.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 177 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=177, max=177, avg=177.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 216 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=216, max=216, avg=216.0
+2025-12-12 10:53:18,581 - INFO -   Created 4 leaves for 390 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=48, max=192, avg=97.5
+2025-12-12 10:53:18,581 - INFO -   Created 2 leaves for 311 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=61, max=250, avg=155.5
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 69 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=69, max=69, avg=69.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 216 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=216, max=216, avg=216.0
+2025-12-12 10:53:18,581 - INFO -   Created 4 leaves for 390 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=48, max=192, avg=97.5
+2025-12-12 10:53:18,581 - INFO -   Created 2 leaves for 290 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=62, max=228, avg=145.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 71 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=71, max=71, avg=71.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 60 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=60, max=60, avg=60.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 156 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=156, max=156, avg=156.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 198 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=198, max=198, avg=198.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 161 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=161, max=161, avg=161.0
+2025-12-12 10:53:18,581 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,581 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 51 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=51, max=51, avg=51.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 114 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=114, max=114, avg=114.0
+2025-12-12 10:53:18,582 - INFO -   Block 50/256: 1 leaves, 114 elements
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 129 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=129, max=129, avg=129.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 106 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=106, max=106, avg=106.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 52 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=52, max=52, avg=52.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 39 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=39, max=39, avg=39.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 70 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=70, max=70, avg=70.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 64 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=64, max=64, avg=64.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 63 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=63, max=63, avg=63.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 67 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=67, max=67, avg=67.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 70 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=70, max=70, avg=70.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 70 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=70, max=70, avg=70.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 111 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=111, max=111, avg=111.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 132 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=132, max=132, avg=132.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 123 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=123, max=123, avg=123.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 90 elements
+2025-12-12 10:53:18,582 - INFO -   Leaf sizes: min=90, max=90, avg=90.0
+2025-12-12 10:53:18,582 - INFO -   Created 1 leaves for 67 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=67, max=67, avg=67.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 90 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=90, max=90, avg=90.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 254 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=254, max=254, avg=254.0
+2025-12-12 10:53:18,583 - INFO -   Created 3 leaves for 427 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=33, max=225, avg=142.3
+2025-12-12 10:53:18,583 - INFO -   Created 2 leaves for 382 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=151, max=231, avg=191.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 126 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=126, max=126, avg=126.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,583 - INFO -   Created 1 leaves for 120 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=120, max=120, avg=120.0
+2025-12-12 10:53:18,583 - INFO -   Created 2 leaves for 453 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=213, max=240, avg=226.5
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/hot_morton_builder.py:310: RuntimeWarning: overflow encountered in scalar add
+  mid_morton = (morton_low + morton_high) // 2
+2025-12-12 10:53:18,583 - INFO -   Created 8 leaves for 7047 elements
+2025-12-12 10:53:18,583 - INFO -   Leaf sizes: min=24, max=3711, avg=880.9
+2025-12-12 10:53:18,584 - INFO -   Created 8 leaves for 5558 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=18, max=2995, avg=694.8
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 179 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=179, max=179, avg=179.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 120 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=120, max=120, avg=120.0
+2025-12-12 10:53:18,584 - INFO -   Created 2 leaves for 468 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=216, max=252, avg=234.0
+2025-12-12 10:53:18,584 - INFO -   Created 10 leaves for 9101 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=9, max=5061, avg=910.1
+2025-12-12 10:53:18,584 - INFO -   Created 9 leaves for 6718 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=18, max=3816, avg=746.4
+2025-12-12 10:53:18,584 - INFO -   Block 100/256: 9 leaves, 6718 elements
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 177 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=177, max=177, avg=177.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 66 elements
+2025-12-12 10:53:18,584 - INFO -   Leaf sizes: min=66, max=66, avg=66.0
+2025-12-12 10:53:18,584 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 102 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=102, max=102, avg=102.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 339 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=339, max=339, avg=339.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 664 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=664, max=664, avg=664.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 513 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=513, max=513, avg=513.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 145 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=145, max=145, avg=145.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 67 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=67, max=67, avg=67.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 93 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=93, max=93, avg=93.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 222 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=222, max=222, avg=222.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 285 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=285, max=285, avg=285.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 232 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=232, max=232, avg=232.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 101 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=101, max=101, avg=101.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 70 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=70, max=70, avg=70.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 90 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=90, max=90, avg=90.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 90 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=90, max=90, avg=90.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 81 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=81, max=81, avg=81.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 75 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=75, max=75, avg=75.0
+2025-12-12 10:53:18,585 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,585 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 65 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=65, max=65, avg=65.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 114 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=114, max=114, avg=114.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 179 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=179, max=179, avg=179.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 186 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=186, max=186, avg=186.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 140 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=140, max=140, avg=140.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 75 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=75, max=75, avg=75.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 82 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=82, max=82, avg=82.0
+2025-12-12 10:53:18,586 - INFO -   Created 2 leaves for 394 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=78, max=316, avg=197.0
+2025-12-12 10:53:18,586 - INFO -   Created 2 leaves for 1102 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=124, max=978, avg=551.0
+2025-12-12 10:53:18,586 - INFO -   Created 2 leaves for 1111 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=126, max=985, avg=555.5
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 245 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=245, max=245, avg=245.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 75 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=75, max=75, avg=75.0
+2025-12-12 10:53:18,586 - INFO -   Block 150/256: 1 leaves, 75 elements
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,586 - INFO -   Created 1 leaves for 120 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=120, max=120, avg=120.0
+2025-12-12 10:53:18,586 - INFO -   Created 2 leaves for 943 elements
+2025-12-12 10:53:18,586 - INFO -   Leaf sizes: min=115, max=828, avg=471.5
+2025-12-12 10:53:18,595 - INFO -   Created 1 leaves for 277375 elements
+2025-12-12 10:53:18,595 - INFO -   Leaf sizes: min=277375, max=277375, avg=277375.0
+2025-12-12 10:53:18,604 - INFO -   Created 1 leaves for 305104 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=305104, max=305104, avg=305104.0
+2025-12-12 10:53:18,605 - INFO -   Created 1 leaves for 487 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=487, max=487, avg=487.0
+2025-12-12 10:53:18,605 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,605 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,605 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,605 - INFO -   Created 1 leaves for 120 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=120, max=120, avg=120.0
+2025-12-12 10:53:18,605 - INFO -   Created 2 leaves for 993 elements
+2025-12-12 10:53:18,605 - INFO -   Leaf sizes: min=123, max=870, avg=496.5
+2025-12-12 10:53:18,615 - INFO -   Created 1 leaves for 325599 elements
+2025-12-12 10:53:18,615 - INFO -   Leaf sizes: min=325599, max=325599, avg=325599.0
+2025-12-12 10:53:18,623 - INFO -   Created 1 leaves for 278470 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=278470, max=278470, avg=278470.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 520 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=520, max=520, avg=520.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 102 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=102, max=102, avg=102.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 678 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=678, max=678, avg=678.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 1811 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=1811, max=1811, avg=1811.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 1464 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=1464, max=1464, avg=1464.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 305 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=305, max=305, avg=305.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 102 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=102, max=102, avg=102.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 318 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=318, max=318, avg=318.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 516 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=516, max=516, avg=516.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 413 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=413, max=413, avg=413.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 126 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=126, max=126, avg=126.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 70 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=70, max=70, avg=70.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 114 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=114, max=114, avg=114.0
+2025-12-12 10:53:18,624 - INFO -   Created 1 leaves for 120 elements
+2025-12-12 10:53:18,624 - INFO -   Leaf sizes: min=120, max=120, avg=120.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 102 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=102, max=102, avg=102.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 75 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=75, max=75, avg=75.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 48 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=48, max=48, avg=48.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 39 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=39, max=39, avg=39.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,625 - INFO -   Block 200/256: 1 leaves, 24 elements
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 33 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=33, max=33, avg=33.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 74 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=74, max=74, avg=74.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 193 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=193, max=193, avg=193.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 222 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=222, max=222, avg=222.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 121 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=121, max=121, avg=121.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 39 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=39, max=39, avg=39.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 45 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=45, max=45, avg=45.0
+2025-12-12 10:53:18,625 - INFO -   Created 1 leaves for 873 elements
+2025-12-12 10:53:18,625 - INFO -   Leaf sizes: min=873, max=873, avg=873.0
+2025-12-12 10:53:18,629 - INFO -   Created 1 leaves for 126660 elements
+2025-12-12 10:53:18,629 - INFO -   Leaf sizes: min=126660, max=126660, avg=126660.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 125487 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=125487, max=125487, avg=125487.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 1082 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=1082, max=1082, avg=1082.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 39 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=39, max=39, avg=39.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,633 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,633 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,635 - INFO -   Created 1 leaves for 55843 elements
+2025-12-12 10:53:18,635 - INFO -   Leaf sizes: min=55843, max=55843, avg=55843.0
+2025-12-12 10:53:18,648 - INFO -   Created 1 leaves for 424017 elements
+2025-12-12 10:53:18,648 - INFO -   Leaf sizes: min=424017, max=424017, avg=424017.0
+2025-12-12 10:53:18,663 - INFO -   Created 1 leaves for 469905 elements
+2025-12-12 10:53:18,663 - INFO -   Leaf sizes: min=469905, max=469905, avg=469905.0
+2025-12-12 10:53:18,664 - INFO -   Created 1 leaves for 47332 elements
+2025-12-12 10:53:18,664 - INFO -   Leaf sizes: min=47332, max=47332, avg=47332.0
+2025-12-12 10:53:18,664 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,664 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,664 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,664 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,664 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,664 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,664 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,664 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,666 - INFO -   Created 1 leaves for 61938 elements
+2025-12-12 10:53:18,666 - INFO -   Leaf sizes: min=61938, max=61938, avg=61938.0
+2025-12-12 10:53:18,681 - INFO -   Created 1 leaves for 474247 elements
+2025-12-12 10:53:18,681 - INFO -   Leaf sizes: min=474247, max=474247, avg=474247.0
+2025-12-12 10:53:18,694 - INFO -   Created 1 leaves for 426367 elements
+2025-12-12 10:53:18,694 - INFO -   Leaf sizes: min=426367, max=426367, avg=426367.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 47906 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=47906, max=47906, avg=47906.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 60 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=60, max=60, avg=60.0
+2025-12-12 10:53:18,696 - INFO -   Created 1 leaves for 3000 elements
+2025-12-12 10:53:18,696 - INFO -   Leaf sizes: min=3000, max=3000, avg=3000.0
+2025-12-12 10:53:18,700 - INFO -   Created 1 leaves for 147306 elements
+2025-12-12 10:53:18,700 - INFO -   Leaf sizes: min=147306, max=147306, avg=147306.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 134727 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=134727, max=134727, avg=134727.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 720 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=720, max=720, avg=720.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 60 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=60, max=60, avg=60.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 240 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=240, max=240, avg=240.0
+2025-12-12 10:53:18,704 - INFO -   Created 1 leaves for 564 elements
+2025-12-12 10:53:18,704 - INFO -   Leaf sizes: min=564, max=564, avg=564.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 423 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=423, max=423, avg=423.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 81 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=81, max=81, avg=81.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 34 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=34, max=34, avg=34.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 42 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=42, max=42, avg=42.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 72 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=72, max=72, avg=72.0
+2025-12-12 10:53:18,705 - INFO -   Block 250/256: 1 leaves, 72 elements
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 78 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=78, max=78, avg=78.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 63 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=63, max=63, avg=63.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 39 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=39, max=39, avg=39.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 36 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=36, max=36, avg=36.0
+2025-12-12 10:53:18,705 - INFO -   Created 1 leaves for 24 elements
+2025-12-12 10:53:18,705 - INFO -   Leaf sizes: min=24, max=24, avg=24.0
+2025-12-12 10:53:18,705 - INFO - Max leaves per block: 10
+2025-12-12 10:53:18,705 - INFO - 
+[4/5] Extracting local connectivity per leaf...
+2025-12-12 10:53:18,706 - INFO -   Processed 1 leaves (0/256 blocks)
+2025-12-12 10:53:18,713 - INFO -   Processed 59 leaves (50/256 blocks)
+2025-12-12 10:53:18,719 - ERROR -   ❌ HOT Morton preprocessing FAILED: index 256 is out of bounds for axis 0 with size 256
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)

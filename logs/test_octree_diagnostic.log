@@ -1,0 +1,181 @@
+test_octree_diagnostic.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+OCTREE DIAGNOSTIC TEST
+================================================================================
+
+Configuration:
+  Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Level threshold: 1.1
+  Octree max depth: 15
+  Octree max leaf size: 50
+  Test elements: 2,000
+  Test particles: 1,000
+
+================================================================================
+LOADING MESH
+================================================================================
+
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded mesh (5.35 s):
+  Nodes: 900,671
+  Elements: 3,512,384
+
+Computing element centroids...
+✓ Computed centroids (11.80 s)
+
+Computing element LEVEL field...
+  ✓ Found LEVEL in point data: 900,671 nodes
+    Node levelset range: [-0.003510, 0.030511]
+  ✓ Computed element levelset: 3,512,384 elements
+    Element levelset range: [-0.002615, 0.030511]
+✓ Computed element levels (9.48 s)
+
+================================================================================
+BUILDING OCTREE
+================================================================================
+
+Building octree with LEVEL < 1.1...
+✓ Octree built (3.34 s)
+
+Flattening octree to arrays...
+✓ Octree flattened (0.27 s)
+  Octree nodes: 240,227
+  Max elements per leaf: 50
+  Filtered elements: 3,512,384
+
+
+================================================================================
+OCTREE CONSISTENCY CHECK
+================================================================================
+Testing 2,000 random elements...
+
+Results:
+  Assigned leaf == Navigated leaf: 0/2000 (0.00%)
+  Assigned leaf != Navigated leaf: 2000/2000 (100.00%)
+
+--------------------------------------------------------------------------------
+MISMATCH EXAMPLES (First 5)
+--------------------------------------------------------------------------------
+
+Example 1:
+  Element ID: 845645
+  Centroid: [0.00267578, 0.00283507, -0.00033203]
+
+  DURING CONSTRUCTION:
+    Assigned to leaf: 219795 (depth -1)
+    Leaf bbox: min=[0.00252012, 0.00276958, -0.00033601]
+               max=[0.00274922, 0.00294268, -0.00029873]
+    Centroid inside assigned bbox: True
+
+  DURING SEARCH:
+    Navigated to leaf: 8 (depth -1)
+    Leaf bbox: min=[-0.01466250, -0.00553917, -0.00946855]
+               max=[-0.00733125, 0.00000000, -0.00827573]
+    Centroid inside navigated bbox: False
+
+  CONCLUSION: Element assigned to leaf 219795, but centroid navigates to leaf 8
+              This means particles inside this element will search the WRONG leaf!
+
+Example 2:
+  Element ID: 2066930
+  Centroid: [0.00363281, -0.00085851, -0.00443359]
+
+  DURING CONSTRUCTION:
+    Assigned to leaf: 61344 (depth -1)
+    Leaf bbox: min=[0.00343652, -0.00086549, -0.00443634]
+               max=[0.00366562, -0.00069240, -0.00439906]
+    Centroid inside assigned bbox: True
+
+  DURING SEARCH:
+    Navigated to leaf: 6 (depth -1)
+    Leaf bbox: min=[-0.01466250, -0.01107834, -0.00946855]
+               max=[-0.00733125, -0.00553917, -0.00827573]
+    Centroid inside navigated bbox: False
+
+  CONCLUSION: Element assigned to leaf 61344, but centroid navigates to leaf 6
+              This means particles inside this element will search the WRONG leaf!
+
+Example 3:
+  Element ID: 1491600
+  Centroid: [0.00066406, 0.00377344, -0.00091797]
+
+  DURING CONSTRUCTION:
+    Assigned to leaf: 211607 (depth -1)
+    Leaf bbox: min=[0.00045820, 0.00363508, -0.00093242]
+               max=[0.00068730, 0.00380818, -0.00089514]
+    Centroid inside assigned bbox: True
+
+  DURING SEARCH:
+    Navigated to leaf: 8 (depth -1)
+    Leaf bbox: min=[-0.01466250, -0.00553917, -0.00946855]
+               max=[-0.00733125, 0.00000000, -0.00827573]
+    Centroid inside navigated bbox: False
+
+  CONCLUSION: Element assigned to leaf 211607, but centroid navigates to leaf 8
+              This means particles inside this element will search the WRONG leaf!
+
+Example 4:
+  Element ID: 3502747
+  Centroid: [-0.00373047, -0.00035938, -0.00205078]
+
+  DURING CONSTRUCTION:
+    Assigned to leaf: 22641 (depth -1)
+    Leaf bbox: min=[-0.00389473, -0.00051930, -0.00208797]
+               max=[-0.00366562, -0.00034620, -0.00205069]
+    Centroid inside assigned bbox: True
+
+  DURING SEARCH:
+    Navigated to leaf: 20 (depth -1)
+    Leaf bbox: min=[-0.00733125, -0.00276958, -0.00767932]
+               max=[-0.00366562, 0.00000000, -0.00708291]
+    Centroid inside navigated bbox: False
+
+  CONCLUSION: Element assigned to leaf 22641, but centroid navigates to leaf 20
+              This means particles inside this element will search the WRONG leaf!
+
+Example 5:
+  Element ID: 2079833
+  Centroid: [0.00035156, -0.00305469, -0.00431641]
+
+  DURING CONSTRUCTION:
+    Assigned to leaf: 59650 (depth -1)
+    Leaf bbox: min=[0.00022910, -0.00311578, -0.00432451]
+               max=[0.00045820, -0.00294268, -0.00428723]
+    Centroid inside assigned bbox: True
+
+  DURING SEARCH:
+    Navigated to leaf: 6 (depth -1)
+    Leaf bbox: min=[-0.01466250, -0.01107834, -0.00946855]
+               max=[-0.00733125, -0.00553917, -0.00827573]
+    Centroid inside navigated bbox: False
+
+  CONCLUSION: Element assigned to leaf 59650, but centroid navigates to leaf 6
+              This means particles inside this element will search the WRONG leaf!
+================================================================================
+BUILDING ELEMENT NEIGHBORS
+================================================================================
+
+Building element neighbors...
+✓ Element neighbors built (57.57 s)
+
+================================================================================
+UPLOADING TO GPU
+================================================================================
+
+Uploading mesh to GPU...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_diagnostic.py", line 562, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_diagnostic.py", line 493, in main
+    mesh_gpu = upload_mesh_to_gpu(node_positions, connectivity, element_neighbors)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/mesh_data_gpu.py", line 130, in upload_mesh_to_gpu
+    raise ValueError(f"connectivity must have shape (n_elements, 4), got {connectivity.shape}")
+ValueError: connectivity must have shape (n_elements, 4), got (900671, 3)

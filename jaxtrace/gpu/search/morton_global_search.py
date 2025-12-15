@@ -38,8 +38,9 @@ class MeshGPUGlobalMorton:
     leaf_start: jax.Array            # (n_leaves,) int32 - start index in elem_ids_sorted
     leaf_length: jax.Array           # (n_leaves,) int32 - elements in this leaf
 
-    # Octree prefix table for O(1) position→leaf mapping (NEW)
-    prefix_table: jax.Array          # (8^D,) int32 - prefix→leaf_id lookup
+    # Octree prefix table for position→leaf mapping (NEW - Phase 5)
+    prefix_start: jax.Array          # (8^D,) int32 - prefix→first_leaf_id lookup
+    prefix_length: jax.Array         # (8^D,) int32 - prefix→num_leaves lookup
     table_depth: jnp.int32           # Number of octree levels in prefix table
 
     # Morton parameters
@@ -208,19 +209,21 @@ def position_to_leaf_id_octree(
     mesh_gpu: MeshGPUGlobalMorton
 ) -> jnp.int32:
     """
-    Map position to leaf ID using octree prefix table (O(1) lookup).
+    Map position to leaf ID using octree prefix table with range search.
 
-    This is the CORRECT implementation using adaptive octree leaves.
-    Each leaf aligns with a spatial octant (Morton prefix).
+    Since multiple leaves at depth D+1 can share the same prefix at depth D,
+    the prefix table stores a range of leaves. We then search within that
+    range to find the exact leaf containing the position.
 
     Algorithm:
     1. Compute Morton code for position
     2. Extract prefix bits (top table_depth * 3 bits)
-    3. Lookup prefix in prefix_table → leaf_id
+    3. Get leaf range from prefix_start[prefix] and prefix_length[prefix]
+    4. Search within range for leaf containing this Morton code
 
     Args:
         pos: (3,) float32 - query position
-        mesh_gpu: GPU-resident Morton structure with prefix_table
+        mesh_gpu: GPU-resident Morton structure with prefix_start/prefix_length
 
     Returns:
         leaf_id: int32 in range [0, n_leaves - 1]
@@ -234,10 +237,7 @@ def position_to_leaf_id_octree(
     )
 
     # 2. Extract prefix bits (top table_depth * 3 bits)
-    # Morton codes are 63 bits total (21 bits per dimension * 3)
-    # We want the top table_depth levels (3 bits per level)
-    # IMPORTANT: Ensure all operations are integer types
-    table_depth_int = int(mesh_gpu.table_depth)  # Convert to Python int
+    table_depth_int = int(mesh_gpu.table_depth)
     prefix_bits_int = table_depth_int * 3
     shift_amount = 63 - prefix_bits_int
 
@@ -245,14 +245,39 @@ def position_to_leaf_id_octree(
     prefix = lax.shift_right_logical(m, jnp.uint64(shift_amount))
     prefix = prefix.astype(jnp.int32)
 
-    # 3. Lookup prefix in table
-    # Handle out-of-bounds (shouldn't happen, but safety)
-    prefix = jnp.clip(prefix, 0, mesh_gpu.prefix_table.shape[0] - 1)
-    leaf_id = mesh_gpu.prefix_table[prefix]
+    # 3. Get leaf range from prefix table
+    prefix = jnp.clip(prefix, 0, mesh_gpu.prefix_start.shape[0] - 1)
+    first_leaf = mesh_gpu.prefix_start[prefix]
+    num_leaves = mesh_gpu.prefix_length[prefix]
 
-    # Handle invalid leaf_id (shouldn't happen with proper table)
-    leaf_id = jnp.where(leaf_id >= 0, leaf_id, jnp.int32(0))
-    leaf_id = jnp.clip(leaf_id, 0, mesh_gpu.n_leaves - 1)
+    # 4. Search within leaf range for exact match
+    # If only one leaf, return it directly
+    # If multiple leaves, find which one contains this Morton code
+    def check_leaf(leaf_idx):
+        """Check if Morton code m is in this leaf's range."""
+        start_idx = mesh_gpu.leaf_start[leaf_idx]
+        length = mesh_gpu.leaf_length[leaf_idx]
+
+        # Check if m is in [morton_sorted[start], morton_sorted[start+length-1]]
+        morton_first = mesh_gpu.morton_sorted[start_idx]
+        morton_last = mesh_gpu.morton_sorted[start_idx + jnp.maximum(length - 1, 0)]
+
+        return (m >= morton_first) & (m <= morton_last)
+
+    # Linear search through candidate leaves (usually ≤8 leaves)
+    best_leaf = first_leaf
+
+    # Unroll loop for JAX (max 8 iterations for depth-7 leaves sharing depth-6 prefix)
+    for offset in range(8):
+        leaf_idx = first_leaf + offset
+        # Only check if within valid range
+        is_valid = (offset < num_leaves) & (leaf_idx < mesh_gpu.n_leaves)
+        matches = is_valid & check_leaf(leaf_idx)
+        # Update best_leaf if this one matches
+        best_leaf = jnp.where(matches, leaf_idx, best_leaf)
+
+    # Safety clipping
+    leaf_id = jnp.clip(best_leaf, 0, mesh_gpu.n_leaves - 1)
 
     return leaf_id
 
@@ -589,23 +614,25 @@ def upload_global_morton_to_gpu(
         morton_struct: GlobalMortonStructure from CPU preprocessing
             Must have: elem_ids_sorted, morton_sorted, leaf_start, leaf_length,
                       bbox_min, bbox_max, max_depth, leaf_capacity, n_leaves
-            Optional (for octree): prefix_table, table_depth
+            Optional (for octree): prefix_start, prefix_length, table_depth
         connectivity: (n_elements, 4) int32 - mesh connectivity
         node_positions: (n_nodes, 3) float32 - node coordinates
 
     Returns:
         MeshGPUGlobalMorton with all data on GPU
     """
-    # Check if octree structure (has prefix_table)
-    has_prefix_table = hasattr(morton_struct, 'prefix_table') and morton_struct.prefix_table is not None
+    # Check if octree structure (has prefix_start/prefix_length)
+    has_prefix_table = hasattr(morton_struct, 'prefix_start') and morton_struct.prefix_start is not None
 
-    # Create prefix_table arrays (use dummy if not available)
+    # Create prefix table arrays (use dummy if not available)
     if has_prefix_table:
-        prefix_table_gpu = jax.device_put(morton_struct.prefix_table.astype(np.int32))
+        prefix_start_gpu = jax.device_put(morton_struct.prefix_start.astype(np.int32))
+        prefix_length_gpu = jax.device_put(morton_struct.prefix_length.astype(np.int32))
         table_depth_val = jnp.int32(morton_struct.table_depth)
     else:
         # Dummy prefix table for backward compatibility
-        prefix_table_gpu = jax.device_put(np.array([0], dtype=np.int32))
+        prefix_start_gpu = jax.device_put(np.array([0], dtype=np.int32))
+        prefix_length_gpu = jax.device_put(np.array([0], dtype=np.int32))
         table_depth_val = jnp.int32(0)
 
     return MeshGPUGlobalMorton(
@@ -619,8 +646,9 @@ def upload_global_morton_to_gpu(
         leaf_start=jax.device_put(morton_struct.leaf_start.astype(np.int32)),
         leaf_length=jax.device_put(morton_struct.leaf_length.astype(np.int32)),
 
-        # Octree prefix table (NEW)
-        prefix_table=prefix_table_gpu,
+        # Octree prefix table (NEW - Phase 5)
+        prefix_start=prefix_start_gpu,
+        prefix_length=prefix_length_gpu,
         table_depth=table_depth_val,
 
         # Morton parameters

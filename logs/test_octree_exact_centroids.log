@@ -1,0 +1,129 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+OCTREE SEARCH TEST - EXACT CENTROIDS (NO PERTURBATION)
+================================================================================
+
+Loading mesh: threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded: 900,671 nodes, 3,512,384 elements
+
+Loading LEVEL field...
+✓ Loaded LEVEL field
+
+Computing element centroids...
+✓ Computed 3,512,384 centroids
+
+Building octree...
+✓ Built octree (3.32 s)
+  Filtered elements: 3,512,384/3,512,384
+  Total nodes: 240,227
+  Max depth: 8
+
+✓ Uploaded octree to GPU
+
+================================================================================
+TEST: Particles at EXACT element centroids
+================================================================================
+
+Generated 50,000 particles at EXACT centroids
+  Perturbation: ZERO (exact centroids)
+
+Warming up JIT...
+✓ JIT warm-up complete
+
+Running octree search...
+✓ Search complete (0.7784 s)
+  Throughput: 64,235.4 p/s
+
+================================================================================
+RESULTS
+================================================================================
+
+Particles tested: 50,000
+Particles found: 50,000/50,000 (100.00%)
+Correct assignments: 3,013/50,000 (6.03%)
+
+Accuracy (of found): 3013/50000 (6.03%)
+
+✗ FAIL: Particles at exact centroids should be found in correct elements!
+
+This confirms the hypothesis:
+  Elements are assigned to octree leaves based on their CENTROIDS,
+  but particles (even at exact centroids) navigate to different leaves!
+
+ROOT CAUSE:
+  An element may EXTEND into multiple octants, but is only stored in
+  ONE octant (based on centroid). Particles inside the element but in
+  different octants won't find it.
+
+================================================================================
+FIRST 10 MISMATCHES
+================================================================================
+
+Particle 0:
+  Position (exact centroid): [ 0.00050781  0.00151736 -0.00332031]
+  True element ID: 606482
+  Found element ID: 606231
+
+Particle 1:
+  Position (exact centroid): [-0.00488281 -0.00185677 -0.00033203]
+  True element ID: 2923897
+  Found element ID: 2920497
+
+Particle 2:
+  Position (exact centroid): [-0.00347656 -0.00205643 -0.00271484]
+  True element ID: 2834900
+  Found element ID: 2833740
+
+Particle 3:
+  Position (exact centroid): [-0.00441406 -0.00121788 -0.00033203]
+  True element ID: 2902207
+  Found element ID: 2901991
+
+Particle 4:
+  Position (exact centroid): [ 0.00337891  0.00089844 -0.00410156]
+  True element ID: 432571
+  Found element ID: 427086
+
+Particle 5:
+  Position (exact centroid): [-0.00189453 -0.00289497 -0.00105469]
+  True element ID: 3058274
+  Found element ID: 3024587
+
+Particle 6:
+  Position (exact centroid): [ 0.00464844 -0.00133768 -0.00013672]
+  True element ID: 1802065
+  Found element ID: 1801758
+
+Particle 7:
+  Position (exact centroid): [-0.00349609  0.00281511 -0.00089844]
+  True element ID: 334308
+  Found element ID: 299175
+
+Particle 8:
+  Position (exact centroid): [-0.00410156  0.00455209 -0.00074219]
+  True element ID: 8700
+  Found element ID: 1720
+
+Particle 10:
+  Position (exact centroid): [-0.00025391  0.00347396 -0.00052734]
+  True element ID: 121288
+  Found element ID: 120582
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The centroid-based octree assignment is FUNDAMENTALLY FLAWED for
+tetrahedral meshes where elements can span multiple octants.
+
+SOLUTION:
+  Assign elements to ALL octree leaves they intersect (bounding-box based),
+  not just the leaf containing their centroid.
+

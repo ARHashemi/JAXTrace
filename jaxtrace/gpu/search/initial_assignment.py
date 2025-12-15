@@ -372,7 +372,8 @@ def initial_search_batch(
     processed = 0
 
     # Batch size to avoid OOM (tune based on GPU memory)
-    BATCH_SIZE = 1000  # Process 1000 particles at a time
+    # Reduced from 1000 to 250 for 4GB GPU with octree loaded
+    BATCH_SIZE = 250  # Process 250 particles at a time
 
     for block_id, particle_indices in particles_per_block.items():
         n_in_block = len(particle_indices)
@@ -380,10 +381,10 @@ def initial_search_batch(
 
         # Get block data
         if is_heavy and hash_bucket_data and block_id in hash_bucket_data:
-            # L2b: Heavy block with hash buckets
+            # L2b: Heavy block with hash buckets (CSR)
             hash_arrays = hash_bucket_data[block_id]
-            bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
-            bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
+            hash_bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
+            hash_bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
             bucket_neighbors_jax = jnp.array(hash_arrays.bucket_neighbors_6, dtype=jnp.int32)
             block_bounds_jax = jnp.array(hash_arrays.block_bounds, dtype=jnp.float32)
         else:
@@ -401,13 +402,13 @@ def initial_search_batch(
 
             # L2: Search within primary block (vectorized over batch)
             if is_heavy and hash_bucket_data and block_id in hash_bucket_data:
-                # Vectorize hash bucket search over batch
+                # L2b: Heavy block with hash bucket search
                 search_hash_vmap = jax.vmap(
                     lambda pos: search_level2b_hash_bucket(
                         pos,
                         block_id,
-                        bucket_elements_jax,
-                        bucket_counts_jax,
+                        hash_bucket_elements_jax,
+                        hash_bucket_counts_jax,
                         bucket_neighbors_jax,
                         hash_arrays.n_buckets,
                         hash_arrays.morton_bits,
@@ -500,18 +501,18 @@ def initial_search_batch(
                 is_heavy = neighbor_id in block_classification.heavy_blocks
 
                 if is_heavy and hash_bucket_data and neighbor_id in hash_bucket_data:
-                    # L2b: Heavy block search
+                    # L2b: Heavy block hash bucket search
                     hash_arrays = hash_bucket_data[neighbor_id]
-                    bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
-                    bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
+                    hash_bucket_elements_jax = jnp.array(hash_arrays.bucket_elements, dtype=jnp.int32)
+                    hash_bucket_counts_jax = jnp.array(hash_arrays.bucket_elem_counts, dtype=jnp.int32)
                     bucket_neighbors_jax = jnp.array(hash_arrays.bucket_neighbors_6, dtype=jnp.int32)
                     block_bounds_jax = jnp.array(hash_arrays.block_bounds, dtype=jnp.float32)
 
                     elem_id = search_level2b_hash_bucket(
                         pos_jax,
                         neighbor_id,
-                        bucket_elements_jax,
-                        bucket_counts_jax,
+                        hash_bucket_elements_jax,
+                        hash_bucket_counts_jax,
                         bucket_neighbors_jax,
                         hash_arrays.n_buckets,
                         hash_arrays.morton_bits,

@@ -1,0 +1,11 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 22, in <module>
+    from jaxtrace.gpu.tracking.rk4_scenario2 import rk4_step_scenario2
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_scenario2.py", line 79, in <module>
+    @jax.jit(static_argnames=['n_hops'])
+     ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: jit() missing 1 required positional argument: 'fun'

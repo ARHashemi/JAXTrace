@@ -1,0 +1,31 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+RK4 SCENARIO #2 VALIDATION TEST
+================================================================================
+
+This test validates the true Scenario #2 architecture:
+  ✓ Separate GPU-parallelized functions for each level
+  ✓ Explicit residual filtering between levels
+  ✓ No monolithic JIT wrapping everything
+  ✓ No nested JIT/vmap/scan
+================================================================================
+Loading test data...
+================================================================================
+Loading mesh from: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 305, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 272, in main
+    mesh_dict, mesh_gpu, octree_metadata_gpu, octree_elements_gpu, velocity_field_gpu, node_positions, connectivity = load_test_data()
+                                                                                                                      ~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 46, in load_test_data
+    mesh_dict = load_mesh_from_pvtu(mesh_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/mesh_loader.py", line 46, in load_mesh_from_pvtu
+    if mesh_path.is_dir():
+       ^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'is_dir'

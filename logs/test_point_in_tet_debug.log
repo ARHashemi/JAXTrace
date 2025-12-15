@@ -1,0 +1,69 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+POINT-IN-TET DEBUG TEST
+================================================================================
+
+Loading mesh: threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded: 900,671 nodes, 3,512,384 elements
+
+Computing element centroids...
+✓ Computed 1,000 centroids
+
+================================================================================
+TEST 1: Centroid Inside Own Element (No Perturbation)
+================================================================================
+
+First element check:
+  Centroid shape: (3,)
+  node_ids: [13023   387 13269   265]
+  node_ids shape: (4,)
+  tet_nodes shape: (4, 3)
+
+Element 0: inside = True
+Element 1: inside = True
+Element 2: inside = True
+Element 3: inside = True
+Element 4: inside = True
+
+RESULTS:
+  Tested: 1000 centroids
+  Inside own element: 1000/1000 (100.0%)
+
+✓ PASS: Point-in-tet works correctly for centroids
+
+================================================================================
+TEST 2: Centroid + Small Perturbation (1% of min edge)
+================================================================================
+
+Minimum edge length: 3.124997e-04
+Perturbation scale: 3.124997e-06 (1%)
+
+Element 0: inside = True (perturbation = 3.263818e-06)
+Element 1: inside = True (perturbation = 3.102393e-06)
+Element 2: inside = True (perturbation = 3.642193e-06)
+Element 3: inside = True (perturbation = 4.392589e-06)
+Element 4: inside = True (perturbation = 3.391751e-06)
+
+RESULTS:
+  Tested: 100 perturbed centroids
+  Still inside own element: 100/100 (100%)
+
+✓ EXCELLENT: All perturbed particles stayed inside
+
+================================================================================
+SUMMARY
+================================================================================
+
+1. Exact centroids: 1000/1000 inside (100.0%)
+2. Perturbed (1%): 100/100 inside (100%)
+
+✓ Point-in-tet algorithm is CORRECT
+  Issue must be elsewhere (octree traversal, element ID mapping, etc.)
+

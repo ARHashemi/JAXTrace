@@ -1,0 +1,45 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+SIMPLE OCTREE CORRECTNESS TEST
+================================================================================
+
+Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_12.pvtu
+  Nodes: 898,502
+  Elements: 3,494,800
+  Loaded field 'Displacement': (898502, 3)
+✓ Mesh loaded (5.33 s)
+  Elements: 3,494,800
+  Nodes: 898,502
+
+Bounding box:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+Creating block grid...
+✓ Block grid created (0.04 s): 4096 blocks
+Assigning elements to blocks...
+✓ Element assignment (14.68 s)
+  Blocks used: 1760/4096
+  Elements per block: 1 - 81425
+Building element neighbors...
+✓ Element neighbors built (56.83 s)
+
+Building padded arrays...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_simple.py", line 98, in <module>
+    padded_arrays = build_padded_block_arrays(
+        element_to_block,
+    ...<4 lines>...
+        verbose=False
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/forest/padded_arrays.py", line 188, in build_padded_block_arrays
+    padded_node_positions = np.tile(node_positions, (n_blocks, 1, 1)).astype(np.float32)
+                            ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py", line 1299, in tile
+    c = c.reshape(-1, n).repeat(nrep, 0)
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 82.3 GiB for an array with shape (4096, 2695506) and data type float64

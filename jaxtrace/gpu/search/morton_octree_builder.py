@@ -235,21 +235,18 @@ def build_adaptive_octree_leaves(
 def build_prefix_table(
     leaves: List[OctreeLeaf],
     max_depth: int = 21
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray, int]:
     """
-    Build prefix→leaf_id lookup table for O(1) position→leaf mapping.
+    Build prefix→leaf_range lookup table for position→leaf mapping.
 
-    Strategy:
-    Since full table of 8^21 entries is too large, we use a two-level approach:
-    1. Determine minimum common depth D where all leaves have unique D-bit prefixes
-    2. Create table of size 8^D mapping D-bit prefixes to leaf_id
-    3. For GPU lookup: extract D-bit prefix from Morton code → table[prefix]
+    Since leaves at depth D+1 share prefixes at depth D, the table stores:
+    - prefix_start[prefix]: First leaf with this prefix
+    - prefix_length[prefix]: Number of consecutive leaves with this prefix
 
-    Alternative (if 8^D still too large):
-    - Use hash table (prefix → leaf_id)
-    - Or binary search in sorted prefix list
-
-    For now, implement direct table at depth where table size is reasonable (≤1M entries).
+    Query lookup becomes:
+    1. Extract prefix from Morton code
+    2. Get leaf range: [prefix_start[p], prefix_start[p] + prefix_length[p])
+    3. Search within range for correct leaf (usually 1-8 leaves)
 
     Parameters
     ----------
@@ -260,30 +257,33 @@ def build_prefix_table(
 
     Returns
     -------
-    prefix_table : np.ndarray or Dict
-        Lookup structure for prefix→leaf_id
-        If direct table: shape (8^D,), dtype int32
-        If hash table: dict mapping prefix→leaf_id
+    prefix_start : np.ndarray
+        Start index of first leaf for each prefix, shape (8^D,), dtype int32
+    prefix_length : np.ndarray
+        Number of leaves for each prefix, shape (8^D,), dtype int32
     table_depth : int
-        Number of bits used in prefix table
+        Number of octree levels in prefix table
     """
     # Find maximum prefix_bits among all leaves (deepest level)
     max_prefix_bits = max(leaf.prefix_bits for leaf in leaves)
 
-    # Determine table depth: use minimum depth where all leaves distinguishable
-    # Start from max_prefix_bits and reduce until table size reasonable
+    # Determine table depth: use minimum depth where table size reasonable
     for table_depth_bits in range(max_prefix_bits, 2, -3):  # Step by 3 (one octree level)
         table_size = 8 ** (table_depth_bits // 3)
-        if table_size <= 1_000_000:  # 1M entries ≈ 4 MB for int32
+        if table_size <= 1_000_000:  # 1M entries ≈ 8 MB for two int32 arrays
             break
 
     table_depth = table_depth_bits // 3
     table_size = 8 ** table_depth
 
-    # Create prefix table (initialize to -1 = invalid)
-    prefix_table = np.full(table_size, -1, dtype=np.int32)
+    # Create prefix tables (initialize to 0)
+    prefix_start = np.full(table_size, -1, dtype=np.int32)
+    prefix_length = np.zeros(table_size, dtype=np.int32)
 
-    # Fill table: for each leaf, set all prefixes that map to this leaf
+    # Track which prefixes have been seen
+    prefix_to_leaves = {}  # prefix → list of leaf_ids
+
+    # Collect all leaf_ids that map to each prefix
     for leaf_id, leaf in enumerate(leaves):
         leaf_depth = leaf.prefix_bits // 3
 
@@ -291,18 +291,28 @@ def build_prefix_table(
             # Leaf is at or deeper than table depth: extract table_depth-bit prefix
             shift = leaf.prefix_bits - (table_depth * 3)
             prefix = leaf.morton_prefix >> shift
-            prefix_table[prefix] = leaf_id
+
+            if prefix not in prefix_to_leaves:
+                prefix_to_leaves[prefix] = []
+            prefix_to_leaves[prefix].append(leaf_id)
         else:
             # Leaf is shallower than table depth: fill all descendant prefixes
-            # Example: leaf at depth 2 (prefix=0b101) with table_depth=4
-            # Fill prefixes: 0b101000, 0b101001, ..., 0b101111 (all 64 descendants)
             n_descendants = 8 ** (table_depth - leaf_depth)
             base_prefix = leaf.morton_prefix << ((table_depth - leaf_depth) * 3)
             for i in range(n_descendants):
                 prefix = base_prefix + i
-                prefix_table[prefix] = leaf_id
+                if prefix not in prefix_to_leaves:
+                    prefix_to_leaves[prefix] = []
+                prefix_to_leaves[prefix].append(leaf_id)
 
-    return prefix_table, table_depth
+    # Fill prefix tables
+    for prefix, leaf_ids in prefix_to_leaves.items():
+        # Leaves should be consecutive in the leaf list
+        leaf_ids_sorted = sorted(leaf_ids)
+        prefix_start[prefix] = leaf_ids_sorted[0]
+        prefix_length[prefix] = len(leaf_ids_sorted)
+
+    return prefix_start, prefix_length, table_depth
 
 
 def convert_leaves_to_arrays(
@@ -368,7 +378,8 @@ def build_global_morton_octree(
         - morton_sorted: (n_elements,) uint64
         - leaf_start: (n_leaves,) int32
         - leaf_length: (n_leaves,) int32
-        - prefix_table: (8^D,) int32 (prefix→leaf_id)
+        - prefix_start: (8^D,) int32 (prefix→first leaf_id)
+        - prefix_length: (8^D,) int32 (prefix→number of leaves)
         - table_depth: int (number of octree levels in prefix table)
         - n_leaves: int
         - bbox_min, bbox_max: (3,) float32
@@ -457,11 +468,16 @@ def build_global_morton_octree(
     if verbose:
         print(f"[5/5] Building prefix table...")
 
-    prefix_table, table_depth = build_prefix_table(leaves, max_depth)
+    prefix_start, prefix_length, table_depth = build_prefix_table(leaves, max_depth)
 
     if verbose:
-        print(f"  Prefix table: {len(prefix_table):,} entries (depth={table_depth})")
-        print(f"  Memory: prefix_table={prefix_table.nbytes / (1024**2):.1f} MB")
+        print(f"  Prefix table: {len(prefix_start):,} entries (depth={table_depth})")
+        total_mem = (prefix_start.nbytes + prefix_length.nbytes) / (1024**2)
+        print(f"  Memory: {total_mem:.1f} MB (start + length arrays)")
+        # Statistics on prefix collisions
+        n_shared_prefixes = np.sum(prefix_length > 1)
+        max_collision = np.max(prefix_length)
+        print(f"  Prefix sharing: {n_shared_prefixes:,} prefixes map to multiple leaves (max: {max_collision})")
 
     # Convert leaves to arrays
     leaf_start, leaf_length = convert_leaves_to_arrays(leaves)
@@ -472,7 +488,8 @@ def build_global_morton_octree(
         'morton_sorted',
         'leaf_start',
         'leaf_length',
-        'prefix_table',
+        'prefix_start',
+        'prefix_length',
         'table_depth',
         'n_leaves',
         'bbox_min',
@@ -486,7 +503,8 @@ def build_global_morton_octree(
         morton_sorted=morton_sorted,
         leaf_start=leaf_start,
         leaf_length=leaf_length,
-        prefix_table=prefix_table,
+        prefix_start=prefix_start,
+        prefix_length=prefix_length,
         table_depth=table_depth,
         n_leaves=n_leaves,
         bbox_min=bbox_min,

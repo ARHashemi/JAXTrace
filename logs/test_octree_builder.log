@@ -1,0 +1,113 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+OCTREE BUILDER UNIT TEST
+================================================================================
+
+Test 1: Basic octree construction
+--------------------------------------------------------------------------------
+Test data:
+  Elements: 10,000
+  Level range: 0 - 9
+
+Building octree (no level filtering)...
+
+Octree Statistics:
+  Elements (filtered): 10,000
+  Total nodes: 585
+  Branch nodes: 73
+  Leaf nodes: 512
+  Max depth: 3
+  Max leaf size: 100
+  Memory estimate: 0.25 MB
+  Bounding box:
+    Min: [-0.009951, -0.009987, -0.009966]
+    Max: [1.009924, 1.009900, 1.009670]
+
+✅ Test 1 PASSED: Basic construction works
+
+================================================================================
+Test 2: Level-based filtering
+--------------------------------------------------------------------------------
+Filtering elements with level >= 7...
+
+Expected filtered count: 3,031
+Actual filtered count: 3,031
+
+Octree Statistics:
+  Elements (filtered): 3,031
+  Total nodes: 73
+  Branch nodes: 9
+  Leaf nodes: 64
+  Max depth: 2
+  Max leaf size: 100
+  Memory estimate: 0.03 MB
+  Bounding box:
+    Min: [-0.009686, -0.009942, -0.009966]
+    Max: [1.009867, 1.009503, 1.009653]
+
+✅ Test 2 PASSED: Level filtering works
+
+================================================================================
+Test 3: Fixed-size node arrays
+--------------------------------------------------------------------------------
+Flattening octree to GPU-compatible arrays...
+
+Node metadata shape: (73, 15)
+Node elements shape: (73, 100)
+Node metadata dtype: float32
+Node elements dtype: int32
+
+✅ Test 3 PASSED: Array flattening works
+
+================================================================================
+Test 4: Memory estimates
+--------------------------------------------------------------------------------
+Actual memory:
+  Metadata: 0.00 MB
+  Elements: 0.03 MB
+  Total: 0.03 MB
+
+Estimated memory: 0.03 MB
+
+✅ Test 4 PASSED: Memory estimates reasonable
+
+================================================================================
+Test 5: Stress test (300k elements)
+--------------------------------------------------------------------------------
+Generating 300,000 elements...
+Building octree...
+
+Build time: 0.03 s
+
+Octree Statistics:
+  Elements (filtered): 89,759
+  Total nodes: 585
+  Branch nodes: 73
+  Leaf nodes: 512
+  Max depth: 3
+  Max leaf size: 500
+  Memory estimate: 1.15 MB
+  Bounding box:
+    Min: [-0.009972, -0.009994, -0.009985]
+    Max: [1.009983, 1.009976, 1.009993]
+
+✅ Test 5 PASSED: Stress test successful
+
+================================================================================
+SUMMARY
+================================================================================
+
+✅ ALL TESTS PASSED
+
+Octree builder verified:
+  - Basic construction: ✓
+  - Level filtering: ✓
+  - Fixed-size arrays: ✓
+  - Memory estimates: ✓
+  - Stress test (300k elements): ✓
+
+Ready for GPU integration.
+

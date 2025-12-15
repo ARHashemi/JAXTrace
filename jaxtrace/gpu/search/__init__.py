@@ -32,10 +32,15 @@ from .hash_bucket import (
     compute_morton_codes,
     build_hash_bucket_arrays,
 )
+from .hash_bucket_csr import (
+    HashBucketArraysCSR,
+    build_hash_bucket_arrays_csr,
+)
 from .level0_cached import search_level0_cached
 from .level1_neighbors import search_level1_neighbors
 from .level2a_light import search_level2a_light_block
 from .level2b_heavy import search_level2b_hash_bucket
+from .level2b_heavy_csr import search_level2b_hash_bucket_csr
 from .level3_neighbor_blocks import search_level3_neighbor_blocks
 from .multi_level_search import (
     SearchStats,
@@ -71,6 +76,20 @@ from .block_search import (
     create_block_search_kernel,
 )
 
+# Global Morton search (Phase 3A - NEW HOT-like L2)
+from .morton_global_builder import (
+    GlobalMortonStructure,
+    build_global_morton_structure,
+)
+from .morton_global_search import (
+    MeshGPUGlobalMorton,
+    morton_encode_position_jax,
+    morton_encode_positions_batch,
+    position_to_leaf_id_linear,
+    search_L2_global_morton_single,
+    upload_global_morton_to_gpu,
+)
+
 __all__ = [
     # Block classification
     'BlockClassification',
@@ -80,11 +99,15 @@ __all__ = [
     'HashBucketArrays',
     'compute_morton_codes',
     'build_hash_bucket_arrays',
+    # CSR hash buckets (Phase 1)
+    'HashBucketArraysCSR',
+    'build_hash_bucket_arrays_csr',
     # Level search (original)
     'search_level0_cached',
     'search_level1_neighbors',
     'search_level2a_light_block',
     'search_level2b_hash_bucket',
+    'search_level2b_hash_bucket_csr',
     'search_level3_neighbor_blocks',
     # Multi-level search
     'SearchStats',
@@ -110,4 +133,13 @@ __all__ = [
     'compute_morton_code',
     'lookup_hash_bucket',
     'create_block_search_kernel',
+    # Global Morton search (Phase 3A)
+    'GlobalMortonStructure',
+    'build_global_morton_structure',
+    'MeshGPUGlobalMorton',
+    'morton_encode_position_jax',
+    'morton_encode_positions_batch',
+    'position_to_leaf_id_linear',
+    'search_L2_global_morton_single',
+    'upload_global_morton_to_gpu',
 ]

@@ -1,0 +1,114 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+RK4 SCENARIO #2 VALIDATION TEST
+================================================================================
+
+This test validates the true Scenario #2 architecture:
+  ✓ Separate GPU-parallelized functions for each level
+  ✓ Explicit residual filtering between levels
+  ✓ No monolithic JIT wrapping everything
+  ✓ No nested JIT/vmap/scan
+================================================================================
+Loading test data...
+================================================================================
+Loading mesh from: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded mesh: 900,671 nodes, 3,512,384 elements
+  Time: 5.31 s
+✓ Element neighbors built (57.80 s)
+Uploading mesh to GPU...
+  Elements: 3,512,384
+  Nodes: 900,671
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.59 MB
+  Node positions: 10.31 MB
+  Element neighbors: 53.59 MB
+  Total: 117.50 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 117.50 MB GPU memory (0% waste)
+    Memory reduction: 55.3× smaller
+✓ Uploaded mesh to GPU
+  Time: 0.11 s
+Uploading velocity field to GPU...
+✓ Velocity field uploaded to GPU: (900671, 3)
+
+Loading LEVEL field from mesh...
+✓ Found LEVEL in point data
+✓ Computed element levelset: 3,512,384 elements
+
+Building octree...
+✓ Built octree (16.94 s)
+  Filtered elements: 3,512,384/3,512,384
+  Total nodes: 240,227
+  Max depth: 8
+✓ Octree uploaded to GPU
+
+================================================================================
+Creating 1,000 test particles...
+================================================================================
+✓ Created 1,000 particles
+  Position range: x=[-0.0300, -0.0240]
+  Position range: y=[-0.0230, 0.0230]
+  Position range: z=[-0.0100, 0.0000]
+
+================================================================================
+Testing Scenario #2: Single RK4 Step
+================================================================================
+
+Configuration:
+  dt = 0.0025
+  n_hops = 3
+  max_octree_depth = 15
+  n_particles = 1,000
+
+Running RK4 step (Scenario #2)...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 327, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 300, in main
+    particle_data_updated, stats = test_scenario2_single_step(
+                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        particle_data,
+        ^^^^^^^^^^^^^^
+    ...<6 lines>...
+        max_octree_depth=15
+        ^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_rk4_scenario2.py", line 225, in test_scenario2_single_step
+    particle_data_updated, stats = rk4_step_scenario2(
+                                   ~~~~~~~~~~~~~~~~~~^
+        particle_data,
+        ^^^^^^^^^^^^^^
+    ...<7 lines>...
+        current_time=0.0
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_scenario2.py", line 482, in rk4_step_scenario2
+    elem_ids_k1_l1_raw = search_L1_batch(
+        positions_k1,
+    ...<4 lines>...
+        n_hops
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_scenario2.py", line 191, in search_L1_batch
+    return jax.vmap(search_single_particle)(positions, cached_element_ids)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_scenario2.py", line 145, in search_single_particle
+    if n_hops >= 2:
+       ^^^^^^^^^^^
+jax.errors.TracerBoolConversionError: Attempted boolean conversion of traced array with shape bool[].
+The error occurred while tracing the function search_L1_batch at /home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_scenario2.py:79 for jit. This concrete value was not available in Python because it depends on the value of the argument n_hops.
+See https://docs.jax.dev/en/latest/errors.html#jax.errors.TracerBoolConversionError
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

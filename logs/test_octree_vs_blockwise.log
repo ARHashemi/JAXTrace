@@ -1,0 +1,164 @@
+test_octree_vs_blockwise_initialization.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+
+================================================================================
+OCTREE vs BLOCKWISE INITIALIZATION COMPARISON TEST
+================================================================================
+
+Configuration:
+  Mesh: threadedAvtk_120.pvtu
+  Grid size: (8, 8, 4)
+  Octree max depth: 15
+  Octree max leaf size: 50
+  Octree level threshold: 1.1
+  Number of particles: 50,000
+
+================================================================================
+LOADING MESH AND INITIALIZING STRUCTURES
+================================================================================
+
+Loading mesh from: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Loaded mesh: 900,671 nodes, 3,512,384 elements
+  Time: 5.60 s
+
+Building element neighbors...
+✓ Element neighbors built (58.09 s)
+
+--------------------------------------------------------------------------------
+INITIALIZING OCTREE
+--------------------------------------------------------------------------------
+
+Loading LEVEL field from mesh...
+✓ Found LEVEL in point data
+✓ Computed element levelset: 3,512,384 elements
+
+Computing element centroids...
+✓ Computed 3,512,384 centroids
+
+Building octree (max_depth=15, max_leaf_size=50)...
+✓ Built octree (5.19 s)
+  Filtered elements: 3,512,384/3,512,384
+  Total nodes: 240,227
+  Max depth: 8
+
+Uploading octree to GPU...
+✓ Octree uploaded to GPU
+
+--------------------------------------------------------------------------------
+INITIALIZING BLOCKWISE STRUCTURE
+--------------------------------------------------------------------------------
+
+Creating regular grid (8, 8, 4)...
+✓ Created 8×8×4 grid (0.00 s)
+  Total blocks: 256
+
+Assigning elements to blocks...
+✓ Element assignment (7.39 s)
+  Blocks used: 256/256
+  Elements per block: 2 - 450004
+
+Building padded block arrays...
+✓ Built padded arrays (6.00 s)
+  Shape: (256, 450004)
+  Memory: 6593.80 MB
+
+Classifying blocks...
+✓ Classified blocks (0.00 s)
+  Light blocks: 240
+  Heavy blocks: 16
+
+Building block 26-connectivity...
+✓ Built 26-connectivity (0.00 s)
+
+Building hash buckets...
+✓ Built hash buckets (1.57 s)
+  Heavy blocks processed: 16
+
+--------------------------------------------------------------------------------
+UPLOADING MESH TO GPU
+--------------------------------------------------------------------------------
+
+Uploading mesh to GPU...
+  Elements: 3,512,384
+  Nodes: 900,671
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.59 MB
+  Node positions: 10.31 MB
+  Element neighbors: 53.59 MB
+  Total: 117.50 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 117.50 MB GPU memory (0% waste)
+    Memory reduction: 55.3× smaller
+✓ Uploaded mesh to GPU (0.03 s)
+
+================================================================================
+GENERATING 50,000 TEST PARTICLES
+================================================================================
+
+Computing minimum element size...
+✓ Minimum element size: 3.124997e-04
+✓ Perturbation scale: 3.124997e-06 (1% of min size)
+
+Placing particles at element centroids with perturbations...
+✓ Generated 50,000 particles
+  Position shape: (50000, 3)
+  True element IDs shape: (50000,)
+
+================================================================================
+TESTING OCTREE SEARCH
+================================================================================
+
+Uploading particle positions to GPU...
+✓ Uploaded 50,000 particle positions
+
+Warming up JIT compilation...
+✓ JIT compilation complete
+
+Running octree search...
+✓ Octree search complete
+  Time: 0.4823 s
+  Throughput: 103,668.5 p/s
+
+OCTREE RESULTS:
+  Found: 39392/50000 (78.78%)
+  Correct: 12/50000 (0.02%)
+  Mismatches: 39380
+
+================================================================================
+TESTING BLOCKWISE SEARCH
+================================================================================
+
+Running blockwise search...
+✓ Blockwise search complete
+  Time: 1697.2218 s
+  Throughput: 29.5 p/s
+
+BLOCKWISE RESULTS:
+  Found: 263/50000 (0.53%)
+  Correct: 263/50000 (0.53%)
+  Mismatches: 0
+
+SEARCH STATISTICS:
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 709, in <module>
+    main()
+    ~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 630, in main
+    blockwise_results = test_blockwise_search(
+        particle_positions,
+    ...<8 lines>...
+        true_element_ids
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_vs_blockwise_initialization.py", line 561, in test_blockwise_search
+    for key, value in search_stats.items():
+                      ^^^^^^^^^^^^^^^^^^
+AttributeError: 'InitialSearchStats' object has no attribute 'items'

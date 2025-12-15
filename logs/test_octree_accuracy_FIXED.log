@@ -1,0 +1,81 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Octree Accuracy Validation - Adaptive Octree vs Fixed-Capacity
+================================================================================
+Test particles: 100,000
+L2 search radius: 1
+Perturbation scale: 1.0× minimum element size
+Expected improvement: 12.7% → >95% for centroids
+================================================================================
+
+[1/6] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)
+  Mesh: 3,512,279 elements, 900,658 nodes
+  Load time: 5.45s
+
+[2/6] Building adaptive octree structure (CPU)...
+  Built 9,386,149 octree leaves in 90.42s
+  Table depth: 6
+  Memory: 1.0 MB
+
+[3/6] Uploading mesh and octree structure to GPU...
+  Upload time: 0.19s
+
+[4/6] Computing element sizes...
+  Element sizes computed in 48.68s
+  Min element size: 0.000099
+  Max element size: 0.006701
+  Mean element size: 0.000122
+  Perturbation magnitude: 0.000099
+
+[5/6] Test 1: Centroid-based accuracy (octree leaves)...
+  Computing centroids for 100,000 elements...
+  Running L2 search on centroids (radius=1)...
+
+  Results (Centroid-based, Octree):
+    Success rate: 0.00% (0/100000)
+    Correctness rate: 0.00% (0/0)
+    Search time: 2056.71 ms
+    Throughput: 48621 searches/s
+
+[6/6] Test 2: Perturbed accuracy (octree)...
+  Running L2 search on perturbed positions...
+
+  Results (Perturbed, Octree):
+    Success rate: 0.00% (0/100000)
+    Correctness rate: 0.00% (0/0)
+    Search time: 767.48 ms
+    Throughput: 130297 searches/s
+
+================================================================================
+OCTREE ACCURACY VALIDATION SUMMARY
+================================================================================
+
+Adaptive Octree Results:
+  Centroid test: 0.00% success, 0.00% correct
+  Perturbed test: 0.00% success, 0.00% correct
+  Search radius: 1
+
+Comparison with Fixed-Capacity (from previous test):
+  OLD (Fixed, radius=4): 12.75% centroid, 16.54% perturbed
+  NEW (Octree, radius=1): 0.00% centroid, 0.00% perturbed
+  Improvement: -12.75% (centroid)
+
+================================================================================
+VALIDATION CRITERIA
+================================================================================
+❌ Centroid test: 0.0% success, 0.0% correct (<95% target)
+⚠️  Perturbed test: 0.0% success, 0.0% correct (<80% target)
+✅ Search radius: 1 (much lower than fixed-capacity's 4)
+✅ Octree leaves: 9,386,149 (spatially coherent)
+================================================================================
+
+❌ OCTREE ACCURACY VALIDATION FAILED
+   Centroid accuracy below 95% threshold.
+================================================================================

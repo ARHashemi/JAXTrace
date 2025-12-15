@@ -1,0 +1,65 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Octree Accuracy Validation - Adaptive Octree vs Fixed-Capacity
+================================================================================
+Test particles: 100,000
+L2 search radius: 1
+Perturbation scale: 1.0× minimum element size
+Expected improvement: 12.7% → >95% for centroids
+================================================================================
+
+[1/6] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)
+  Mesh: 3,512,279 elements, 900,658 nodes
+  Load time: 5.42s
+
+[2/6] Building adaptive octree structure (CPU)...
+  Built 32,168 octree leaves in 13.68s
+  Table depth: 6
+  Memory: 1.0 MB
+
+[3/6] Uploading mesh and octree structure to GPU...
+  Upload time: 0.12s
+
+[4/6] Computing element sizes...
+  Element sizes computed in 49.45s
+  Min element size: 0.000099
+  Max element size: 0.006701
+  Mean element size: 0.000122
+  Perturbation magnitude: 0.000099
+
+[5/6] Test 1: Centroid-based accuracy (octree leaves)...
+  Computing centroids for 100,000 elements...
+  Running L2 search on centroids (radius=1)...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_accuracy.py", line 336, in <module>
+    exit_code = main()
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_accuracy.py", line 189, in main
+    found_elem_ids = jax.vmap(
+        lambda p: search_L2_global_morton_single(p, mesh_gpu_morton, jnp.int32(L2_SEARCH_RADIUS))
+    )(centroids_gpu)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_octree_accuracy.py", line 190, in <lambda>
+    lambda p: search_L2_global_morton_single(p, mesh_gpu_morton, jnp.int32(L2_SEARCH_RADIUS))
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/morton_global_search.py", line 511, in search_L2_global_morton_single
+    position_to_leaf_id_octree(pos, mesh_gpu),
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/morton_global_search.py", line 241, in position_to_leaf_id_octree
+    prefix = (m >> shift).astype(jnp.int32)
+              ~~^^~~~~~~
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 1141, in op
+    return getattr(self.aval, f"_{name}")(self, *args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 604, in deferring_binary_op
+    return binary_op(*args)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/ufuncs.py", line 2304, in right_shift
+    return lax_fn(x1, x2)
+TypeError: shift_right_arithmetic does not accept dtype float64 at position 0. Accepted dtypes at position 0 are subtypes of integer.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

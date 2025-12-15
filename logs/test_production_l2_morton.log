@@ -1,0 +1,197 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/block_morton_builder.py:112: RuntimeWarning: invalid value encountered in divide
+  normalized = (element_centroids - block_bbox_min) / bbox_size
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/block_morton_builder.py:118: RuntimeWarning: invalid value encountered in cast
+  grid_coords = (normalized * (grid_resolution - 1)).astype(np.int32)
+W1211 10:52:51.588740 2806631 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.46GiB (2647260995 bytes) by rematerialization; only reduced to 4.88TiB (5361545330608 bytes), down from 4.88TiB (5361670451544 bytes) originally
+W1211 10:53:06.038571 2806631 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 4.88TiB (rounded to 5361585965056)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1211 10:53:06.038943 2806631 bfc_allocator.cc:512] *******___________________________________________**********************************************xxxx
+E1211 10:53:06.038976 2806631 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 5361585964968 bytes. [tf-allocator-allocation-error='']
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+PRODUCTION TRACKING: L2 BLOCK MORTON ARCHITECTURE
+================================================================================
+JAX version: 0.8.0
+JAX backend: gpu
+Devices: [CudaDevice(id=0)]
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+Mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+Particle grid: (50, 70, 30) → 105,000 particles
+Timesteps: 2,500, dt: 0.0025 s
+Grid: (8, 8, 4) → 256 blocks
+L2 Morton: max 50 elements/block
+Export: every 10 steps to output/threadeda_3hop_l2_morton
+
+================================================================================
+MESH LOADING
+================================================================================
+
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+✓ Mesh loaded (5.28 s):
+  Nodes: 900,671
+  Elements: 3,512,384
+  Velocity range: [-0.878970, 0.808578] m/s
+
+================================================================================
+BLOCK STRUCTURE
+================================================================================
+
+Domain bbox:
+  X: [-0.0300, 0.0300]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+
+✓ Block grid: 256 blocks (0.00 s)
+✓ Element assignment (7.47 s)
+  Elements/block: 2 - 450004
+✓ Element neighbors (59.53 s)
+
+================================================================================
+L2 BLOCK MORTON CONSTRUCTION
+================================================================================
+
+Building per-block Morton structures...
+  Elements: 3,512,384
+  Blocks: 256
+  Max elements per block: 50
+
+  Computing element centroids...
+  Grouping elements by block...
+  Building Morton structures per block...
+  WARNING: Block 83 has 89 elements, truncated to 50
+  WARNING: Block 84 has 89 elements, truncated to 50
+  WARNING: Block 91 has 2593 elements, truncated to 50
+  WARNING: Block 92 has 1928 elements, truncated to 50
+  WARNING: Block 99 has 3244 elements, truncated to 50
+  WARNING: Block 100 has 2252 elements, truncated to 50
+  WARNING: Block 107 has 103 elements, truncated to 50
+  WARNING: Block 108 has 80 elements, truncated to 50
+  WARNING: Block 146 has 91 elements, truncated to 50
+  WARNING: Block 147 has 219 elements, truncated to 50
+  WARNING: Block 148 has 264 elements, truncated to 50
+  WARNING: Block 154 has 220 elements, truncated to 50
+  WARNING: Block 155 has 255184 elements, truncated to 50
+  WARNING: Block 156 has 281830 elements, truncated to 50
+  WARNING: Block 157 has 66 elements, truncated to 50
+  WARNING: Block 162 has 220 elements, truncated to 50
+  WARNING: Block 163 has 300720 elements, truncated to 50
+  WARNING: Block 164 has 256434 elements, truncated to 50
+  WARNING: Block 165 has 67 elements, truncated to 50
+  WARNING: Block 170 has 216 elements, truncated to 50
+  WARNING: Block 171 has 480 elements, truncated to 50
+  WARNING: Block 172 has 374 elements, truncated to 50
+  WARNING: Block 173 has 54 elements, truncated to 50
+  WARNING: Block 178 has 62 elements, truncated to 50
+  WARNING: Block 179 has 102 elements, truncated to 50
+  WARNING: Block 180 has 85 elements, truncated to 50
+  WARNING: Block 203 has 51 elements, truncated to 50
+  WARNING: Block 204 has 56 elements, truncated to 50
+  WARNING: Block 210 has 286 elements, truncated to 50
+  WARNING: Block 211 has 119393 elements, truncated to 50
+  WARNING: Block 212 has 118219 elements, truncated to 50
+  WARNING: Block 213 has 551 elements, truncated to 50
+  WARNING: Block 218 has 50839 elements, truncated to 50
+  WARNING: Block 219 has 402033 elements, truncated to 50
+  WARNING: Block 220 has 445897 elements, truncated to 50
+  WARNING: Block 221 has 42730 elements, truncated to 50
+  WARNING: Block 226 has 56840 elements, truncated to 50
+  WARNING: Block 227 has 450004 elements, truncated to 50
+  WARNING: Block 228 has 404287 elements, truncated to 50
+  WARNING: Block 229 has 43255 elements, truncated to 50
+  WARNING: Block 234 has 1724 elements, truncated to 50
+  WARNING: Block 235 has 139428 elements, truncated to 50
+  WARNING: Block 236 has 127256 elements, truncated to 50
+  WARNING: Block 237 has 238 elements, truncated to 50
+  WARNING: Block 242 has 62 elements, truncated to 50
+  WARNING: Block 243 has 102 elements, truncated to 50
+  WARNING: Block 244 has 86 elements, truncated to 50
+  ✓ Built 256 block Morton structures
+  Elements per block: min=2, max=450004, avg=13720.2
+  Memory: 0.15 MB
+
+✓ Morton structures built (19.67 s)
+  Memory: 0.15 MB
+  vs Global octree: ~6,500 MB (815× smaller)
+
+================================================================================
+GPU UPLOAD
+================================================================================
+
+Uploading mesh to GPU...
+  Elements: 3,512,384
+  Nodes: 900,671
+✓ Mesh uploaded to GPU:
+  Connectivity: 53.59 MB
+  Node positions: 10.31 MB
+  Element neighbors: 53.59 MB
+  Total: 117.50 MB
+
+  Baseline comparison:
+    Block-wise padded arrays: ~6,500 MB CPU memory (98% waste)
+    Global mesh: 117.50 MB GPU memory (0% waste)
+    Memory reduction: 55.3× smaller
+✓ Velocity field uploaded: (900671, 3)
+✓ Morton structures uploaded to GPU
+✓ Domain bounds uploaded: (6,)
+
+================================================================================
+PARTICLE GENERATION
+================================================================================
+
+Particle region:
+  X: [-0.0240, -0.0120]
+  Y: [-0.0230, 0.0230]
+  Z: [-0.0100, 0.0000]
+✓ Generated 105,000 particles on 50×70×30 grid
+
+================================================================================
+INITIAL ASSIGNMENT
+================================================================================
+
+Finding containing elements...
+✓ Initial assignment (1.77 s):
+  Found: 81602/105000 (77.7%)
+  Throughput: 46207.0 p/s
+
+Active particles: 81,602
+
+================================================================================
+RK4 SETUP
+================================================================================
+
+Creating L2 block Morton RK4 step function...
+✓ Search hierarchy:
+  L0: Cached element check (85-95% hit rate)
+  L1: 3-hop neighbor search (99.9% cumulative)
+  L2: Block Morton search (99.99% cumulative, O(50) bounded)
+
+Warming up JIT compilation...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_3hop_l2_morton.py", line 486, in <module>
+    _, _ = rk4_step_func(warmup_data, velocity_field_gpu, DT, mesh_gpu, 0.0)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_gpu_fused.py", line 1763, in rk4_step_gpu_fused_for_production_with_l2_block_morton_impl
+    positions_final_gpu, element_ids_final_gpu = rk4_fused_with_l2_morton_search(
+                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        positions_gpu,
+        ^^^^^^^^^^^^^^
+    ...<6 lines>...
+        velocity_field_gpu
+        ^^^^^^^^^^^^^^^^^^
+    )
+    ^
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 5361585964968 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
