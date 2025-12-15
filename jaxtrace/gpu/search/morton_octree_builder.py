@@ -413,11 +413,14 @@ def build_global_morton_octree(
     grid_max = (2 ** max_depth) - 1
     u = np.floor(normalized * grid_max).astype(np.uint32)
 
+    # FIX: Cast to uint64 BEFORE bit operations to avoid overflow
+    u = u.astype(np.uint64)
+
     # Interleave bits (vectorized)
     for i in range(21):
-        morton_codes |= ((u[:, 0] >> i) & 1).astype(np.uint64) << (3*i + 0)
-        morton_codes |= ((u[:, 1] >> i) & 1).astype(np.uint64) << (3*i + 1)
-        morton_codes |= ((u[:, 2] >> i) & 1).astype(np.uint64) << (3*i + 2)
+        morton_codes |= ((u[:, 0] >> i) & 1) << (3*i + 0)
+        morton_codes |= ((u[:, 1] >> i) & 1) << (3*i + 1)
+        morton_codes |= ((u[:, 2] >> i) & 1) << (3*i + 2)
 
     # 4. Sort elements by Morton code
     if verbose:
