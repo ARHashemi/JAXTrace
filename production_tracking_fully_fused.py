@@ -469,9 +469,8 @@ def main():
     print("=" * 80)
 
     # Final retention (download final state)
-    positions_final_cpu = np.array(positions_gpu)
-    element_ids_final_cpu = np.array(element_ids_gpu)
-    particle_data_final = ParticleData(positions_final_cpu, element_ids_final_cpu)
+    positions_final_cpu = np.array(positions_gpu, dtype=np.float32)
+    element_ids_final_cpu = np.array(element_ids_gpu, dtype=np.int32)
 
     final_active = np.sum(element_ids_final_cpu >= 0)
     final_retention = (final_active / N_PARTICLES) * 100
