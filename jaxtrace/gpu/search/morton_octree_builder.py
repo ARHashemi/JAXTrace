@@ -400,9 +400,10 @@ def build_global_morton_octree(
         centroid = node_positions[nodes].mean(axis=0)
         centroids[i] = centroid
 
-    # 2. Compute bounding box
-    bbox_min = centroids.min(axis=0).astype(np.float32)
-    bbox_max = centroids.max(axis=0).astype(np.float32)
+    # 2. Compute bounding box FROM NODE POSITIONS (not centroids!)
+    # CRITICAL: Must use node positions to ensure all points in mesh are within bbox
+    bbox_min = node_positions.min(axis=0).astype(np.float32)
+    bbox_max = node_positions.max(axis=0).astype(np.float32)
 
     # Add small epsilon to avoid boundary issues
     epsilon = 1e-6 * (bbox_max - bbox_min)

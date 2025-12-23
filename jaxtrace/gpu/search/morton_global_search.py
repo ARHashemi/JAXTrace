@@ -369,7 +369,10 @@ def point_in_tet_gpu(
     node_positions: jax.Array
 ) -> jnp.bool_:
     """
-    Test if position is inside tetrahedron using barycentric coordinates.
+    Test if position is inside tetrahedron using barycentric coordinates (GPU-optimized).
+
+    Uses Cramer's rule with explicit determinant computation (faster than matrix solve).
+    NOT JIT-decorated to avoid overhead when used within already-JIT-compiled functions.
 
     Returns True if point is inside (all barycentric coords >= 0).
 
@@ -406,8 +409,15 @@ def point_in_tet_gpu(
            v1[1] * (v2[0] * v3[2] - v2[2] * v3[0]) +
            v1[2] * (v2[0] * v3[1] - v2[1] * v3[0]))
 
-    # Handle degenerate tetrahedron
-    is_degenerate = jnp.abs(det) < 1e-12
+    # Handle degenerate tetrahedron with RELATIVE threshold
+    # FIXED: Use relative threshold based on element size
+    # For refined meshes with L~0.0001m: det~L³~1e-12
+    # Absolute threshold 1e-17 was too strict and rejected valid small elements
+    det_abs = jnp.abs(det)
+    edge_length_sq = jnp.sum(v1 * v1)  # Typical edge length squared
+    expected_det = edge_length_sq ** 1.5  # det scales as L³
+    # Use relative threshold: det < ε * L³ where ε = 1e-12
+    is_degenerate = det_abs < 1e-12 * jnp.maximum(expected_det, 1e-15)
 
     # Compute barycentric coordinates
     det_inv = jnp.where(is_degenerate, 1.0, 1.0 / det)
@@ -431,7 +441,7 @@ def point_in_tet_gpu(
     b0 = 1.0 - b1 - b2 - b3
 
     # Check if all barycentric coordinates are non-negative
-    # Use small tolerance for numerical stability
+    # Use small tolerance for numerical stability at boundaries
     tol = -1e-6
     inside = (b0 >= tol) & (b1 >= tol) & (b2 >= tol) & (b3 >= tol) & (~is_degenerate)
 

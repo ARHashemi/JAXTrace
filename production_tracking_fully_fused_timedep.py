@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Production Particle Tracking - Fully-Fused RK4 with Global Morton
+Production Particle Tracking - Fully-Fused RK4 with Time-Dependent Velocity
 
-FULLY-FUSED implementation with:
+TIME-DEPENDENT VELOCITY implementation with:
+- Cyclic velocity sequence (40 timesteps, wraps periodically)
+- All velocity fields pre-loaded on GPU (no per-step transfers)
 - Single vmap over particles (all RK4 stages fused)
 - NO CPU-GPU transfers between timesteps (data stays on GPU)
 - Download ONLY at export frequency (every 10 steps)
@@ -10,14 +12,15 @@ FULLY-FUSED implementation with:
 Target Performance:
 - Initial assignment: >95%
 - Retention at 2,500 steps: >95%
-- Throughput: 60-120K particles/s (2-3× improvement over baseline)
-- Memory: ~40-100 MB (global Morton)
+- Throughput: 50-120K particles/s (minimal overhead vs static velocity)
+- Memory: ~850-900 MB (40 velocity fields + mesh + Morton)
 
 Architecture:
 - L0: Cached element (point-in-tet)
 - L1: Multi-hop neighbors (3 hops, ~84 neighbors)
 - L2: Global Morton search (binary search + bounded leaf scan, radius=2)
 - Fully-fused RK4: All 5 stages + 5 searches + 4 interpolations in ONE vmap
+- Time-dependent: Cyclic indexing into GPU-resident velocity sequence
 """
 
 import os
@@ -37,25 +40,30 @@ from typing import Dict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from jaxtrace.gpu.particles import ParticleData
-from jaxtrace.gpu.mesh_loader import load_mesh_from_pvtu
+from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu, compute_velocity_cycle_params
 from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
-from jaxtrace.gpu.tracking.rk4_fully_fused import create_rk4_fully_fused_global_morton
+from jaxtrace.gpu.tracking.rk4_fully_fused_timedep import create_rk4_fully_fused_timedep
 from jaxtrace.gpu.tracking.initial_assignment_extended import initial_assignment_extended_batch
+from jaxtrace.gpu.tracking.initial_assignment_cascading import initial_assignment_cascading_fallback
 from jaxtrace.tracking.seeding import uniform_grid_seeds
 
 
 # Configuration
-MESH_PATH = "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu"
+MESH_BASE_PATH = Path("/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule")#Path("/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule")
+MESH_FILE_PATTERN = "featurelessAvtk_{timestep}.pvtu"#"threadedAvtk_{timestep}.pvtu"  # Pattern with {timestep} placeholder
+VELOCITY_TIMESTEP_RANGE = (120, 159)  # Load timesteps 120-159 (40 timesteps)
+VELOCITY_FIELD_NAME = 'Displacement'  # Field name in PVTU files (this IS velocity)
+VELOCITY_DT = 0.0025  # Time spacing between velocity snapshots
 
 # Particle Generation (Uniform Grid - from production_tracking_threadeda.py)
-PARTICLE_GRID_RESOLUTION = (50, 70, 30)  # Grid resolution in (x, y, z) = 105,000 particles
+PARTICLE_GRID_RESOLUTION = (20, 80, 30) #(50, 90, 50)  # Grid resolution in (x, y, z) = 105,000 particles
 PARTICLE_BOUNDS_FRACTION = {
-    'x': (0.1, 0.3),  # Use first 20% of domain in X (entrance region)
-    'y': (0.0, 1.0),  # Full domain in Y
-    'z': (0.0, 1.0),  # Full domain in Z
+    'x': (0.2, 0.35),  # Use first 20% of domain in X (entrance region)
+    'y': (0.2, 0.8),  # Full domain in Y
+    'z': (0.3, 1.0),  # Full domain in Z
 }
 # Use grid resolution directly (not dependent on domain size)
 N_X = max(1, int(PARTICLE_GRID_RESOLUTION[0]))
@@ -66,15 +74,33 @@ N_PARTICLES = N_X * N_Y * N_Z
 
 DT = 0.0025
 N_STEPS = 2_500
-N_HOPS = 3
-L2_SEARCH_RADIUS = 2          # L2 search radius during integration
+
+# Search Hierarchy Configuration
+# Neighbor Method Selection:
+#   'face': Elements sharing 3 nodes (tetrahedral face)
+#           - Memory: ~48 MB for 3M elements
+#           - Neighbors: 4 per element (max)
+#           - Works for: Uniform refinement, conforming meshes
+#           - FAILS for: 1:2 octree refinement (coarse/fine share edges, not faces)
+#   'node': Elements sharing ANY node (vertex, edge, or face)
+#           - Memory: ~1.1 GB for 3M elements
+#           - Neighbors: 20-100 per element
+#           - Works for: All mesh types, including 1:2 octree refinement
+#           - Trade-off: Higher memory, slower L1 search, but CORRECT for refined meshes
+NEIGHBOR_METHOD = 'node'       # 'face' or 'node' - Choose based on mesh structure
+
+N_HOPS = 3                     # Number of hops for L1 neighbor search
+L2_SEARCH_RADIUS = 10          # L2 search radius during integration
+ENABLE_L1_SEARCH = True        # Enable L1 neighbor search (set False to test L0→L2 only)
 INITIAL_SEARCH_RADIUS = 50    # Extended radius for initial assignment
+INITIAL_SEARCH_FALLBACK_RADII = [100, 200, 500]  # Fallback radii for cascading initial assignment
+
 SEED = 42
 LOG_INTERVAL = 100
 
 # Export Configuration
 EXPORT_FREQUENCY = 10  # Export every 10 timesteps
-OUTPUT_DIR = Path("./output/global_morton")
+OUTPUT_DIR = Path("./output/global_morton_timedep")
 STORE_VELOCITIES = False  # Store particle velocities in VTK
 
 
@@ -217,27 +243,45 @@ def main():
     print("=" * 80)
 
     # ========================================================================
-    # 1. Load Mesh
+    # 1. Load Mesh and Velocity Sequence
     # ========================================================================
 
-    print("\n[1/5] Loading mesh...")
+    print("\n[1/6] Loading mesh and velocity sequence...")
     t_load = time.time()
-    node_positions, connectivity, velocity_field = load_mesh_from_pvtu(
-        Path(MESH_PATH),
-        field_name='Displacement'
+    node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
+        base_path=MESH_BASE_PATH,
+        file_pattern=MESH_FILE_PATTERN,
+        timestep_range=VELOCITY_TIMESTEP_RANGE,
+        field_name=VELOCITY_FIELD_NAME,
+        verbose=True
     )
     t_load = time.time() - t_load
 
     n_nodes = node_positions.shape[0]
     n_elements = connectivity.shape[0]
-    print(f"  Mesh: {n_elements:,} elements, {n_nodes:,} nodes")
-    print(f"  Load time: {t_load:.2f}s")
+    n_velocity_steps = velocity_sequence.shape[0]
+
+    print(f"\n  Mesh: {n_elements:,} elements, {n_nodes:,} nodes")
+    print(f"  Velocity timesteps: {n_velocity_steps}")
+    print(f"  Total load time: {t_load:.2f}s")
+
+    # Compute velocity cycle parameters
+    cycle_params = compute_velocity_cycle_params(
+        total_steps=N_STEPS,
+        dt=DT,
+        velocity_timestep_range=VELOCITY_TIMESTEP_RANGE,
+        velocity_dt=VELOCITY_DT
+    )
+    print(f"\n  Velocity cycle parameters:")
+    print(f"    Cycle period: {cycle_params['cycle_period']:.3f} time units")
+    print(f"    Number of cycles: {cycle_params['n_cycles']:.2f}")
+    print(f"    Tracking steps per velocity step: {cycle_params['steps_per_velocity']}")
 
     # ========================================================================
     # 2. Build Global Morton Structure (CPU)
     # ========================================================================
 
-    print("\n[2/5] Building global Morton structure (CPU)...")
+    print("\n[2/6] Building global Morton structure (CPU)...")
     t_morton = time.time()
 
     morton_struct = build_global_morton_octree(
@@ -257,15 +301,23 @@ def main():
     # 3. Upload to GPU
     # ========================================================================
 
-    print("\n[3/5] Uploading mesh and Morton structure to GPU...")
+    print("\n[3/6] Uploading mesh and Morton structure to GPU...")
     t_upload = time.time()
 
-    # Compute element neighbors
-    print("  Computing element neighbors...")
+    # Compute element neighbors (using configured method)
+    neighbor_method_name = "NODE-BASED" if NEIGHBOR_METHOD == 'node' else "FACE-BASED"
+    print(f"  Computing element neighbors ({neighbor_method_name})...")
     t_neighbors = time.time()
-    element_neighbors = build_element_neighbors_array(connectivity)
+    element_neighbors = build_element_neighbors_array(connectivity, method=NEIGHBOR_METHOD, verbose=True)
     t_neighbors = time.time() - t_neighbors
     print(f"    Neighbor computation: {t_neighbors:.2f}s")
+    neighbor_memory_mb = element_neighbors.nbytes / (1024**2)
+    print(f"    Neighbor memory: {neighbor_memory_mb:.1f} MB")
+    print(f"    Neighbor array shape: {element_neighbors.shape}")
+    print(f"    Max neighbors per element: {element_neighbors.shape[1]}")
+    if NEIGHBOR_METHOD == 'face':
+        print(f"    ⚠  WARNING: Face-based neighbors may NOT work for 1:2 octree refinement!")
+        print(f"              If trajectories are linear, switch to NEIGHBOR_METHOD='node'")
 
     # Upload standard mesh data
     mesh_gpu = upload_mesh_to_gpu(
@@ -288,6 +340,8 @@ def main():
 
     t_upload = time.time() - t_upload
     print(f"  Total upload time: {t_upload:.2f}s")
+    print(f"  Moroton GPU leaves: {mesh_gpu_morton.n_leaves:,}")
+    print(f"  Moroton Prefix Table Depth: {mesh_gpu_morton.table_depth}")
 
     # ========================================================================
     # 4. Initialize Particles
@@ -308,7 +362,7 @@ def main():
     par_bounds = [par_bounds_min, par_bounds_max]
 
     # Use grid resolution (already unpacked at top of main())
-    print(f"\n[4/5] Initializing {N_PARTICLES:,} particles (uniform grid {nx}×{ny}×{nz})...")
+    print(f"\n[4/6] Initializing {N_PARTICLES:,} particles (uniform grid {nx}×{ny}×{nz})...")
     print(f"  Particle bounds:")
     print(f"    X: [{par_bounds_min[0]:.6f}, {par_bounds_max[0]:.6f}] (domain fraction: {PARTICLE_BOUNDS_FRACTION['x']})")
     print(f"    Y: [{par_bounds_min[1]:.6f}, {par_bounds_max[1]:.6f}] (domain fraction: {PARTICLE_BOUNDS_FRACTION['y']})")
@@ -351,33 +405,47 @@ def main():
     # ========================================================================
 
     print(f"\n[6/6] Running time integration ({N_STEPS:,} steps)...")
+    print(f"\n  Search hierarchy configuration:")
+    if ENABLE_L1_SEARCH:
+        print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton, radius={L2_SEARCH_RADIUS})")
+    else:
+        print(f"    L0 (cached element) → L2 (Morton, radius={L2_SEARCH_RADIUS})")
+        print(f"    ⚠️  L1 neighbor search DISABLED")
 
-    # Create fully-fused RK4 step function
-    rk4_step = create_rk4_fully_fused_global_morton(
+    # Create fully-fused time-dependent RK4 step function
+    rk4_step = create_rk4_fully_fused_timedep(
         mesh_gpu_connectivity=mesh_gpu.connectivity,
         mesh_gpu_node_positions=mesh_gpu.node_positions,
         mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
         mesh_gpu_global_morton=mesh_gpu_morton,
         n_hops=N_HOPS,
-        l2_search_radius=L2_SEARCH_RADIUS
+        l2_search_radius=L2_SEARCH_RADIUS,
+        enable_l1_search=ENABLE_L1_SEARCH
     )
 
-    # Upload velocity field and particle data to GPU ONCE
+    # Upload velocity sequence and particle data to GPU ONCE
     print("\n  Uploading data to GPU...")
     t_upload_initial = time.time()
-    velocity_field_gpu = jax.device_put(velocity_field)
+    velocity_fields_gpu = jax.device_put(velocity_sequence)  # Upload entire sequence
     positions_gpu = jax.device_put(particle_data.positions)
     element_ids_gpu = jax.device_put(particle_data.element_ids)
     t_upload_initial = time.time() - t_upload_initial
-    print(f"    Initial upload time: {t_upload_initial:.2f}s")
+    vel_memory_mb = velocity_sequence.nbytes / (1024**2)
+    print(f"    Velocity sequence upload: {t_upload_initial:.2f}s ({vel_memory_mb:.1f} MB)")
+    print(f"    Particle data upload: minimal")
 
-    # Extended initial assignment (more thorough search with larger radius)
-    print(f"\n  Running extended initial assignment (radius={INITIAL_SEARCH_RADIUS})...")
+    # Cascading initial assignment (memory-efficient progressive search)
+    # Start with radius=100 for all, then search unassigned with larger radii
+    print(f"\n  Running cascading initial assignment...")
+    print(f"    Initial radius: {INITIAL_SEARCH_RADIUS} (all particles)")
+    print(f"    Fallback radii: [200, 500, 1000] (only unassigned particles)")
     t_initial_search = time.time()
-    element_ids_gpu = initial_assignment_extended_batch(
+    element_ids_gpu = initial_assignment_cascading_fallback(
         positions_gpu,
         mesh_gpu_morton,
-        max_radius=INITIAL_SEARCH_RADIUS
+        initial_radius=INITIAL_SEARCH_RADIUS,
+        fallback_radii=INITIAL_SEARCH_FALLBACK_RADII,
+        verbose=True
     )
     element_ids_gpu = jax.block_until_ready(element_ids_gpu)
     t_initial_search = time.time() - t_initial_search
@@ -395,7 +463,8 @@ def main():
         positions_gpu,
         element_ids_gpu,
         DT,
-        velocity_field_gpu
+        velocity_fields_gpu,
+        0  # time_idx for first step
     )
     positions_gpu = jax.block_until_ready(positions_gpu)
     element_ids_gpu = jax.block_until_ready(element_ids_gpu)
@@ -417,12 +486,16 @@ def main():
     for step in range(1, N_STEPS + 1):
         t_step = time.time()
 
+        # Compute time index for cyclic velocity (wraps automatically in RK4)
+        time_idx = step  # Will be converted to velocity index via modulo in RK4
+
         # Run RK4 step (all data stays on GPU)
         positions_gpu, element_ids_gpu = rk4_step(
             positions_gpu,
             element_ids_gpu,
             DT,
-            velocity_field_gpu
+            velocity_fields_gpu,
+            time_idx
         )
 
         # Block until computation completes
