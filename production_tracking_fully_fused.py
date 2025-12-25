@@ -68,7 +68,7 @@ DT = 0.0025
 N_STEPS = 2_500
 N_HOPS = 3
 L2_SEARCH_RADIUS = 2          # L2 search radius during integration
-INITIAL_SEARCH_RADIUS = 50    # Extended radius for initial assignment
+INITIAL_SEARCH_RADIUS = 100    # Extended radius for initial assignment
 SEED = 42
 LOG_INTERVAL = 100
 

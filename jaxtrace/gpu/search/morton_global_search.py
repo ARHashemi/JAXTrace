@@ -680,7 +680,11 @@ def search_L2_morton_neighbors_single(
         neighbor_prefix = neighbor_prefixes[i]
 
         # Convert prefix to array index for lookup
-        prefix_idx = neighbor_prefix.astype(jnp.int32)
+        # Prefix is stored in top (depth*3) bits of uint64, need to shift right to get index
+        table_depth_int = int(mesh_gpu.table_depth)
+        shift_amount = 63 - (table_depth_int * 3)
+        prefix_idx = lax.shift_right_logical(neighbor_prefix, jnp.uint64(shift_amount))
+        prefix_idx = prefix_idx.astype(jnp.int32)
         prefix_idx = jnp.clip(prefix_idx, 0, mesh_gpu.prefix_start.shape[0] - 1)
 
         # Look up leaf ID for this prefix

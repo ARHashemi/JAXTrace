@@ -101,7 +101,7 @@ NEIGHBOR_METHOD = 'node'       # 'face' or 'node' - Choose based on mesh structu
 #                - Fixed cost (always 27 octants regardless of domain size)
 #                - Expected performance: 10-15× faster L2 search
 #                - Requires octree prefix table (table_depth > 0)
-L2_SEARCH_METHOD = 'radius'    # 'radius' or 'neighbors' - Choose L2 search strategy
+L2_SEARCH_METHOD = 'neighbors'    # 'radius' or 'neighbors' - Choose L2 search strategy
 
 N_HOPS = 3                     # Number of hops for L1 neighbor search
 L2_SEARCH_RADIUS = 10          # L2 search radius (only used if L2_SEARCH_METHOD='radius')

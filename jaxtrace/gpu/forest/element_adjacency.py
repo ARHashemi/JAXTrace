@@ -271,15 +271,12 @@ def validate_neighbor_symmetry(
         return True
 
 
-def build_element_neighbors_array(
+def build_node_to_elements_map(
     connectivity: np.ndarray,
     verbose: bool = False
-) -> np.ndarray:
+) -> Dict[int, Set[int]]:
     """
-    Build element face-neighbors array in fixed-size padded format.
-
-    This is a convenience wrapper around extract_element_neighbors() that
-    returns a padded array suitable for GPU processing and incremental search.
+    Build mapping from nodes to elements that contain them.
 
     Parameters
     ----------
@@ -290,64 +287,252 @@ def build_element_neighbors_array(
 
     Returns
     -------
-    element_neighbors : np.ndarray
-        Element face neighbors, shape (N_elements, 4), int32
-        Each row contains up to 4 neighbor element IDs, -1 for missing neighbors
+    node_to_elements : Dict[int, Set[int]]
+        Maps node_id -> set of element IDs containing that node
 
     Notes
     -----
-    - Tetrahedral elements have at most 4 face neighbors (one per face)
-    - Boundary elements have fewer neighbors (padded with -1)
-    - Interior elements typically have 4 neighbors
-    - This format is compatible with L1 neighbor search (level1_neighbors.py)
+    - Used for node-based neighbor extraction (shared node = neighbor)
+    - More inclusive than face-based neighbors (captures edge/vertex neighbors)
+    - O(N_elements) complexity
+    """
+    n_elements = connectivity.shape[0]
+    node_to_elements = defaultdict(set)
+
+    if verbose:
+        print(f"Building node-to-element map for {n_elements:,} elements...")
+
+    for elem_id in range(n_elements):
+        nodes = connectivity[elem_id]
+        for node_id in nodes:
+            node_to_elements[node_id].add(elem_id)
+
+        if verbose and (elem_id + 1) % 500000 == 0:
+            print(f"  Processed {elem_id + 1:,}/{n_elements:,} elements...")
+
+    if verbose:
+        n_nodes = len(node_to_elements)
+        avg_elems_per_node = np.mean([len(elems) for elems in node_to_elements.values()])
+        print(f"  Total nodes: {n_nodes:,}")
+        print(f"  Avg elements per node: {avg_elems_per_node:.2f}")
+
+    return node_to_elements
+
+
+def extract_element_neighbors_node_based(
+    connectivity: np.ndarray,
+    verbose: bool = False
+) -> Tuple[Dict[int, np.ndarray], AdjacencyStats]:
+    """
+    Extract element node-adjacency neighbors.
+
+    Two elements are neighbors if they share ANY node (vertex, edge, or face).
+    This is more inclusive than face-based neighbors and captures refined mesh
+    boundaries where coarse and fine elements share edges but not faces.
+
+    Parameters
+    ----------
+    connectivity : np.ndarray
+        Element connectivity, shape (N_elements, 4), int32
+    verbose : bool, optional
+        Print progress messages (default: False)
+
+    Returns
+    -------
+    neighbors : Dict[int, np.ndarray]
+        Maps element_id -> array of neighbor element IDs (variable length)
+    stats : AdjacencyStats
+        Adjacency statistics
+
+    Notes
+    -----
+    - Node-based neighbors include ALL elements sharing at least 1 node
+    - This captures edge-sharing and vertex-sharing neighbors (not just face-sharing)
+    - Critical for adaptively refined meshes where coarse/fine elements share edges
+    - Results in MORE neighbors per element than face-based (can be 20-100+ neighbors)
+    - O(N_elements) complexity
 
     Examples
     --------
-    >>> # Element 42 has 3 neighbors: [15, 108, 201]
-    >>> # Row 42: [15, 108, 201, -1]
+    In octree-refined mesh:
+    - Coarse cube (8 tets) refined to 8 sub-cubes (64 tets total)
+    - Coarse element at boundary shares EDGE with 2 fine elements
+    - Face-based: 0 fine neighbors (no shared face)
+    - Node-based: 2 fine neighbors (shared edge = shared 2 nodes)
+    """
+    n_elements = connectivity.shape[0]
 
-    >>> # Element 7 is fully interior with 4 neighbors: [3, 9, 12, 18]
-    >>> # Row 7: [3, 9, 12, 18]
+    if verbose:
+        print(f"\nExtracting NODE-BASED element neighbors for {n_elements:,} elements...")
+        print("  (Elements sharing ANY node are considered neighbors)")
+
+    # Build node-to-element map
+    node_to_elements = build_node_to_elements_map(connectivity, verbose=verbose)
+
+    # Extract neighbors
+    if verbose:
+        print("Building neighbor lists from node connectivity...")
+
+    neighbors = {}
+    neighbor_counts = []
+
+    for elem_id in range(n_elements):
+        nodes = connectivity[elem_id]
+
+        # Find all elements sharing any node with this element
+        neighbor_set = set()
+        for node_id in nodes:
+            elements_on_node = node_to_elements[node_id]
+            neighbor_set.update(elements_on_node)
+
+        # Remove self from neighbor set
+        neighbor_set.discard(elem_id)
+
+        neighbor_array = np.array(sorted(neighbor_set), dtype=np.int32)
+        neighbors[elem_id] = neighbor_array
+        neighbor_counts.append(len(neighbor_array))
+
+        if verbose and (elem_id + 1) % 500000 == 0:
+            print(f"  Processed {elem_id + 1:,}/{n_elements:,} elements...")
+
+    # Compute statistics
+    avg_neighbors = np.mean(neighbor_counts)
+    max_neighbors = max(neighbor_counts)
+    min_neighbors = min(neighbor_counts)
+
+    stats = AdjacencyStats(
+        n_elements=n_elements,
+        n_faces=0,  # Not applicable for node-based
+        n_boundary_faces=0,
+        n_internal_faces=0,
+        avg_neighbors_per_element=avg_neighbors,
+        max_neighbors_per_element=max_neighbors,
+        min_neighbors_per_element=min_neighbors,
+    )
+
+    if verbose:
+        print(f"\nNode-based neighbor statistics:")
+        print(f"  Elements: {n_elements:,}")
+        print(f"  Neighbors per element: min={min_neighbors}, max={max_neighbors}, avg={avg_neighbors:.2f}")
+        print(f"  NOTE: Node-based typically has {avg_neighbors/4:.1f}x more neighbors than face-based")
+
+    return neighbors, stats
+
+
+def build_element_neighbors_array(
+    connectivity: np.ndarray,
+    verbose: bool = False,
+    method: str = 'face'
+) -> np.ndarray:
+    """
+    Build element neighbors array in fixed-size padded format.
+
+    This is a convenience wrapper around extract_element_neighbors() that
+    returns a padded array suitable for GPU processing and incremental search.
+
+    Parameters
+    ----------
+    connectivity : np.ndarray
+        Element connectivity, shape (N_elements, 4), int32
+    verbose : bool, optional
+        Print progress messages (default: False)
+    method : str, optional
+        Neighbor definition method (default: 'face')
+        - 'face': Elements sharing a face (3 nodes) are neighbors
+                  Returns shape (N_elements, 4) - at most 4 face neighbors
+                  Memory efficient, but misses edge/vertex neighbors
+        - 'node': Elements sharing ANY node are neighbors
+                  Returns shape (N_elements, MAX_NEIGHBORS) - typically 20-100+ neighbors
+                  Captures refined mesh boundaries (coarse/fine edge-sharing)
+                  Higher memory usage but ensures all geometric neighbors found
+
+    Returns
+    -------
+    element_neighbors : np.ndarray
+        Element neighbors, shape depends on method:
+        - 'face': (N_elements, 4), int32 - 4 face neighbors max
+        - 'node': (N_elements, MAX_NEIGHBORS), int32 - variable per mesh
+        Each row contains neighbor element IDs, -1 for missing neighbors
+
+    Notes
+    -----
+    **Face-based (method='face'):**
+    - Tetrahedral elements have at most 4 face neighbors (one per face)
+    - Boundary elements have fewer neighbors (padded with -1)
+    - Interior elements typically have 4 neighbors
+    - Misses edge-sharing neighbors in adaptively refined meshes
+    - Memory: ~48 MB for 3M elements
+
+    **Node-based (method='node'):**
+    - Elements sharing ANY node are neighbors (vertex, edge, or face)
+    - Captures ALL geometric neighbors including refined mesh boundaries
+    - Critical for octree-refined meshes where coarse/fine share edges
+    - More neighbors per element (20-100+ typical)
+    - Memory: ~600-1200 MB for 3M elements (depends on max_neighbors)
+
+    **When to use node-based:**
+    - Adaptively refined meshes with multi-level refinement
+    - Friction stir welding (rotating tool with refined region)
+    - Particles crossing coarse/fine boundaries
+    - L1 neighbor search must find fine elements from coarse elements
+
+    Examples
+    --------
+    >>> # Face-based (default): Element 42 has 3 face neighbors
+    >>> neighbors = build_element_neighbors_array(connectivity, method='face')
+    >>> neighbors[42]  # [15, 108, 201, -1]
+
+    >>> # Node-based: Element 42 has 47 node neighbors (includes edge/vertex)
+    >>> neighbors = build_element_neighbors_array(connectivity, method='node')
+    >>> neighbors[42]  # [12, 15, 18, 21, ..., 201, 208, -1, -1, ...]
     """
     n_elements = connectivity.shape[0]
 
     if verbose:
         print(f"\nBuilding element neighbors array for {n_elements:,} elements...")
+        print(f"  Method: {method}")
 
-    # Extract neighbors as dictionary
-    neighbors_dict, stats = extract_element_neighbors(connectivity, verbose=verbose)
-
-    # Determine max neighbors (should be 4 for tets, but check stats to be safe)
-    max_neighbors = stats.max_neighbors_per_element
-    if max_neighbors > 4:
+    # Extract neighbors as dictionary using chosen method
+    if method == 'face':
+        neighbors_dict, stats = extract_element_neighbors(connectivity, verbose=verbose)
+        max_neighbors_padded = 4  # Tets have at most 4 face neighbors
+    elif method == 'node':
+        neighbors_dict, stats = extract_element_neighbors_node_based(connectivity, verbose=verbose)
+        max_neighbors_padded = stats.max_neighbors_per_element
         if verbose:
-            print(f"  WARNING: Found element with {max_neighbors} neighbors (expected ≤4 for tets)")
+            print(f"  Max neighbors found: {max_neighbors_padded}")
+            memory_mb = (n_elements * max_neighbors_padded * 4) / (1024**2)
+            print(f"  Estimated memory: {memory_mb:.1f} MB")
+    else:
+        raise ValueError(f"Invalid method '{method}'. Must be 'face' or 'node'.")
 
-    # Use 4 as fixed size (standard for tetrahedral elements)
-    padded_neighbors = np.full((n_elements, 4), -1, dtype=np.int32)
+    # Create padded array
+    padded_neighbors = np.full((n_elements, max_neighbors_padded), -1, dtype=np.int32)
 
     # Fill array from dictionary
     if verbose:
-        print(f"  Converting to padded array ({n_elements}, 4)...")
+        print(f"  Converting to padded array ({n_elements}, {max_neighbors_padded})...")
 
     for elem_id in range(n_elements):
         neighbors_list = neighbors_dict[elem_id]
         n_neighbors = len(neighbors_list)
 
-        if n_neighbors > 4:
-            # Truncate to first 4 neighbors
+        if n_neighbors > max_neighbors_padded:
+            # Truncate to max (shouldn't happen with correct max_neighbors_padded)
             if verbose:
-                print(f"  WARNING: Element {elem_id} has {n_neighbors} neighbors, truncating to 4")
-            neighbors_list = neighbors_list[:4]
-            n_neighbors = 4
+                print(f"  WARNING: Element {elem_id} has {n_neighbors} neighbors, truncating to {max_neighbors_padded}")
+            neighbors_list = neighbors_list[:max_neighbors_padded]
+            n_neighbors = max_neighbors_padded
 
         padded_neighbors[elem_id, :n_neighbors] = neighbors_list
 
     if verbose:
         n_boundary = np.sum(np.any(padded_neighbors == -1, axis=1))
         n_interior = n_elements - n_boundary
-        print(f"  Boundary elements (< 4 neighbors): {n_boundary:,} ({100*n_boundary/n_elements:.1f}%)")
-        print(f"  Interior elements (4 neighbors): {n_interior:,} ({100*n_interior/n_elements:.1f}%)")
+        avg_actual = np.mean([len(neighbors_dict[i]) for i in range(n_elements)])
+        print(f"  Elements with max neighbors: {n_interior:,} ({100*n_interior/n_elements:.1f}%)")
+        print(f"  Elements with < max neighbors: {n_boundary:,} ({100*n_boundary/n_elements:.1f}%)")
+        print(f"  Avg neighbors per element: {avg_actual:.2f}")
         print(f"  Element neighbors array built successfully!")
 
     return padded_neighbors

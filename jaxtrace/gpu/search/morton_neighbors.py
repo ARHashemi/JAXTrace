@@ -85,10 +85,10 @@ def decode_morton_prefix_jax(prefix: jnp.uint64, depth: int) -> Tuple[jnp.int32,
         octant_bits = octant_bits & jnp.uint64(0b111)
         octant_bits = octant_bits.astype(jnp.int32)
 
-        # De-interleave: Morton uses [z][y][x] bit order
-        x_bit = (octant_bits >> 2) & 1  # Bit 2 is x
+        # De-interleave: Morton uses [x][y][z] bit order (x at bit 0, y at bit 1, z at bit 2)
+        x_bit = (octant_bits >> 0) & 1  # Bit 0 is x
         y_bit = (octant_bits >> 1) & 1  # Bit 1 is y
-        z_bit = (octant_bits >> 0) & 1  # Bit 0 is z
+        z_bit = (octant_bits >> 2) & 1  # Bit 2 is z
 
         # Accumulate coordinates (build from MSB to LSB)
         # Shift left to make room for next bit, then OR in new bit
@@ -144,8 +144,8 @@ def encode_morton_prefix_jax(
         y_bit = (y >> bit_idx) & 1
         z_bit = (z >> bit_idx) & 1
 
-        # Combine into 3-bit octant code: [z][y][x]
-        octant_bits = jnp.uint64((z_bit << 2) | (y_bit << 1) | (x_bit << 0))
+        # Combine into 3-bit octant code: [x][y][z] (x at bit 0, y at bit 1, z at bit 2)
+        octant_bits = jnp.uint64((x_bit << 0) | (y_bit << 1) | (z_bit << 2))
 
         # Position in output Morton code (from MSB)
         bit_pos = (63 - 3) - i * 3

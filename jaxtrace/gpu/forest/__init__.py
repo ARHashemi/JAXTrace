@@ -27,7 +27,9 @@ from .element_adjacency import (
     AdjacencyStats,
     get_tet_faces,
     build_face_to_element_map,
+    build_node_to_elements_map,
     extract_element_neighbors,
+    extract_element_neighbors_node_based,
     validate_neighbor_symmetry,
     build_element_neighbors_array,
 )
@@ -58,7 +60,9 @@ __all__ = [
     "AdjacencyStats",
     "get_tet_faces",
     "build_face_to_element_map",
+    "build_node_to_elements_map",
     "extract_element_neighbors",
+    "extract_element_neighbors_node_based",
     "validate_neighbor_symmetry",
     "build_element_neighbors_array",
     # Padded arrays (Phase 2)
