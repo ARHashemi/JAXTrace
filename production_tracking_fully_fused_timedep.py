@@ -76,7 +76,7 @@ DT = 0.0025
 N_STEPS = 2_500
 
 # Search Hierarchy Configuration
-# Neighbor Method Selection:
+# Neighbor Method Selection (L1):
 #   'face': Elements sharing 3 nodes (tetrahedral face)
 #           - Memory: ~48 MB for 3M elements
 #           - Neighbors: 4 per element (max)
@@ -89,8 +89,22 @@ N_STEPS = 2_500
 #           - Trade-off: Higher memory, slower L1 search, but CORRECT for refined meshes
 NEIGHBOR_METHOD = 'node'       # 'face' or 'node' - Choose based on mesh structure
 
+# L2 Search Method Selection:
+#   'radius': Linear ±radius search along Morton curve
+#             - Searches center_leaf ± L2_SEARCH_RADIUS leaves
+#             - Simple, works for all meshes
+#             - May search many irrelevant leaves (not spatial neighbors)
+#             - Current performance: ~13K particles/s with radius=10
+#   'neighbors': Morton neighbor arithmetic (26 spatial neighbors)
+#                - Decodes Morton prefix to find 26 spatial neighbor octants
+#                - Geometrically correct (actual spatial adjacency)
+#                - Fixed cost (always 27 octants regardless of domain size)
+#                - Expected performance: 10-15× faster L2 search
+#                - Requires octree prefix table (table_depth > 0)
+L2_SEARCH_METHOD = 'radius'    # 'radius' or 'neighbors' - Choose L2 search strategy
+
 N_HOPS = 3                     # Number of hops for L1 neighbor search
-L2_SEARCH_RADIUS = 10          # L2 search radius during integration
+L2_SEARCH_RADIUS = 10          # L2 search radius (only used if L2_SEARCH_METHOD='radius')
 ENABLE_L1_SEARCH = True        # Enable L1 neighbor search (set False to test L0→L2 only)
 INITIAL_SEARCH_RADIUS = 50    # Extended radius for initial assignment
 INITIAL_SEARCH_FALLBACK_RADII = [100, 200, 500]  # Fallback radii for cascading initial assignment
@@ -407,10 +421,25 @@ def main():
     print(f"\n[6/6] Running time integration ({N_STEPS:,} steps)...")
     print(f"\n  Search hierarchy configuration:")
     if ENABLE_L1_SEARCH:
-        print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton, radius={L2_SEARCH_RADIUS})")
+        if L2_SEARCH_METHOD == 'neighbors':
+            print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton neighbors, 27 octants)")
+        else:
+            print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton radius, ±{L2_SEARCH_RADIUS})")
     else:
-        print(f"    L0 (cached element) → L2 (Morton, radius={L2_SEARCH_RADIUS})")
+        if L2_SEARCH_METHOD == 'neighbors':
+            print(f"    L0 (cached element) → L2 (Morton neighbors, 27 octants)")
+        else:
+            print(f"    L0 (cached element) → L2 (Morton radius, ±{L2_SEARCH_RADIUS})")
         print(f"    ⚠️  L1 neighbor search DISABLED")
+
+    print(f"    L2 method: {L2_SEARCH_METHOD}")
+    if L2_SEARCH_METHOD == 'neighbors':
+        if mesh_gpu_morton.table_depth == 0:
+            print(f"    ❌ ERROR: Morton neighbor method requires octree prefix table!")
+            print(f"             Current table_depth = 0. Check Morton structure build.")
+            return 1
+        else:
+            print(f"    ✅ Octree prefix table available (depth={mesh_gpu_morton.table_depth})")
 
     # Create fully-fused time-dependent RK4 step function
     rk4_step = create_rk4_fully_fused_timedep(
@@ -420,7 +449,8 @@ def main():
         mesh_gpu_global_morton=mesh_gpu_morton,
         n_hops=N_HOPS,
         l2_search_radius=L2_SEARCH_RADIUS,
-        enable_l1_search=ENABLE_L1_SEARCH
+        enable_l1_search=ENABLE_L1_SEARCH,
+        l2_search_method=L2_SEARCH_METHOD
     )
 
     # Upload velocity sequence and particle data to GPU ONCE

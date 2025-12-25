@@ -20,7 +20,9 @@ from jaxtrace.gpu.search.morton_global_search import (
     search_in_leaf_global,
     position_to_leaf_id_octree,
     position_to_leaf_id_linear,
-    point_in_tet_gpu
+    point_in_tet_gpu,
+    search_L2_global_morton_single,
+    search_L2_morton_neighbors_single
 )
 
 
@@ -31,7 +33,8 @@ def create_rk4_fully_fused_timedep(
     mesh_gpu_global_morton: MeshGPUGlobalMorton,
     n_hops: int = 3,
     l2_search_radius: int = 2,
-    enable_l1_search: bool = True
+    enable_l1_search: bool = True,
+    l2_search_method: str = 'radius'
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -56,6 +59,10 @@ def create_rk4_fully_fused_timedep(
     enable_l1_search : bool, default=True
         Enable L1 neighbor search. If False, search hierarchy becomes L0→L2 (skip L1).
         Useful for testing or when L1 is known to be ineffective (e.g., graded refinement).
+    l2_search_method : str, default='radius'
+        L2 search method:
+        - 'radius': Linear ±radius search along Morton curve (original method)
+        - 'neighbors': Morton neighbor arithmetic (26 spatial neighbors)
 
     Returns
     -------
@@ -153,46 +160,14 @@ def create_rk4_fully_fused_timedep(
         return jnp.where(found, current_elem, jnp.int32(-1))
 
     def search_l2_single(pos: jax.Array) -> jax.Array:
-        """L2: Global Morton search (single particle)."""
-        # Map position to leaf
-        leaf_id = jnp.where(
-            mesh_gpu_global_morton.table_depth > 0,
-            position_to_leaf_id_octree(pos, mesh_gpu_global_morton),
-            position_to_leaf_id_linear(pos, mesh_gpu_global_morton)
-        )
-
-        # Search center leaf
-        elem_id = search_in_leaf_global(pos, leaf_id, mesh_gpu_global_morton)
-        found = elem_id >= 0
-
-        # Search neighbor leaves (radius search)
-        def search_neighbor_leaf(offset):
-            # Skip center leaf (offset=0, already searched)
-            skip_center = offset == 0
-
-            neighbor_leaf = leaf_id + offset
-            valid = (neighbor_leaf >= 0) & (neighbor_leaf < mesh_gpu_global_morton.n_leaves) & (~skip_center)
-            result = jnp.where(
-                valid,
-                search_in_leaf_global(pos, neighbor_leaf, mesh_gpu_global_morton),
-                jnp.int32(-1)
-            )
-            return result
-
-        # Search ±radius leaves (including 0, but search_neighbor_leaf will skip it)
-        offsets = jnp.arange(-l2_search_radius, l2_search_radius + 1)
-        neighbor_results = jax.vmap(search_neighbor_leaf)(offsets)
-
-        # Find first valid neighbor result
-        neighbor_mask = neighbor_results >= 0
-        found_in_neighbor = jnp.where(
-            jnp.any(neighbor_mask),
-            neighbor_results[jnp.argmax(neighbor_mask)],
-            jnp.int32(-1)
-        )
-
-        # Return center result if found, otherwise neighbor result
-        return jnp.where(found, elem_id, found_in_neighbor)
+        """L2: Global Morton search (single particle) - method selected by config."""
+        if l2_search_method == 'neighbors':
+            # Morton neighbor arithmetic (26 spatial neighbors)
+            # Requires table_depth > 0 (octree prefix table)
+            return search_L2_morton_neighbors_single(pos, mesh_gpu_global_morton)
+        else:
+            # Default: radius-based search (linear ±radius along Morton curve)
+            return search_L2_global_morton_single(pos, mesh_gpu_global_morton, l2_search_radius)
 
     def search_l0_l1_l2_single(pos: jax.Array, cached_elem_id: jax.Array) -> jax.Array:
         """Full L0+L1+L2 search hierarchy for single particle."""
