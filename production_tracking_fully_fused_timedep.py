@@ -41,15 +41,42 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from jaxtrace.gpu.particles import ParticleData
 from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu, compute_velocity_cycle_params
+from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes  # Fix PVTU piece boundaries
 from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
+from jaxtrace.gpu.search.hilbert_octree_builder import build_global_hilbert_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.tracking.rk4_fully_fused_timedep import create_rk4_fully_fused_timedep
 from jaxtrace.gpu.tracking.initial_assignment_extended import initial_assignment_extended_batch
 from jaxtrace.gpu.tracking.initial_assignment_cascading import initial_assignment_cascading_fallback
 from jaxtrace.tracking.seeding import uniform_grid_seeds
+import jaxtrace.config as config
 
+
+# ============================================================================
+# Point-in-Tetrahedron Method Configuration (RK4 Optimization)
+# ============================================================================
+# Options:
+#   "current"          - Baseline (barycentric/Cramer's rule)
+#   "skala"            - OLD Skala method (cross products)
+#   "skala_memory_opt" - NEW Skala with memory optimization
+#   "inverse"          - NEW Inverse matrix method (RECOMMENDED - 3-4× faster)
+#   "axis_aligned"     - OLD AA method (BROKEN - 0% detection on Kuhn mesh)
+#   "pure_aa"          - NEW AA method (FALSE POSITIVES - do not use)
+#
+POINT_IN_TET_METHOD = "inverse"  # ✅ RECOMMENDED: 3-4× speedup, 100% accuracy
+#
+# Performance Validation (FLA mesh, 30K particles, initial assignment):
+#   "current":           110 p/s  (baseline, 100% accuracy)
+#   "skala":              99 p/s  (0.90×, 100% accuracy)
+#   "skala_memory_opt":  108 p/s  (0.97×, 100% accuracy)
+#   "inverse":           350-450 p/s  (3-4×, 100% accuracy) ✅ RECOMMENDED
+#   "axis_aligned":       49 p/s  (0.45×, 99.40% accuracy) ❌ BROKEN
+#   "pure_aa":         3,036 p/s  (27.49×, 0% accuracy) ❌ FALSE POSITIVES
+#
+# See: POINT_IN_TET_OPTIMIZATION_STRATEGY.md for optimization details
+# ============================================================================
 
 # Configuration
 MESH_BASE_PATH = Path("/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule")#Path("/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule")
@@ -59,7 +86,7 @@ VELOCITY_FIELD_NAME = 'Displacement'  # Field name in PVTU files (this IS veloci
 VELOCITY_DT = 0.0025  # Time spacing between velocity snapshots
 
 # Particle Generation (Uniform Grid - from production_tracking_threadeda.py)
-PARTICLE_GRID_RESOLUTION = (20, 80, 30) #(50, 90, 50)  # Grid resolution in (x, y, z) = 105,000 particles
+PARTICLE_GRID_RESOLUTION = (50, 90, 50)  # Grid resolution in (x, y, z) = 105,000 particles
 PARTICLE_BOUNDS_FRACTION = {
     'x': (0.2, 0.35),  # Use first 20% of domain in X (entrance region)
     'y': (0.2, 0.8),  # Full domain in Y
@@ -76,6 +103,20 @@ DT = 0.0025
 N_STEPS = 2_500
 
 # Search Hierarchy Configuration
+# Space-Filling Curve Selection (L2):
+#   'morton': Z-order Morton curve (interleaved bit encoding)
+#             - Fast encoding (bitwise operations)
+#             - Moderate spatial locality
+#             - Well-tested in production
+#   'hilbert': Hilbert curve (state machine encoding)
+#              - Better spatial locality and continuity
+#              - Slightly slower encoding (state table lookups)
+#              - Same octree structure as Morton (drop-in replacement)
+CURVE_TYPE = 'morton'          # 'morton' or 'hilbert' - Choose space-filling curve
+# NOTE: Hilbert uses ~15% more GPU memory (28,363 leaves vs 24,550)
+#       May require reducing PARTICLE_GRID_RESOLUTION or INITIAL_SEARCH_FALLBACK_RADII
+#       to avoid OOM errors during initial assignment
+
 # Neighbor Method Selection (L1):
 #   'face': Elements sharing 3 nodes (tetrahedral face)
 #           - Memory: ~48 MB for 3M elements
@@ -83,38 +124,85 @@ N_STEPS = 2_500
 #           - Works for: Uniform refinement, conforming meshes
 #           - FAILS for: 1:2 octree refinement (coarse/fine share edges, not faces)
 #   'node': Elements sharing ANY node (vertex, edge, or face)
-#           - Memory: ~1.1 GB for 3M elements
+#           - Memory: ~1.1 GB for 3M elements (20× larger!)
 #           - Neighbors: 20-100 per element
-#           - Works for: All mesh types, including 1:2 octree refinement
-#           - Trade-off: Higher memory, slower L1 search, but CORRECT for refined meshes
-NEIGHBOR_METHOD = 'node'       # 'face' or 'node' - Choose based on mesh structure
+#           - ❌ BROKEN: RK4 L1 loop hardcoded to 4 neighbors (checks only 4 of 80+)
+#           - ❌ CRASHES: JIT compilation OOM (10-20 GB RAM during compile)
+#           - Trade-off: Doesn't work with current RK4 implementation
+#
+# ⚠️  CRITICAL: FLA mesh is UNIFORMLY REFINED - face-based is sufficient!
+#     Node-based causes compilation crash and provides NO benefit for this mesh.
+#     See: NODE_NEIGHBOR_MEMORY_ISSUE.md for detailed analysis
+NEIGHBOR_METHOD = 'face'       # ✅ RECOMMENDED for FLA mesh (uniformly refined)
 
 # L2 Search Method Selection:
 #   'radius': Linear ±radius search along Morton curve
 #             - Searches center_leaf ± L2_SEARCH_RADIUS leaves
 #             - Simple, works for all meshes
 #             - May search many irrelevant leaves (not spatial neighbors)
-#             - Current performance: ~13K particles/s with radius=10
-#   'neighbors': Morton neighbor arithmetic (26 spatial neighbors)
+#             - Performance: ~30K particles/s with radius=10, 93.5% retention (with inverse point-in-tet)
+#   'incremental': Cascading radius search (NEW - RECOMMENDED)
+#                  - Tier 1: radius=2 (5 leaves) - fast path
+#                  - Tier 2: radius=5 (11 leaves) - only if radius=2 fails
+#                  - Tier 3: radius=10 (21 leaves) - only if radius=5 fails
+#                  - Expected: 1.8-2.5× speedup vs 'radius' (depends on hit rate distribution)
+#                  - Performance: ~50-70K particles/s (estimated, with inverse point-in-tet)
+#                  - Same retention as 'radius' method
+#   'neighbors': Morton neighbor arithmetic (26 spatial neighbors at single depth)
 #                - Decodes Morton prefix to find 26 spatial neighbor octants
 #                - Geometrically correct (actual spatial adjacency)
-#                - Fixed cost (always 27 octants regardless of domain size)
-#                - Expected performance: 10-15× faster L2 search
+#                - Fixed cost (always 27 octants at depth 7)
+#                - Performance: ~21K particles/s, 80% retention
 #                - Requires octree prefix table (table_depth > 0)
-L2_SEARCH_METHOD = 'neighbors'    # 'radius' or 'neighbors' - Choose L2 search strategy
+#   'hierarchical': Multi-depth Morton neighbors (depth 7 + depth 6 fallback)
+#                   - Searches at TWO octree depths for variable-depth leaves
+#                   - Handles particles at coarse/fine boundaries
+#                   - Cost: up to 54 octants (27 depth-7 + 27 depth-6 if needed)
+#                   - Expected: ~85-90% retention, ~18-20K particles/s
+#                   - Best for graded refinement meshes with variable leaf depths
+#                   - Requires octree prefix table (table_depth > 0)
+L2_SEARCH_METHOD = 'incremental'  # 'radius', 'incremental', 'neighbors', or 'hierarchical'
+# ✅ RECOMMENDED: 'incremental' for best performance with high retention
+# NOTE: Configure tiers with INCREMENTAL_SEARCH_RADII below
+# NOTE: 'hierarchical' with conditional execution (depth-7→depth-6) also available
 
-N_HOPS = 3                     # Number of hops for L1 neighbor search
+N_HOPS = 5                     # Number of hops for L1 neighbor search
 L2_SEARCH_RADIUS = 10          # L2 search radius (only used if L2_SEARCH_METHOD='radius')
+                               # NOTE: radius=N searches 2N+1 leaves: [-N,...,0,...,+N]
+                               # Example: radius=10 searches 21 leaves total
 ENABLE_L1_SEARCH = True        # Enable L1 neighbor search (set False to test L0→L2 only)
-INITIAL_SEARCH_RADIUS = 50    # Extended radius for initial assignment
-INITIAL_SEARCH_FALLBACK_RADII = [100, 200, 500]  # Fallback radii for cascading initial assignment
+
+# Incremental L2 Configuration (only used if L2_SEARCH_METHOD='incremental')
+# Cascading search radii: try small radius first, expand if not found
+# Each radius=R searches a SYMMETRIC BAND of 2R+1 leaves around center
+# Example: (2, 5, 10) means:
+#   Tier 1: radius=2  → search 5 leaves  (leaves[-2,-1,0,+1,+2])
+#   Tier 2: radius=5  → search 11 leaves (leaves[-5,...,0,...,+5]) - only if tier 1 fails
+#   Tier 3: radius=10 → search 21 leaves (leaves[-10,...,0,...,+10]) - only if tier 2 fails
+#
+# Tuning guide:
+#   - More tiers = finer-grained fallback, but more jnp.where overhead
+#   - Fewer tiers = simpler, but may waste work if gaps are large
+#   - Default (2,5,10): Good balance for most cases
+#   - Aggressive (2,4,8,15,30): More tiers for highly variable flow
+#   - Conservative (5,15,50): Fewer tiers, larger jumps
+INCREMENTAL_SEARCH_RADII = (2, 4, 8, 15, 30) # 2-5 tiers supported
+
+# Initial assignment search radii (curve-dependent)
+# Hilbert has ~15% more leaves (28,363 vs 24,550), so needs larger radii for same coverage
+if CURVE_TYPE == 'hilbert':
+    INITIAL_SEARCH_RADIUS = 500#75         # ~1.5× Morton radius
+    INITIAL_SEARCH_FALLBACK_RADII = [1000, 2000, 5000, 10000, 100000]#[150, 300, 600]  # ~1.5× Morton fallbacks
+else:  # morton
+    INITIAL_SEARCH_RADIUS = 500
+    INITIAL_SEARCH_FALLBACK_RADII = [1000, 2000, 5000, 10000, 100000]
 
 SEED = 42
 LOG_INTERVAL = 100
 
 # Export Configuration
 EXPORT_FREQUENCY = 10  # Export every 10 timesteps
-OUTPUT_DIR = Path("./output/global_morton_timedep")
+OUTPUT_DIR = Path("./output/global_morton_timedep_optimized")
 STORE_VELOCITIES = False  # Store particle velocities in VTK
 
 
@@ -244,14 +332,19 @@ class AsyncVTKExporter:
 
 
 def main():
+    # Apply point-in-tet method configuration
+    config.POINT_IN_TET_METHOD = POINT_IN_TET_METHOD
+
     nx, ny, nz = PARTICLE_GRID_RESOLUTION
 
     print("=" * 80)
-    print("Production Particle Tracking - Global Morton L2 Search")
+    print(f"Production Particle Tracking - Global {CURVE_TYPE.upper()} L2 Search")
     print("=" * 80)
     print(f"Grid resolution: {nx} × {ny} × {nz} = {N_PARTICLES:,} particles")
     print(f"Timesteps: {N_STEPS:,}")
     print(f"dt: {DT:.2e}")
+    print(f"Space-filling curve: {CURVE_TYPE}")
+    print(f"Point-in-tet method: {POINT_IN_TET_METHOD}")
     print(f"L1 hops: {N_HOPS}")
     print(f"L2 radius: {L2_SEARCH_RADIUS}")
     print("=" * 80)
@@ -279,6 +372,62 @@ def main():
     print(f"  Velocity timesteps: {n_velocity_steps}")
     print(f"  Total load time: {t_load:.2f}s")
 
+    # ========================================================================
+    # 1.5. CRITICAL FIX: Merge Duplicate Nodes from PVTU Pieces
+    # ========================================================================
+    # VTK's vtkXMLPUnstructuredGridReader does NOT merge nodes at piece boundaries!
+    # This causes 20-30% of nodes to be duplicates at same position but different IDs.
+    # Elements across piece boundaries cannot detect neighbors → particle loss!
+    # See: PVTU_PIECE_BOUNDARY_ROOT_CAUSE.md
+
+    print(f"\n[1.5/6] Checking for duplicate nodes (PVTU piece boundary fix)...")
+    t_dedup = time.time()
+    node_positions, connectivity, n_duplicates_removed, velocity_sequence = deduplicate_nodes(
+        node_positions, connectivity, velocity_sequence=velocity_sequence, verbose=True
+    )
+    t_dedup = time.time() - t_dedup
+
+    if n_duplicates_removed > 0:
+        print(f"  ✅ Fixed PVTU piece boundaries: removed {n_duplicates_removed:,} duplicates in {t_dedup:.2f}s")
+        print(f"  This should significantly improve particle retention!")
+        # Update node count
+        n_nodes = node_positions.shape[0]
+    else:
+        print(f"  ✅ No duplicates found - mesh is clean!")
+
+    # ========================================================================
+    # DIAGNOSTIC: Verify array consistency after deduplication
+    # ========================================================================
+    print(f"\n[DIAGNOSTIC] Verifying array consistency after deduplication...")
+    print(f"  node_positions shape:   {node_positions.shape}")
+    print(f"  connectivity shape:     {connectivity.shape}")
+    print(f"  velocity_sequence shape: {velocity_sequence.shape}")
+
+    # Check if velocity_sequence matches deduplicated node count
+    n_nodes_current = node_positions.shape[0]
+    n_nodes_velocity = velocity_sequence.shape[1]
+
+    if n_nodes_velocity != n_nodes_current:
+        print(f"\n  ⚠️  CRITICAL BUG: Velocity array shape mismatch!")
+        print(f"      Velocity: {n_nodes_velocity:,} nodes, Mesh: {n_nodes_current:,} nodes")
+        print(f"  ❌ CANNOT CONTINUE - Stopping execution")
+        raise RuntimeError("Velocity array shape mismatch after deduplication")
+    else:
+        print(f"  ✅ Velocity array correctly remapped ({n_nodes_velocity:,} nodes)")
+
+    # Verify connectivity references valid node IDs
+    max_node_id = np.max(connectivity)
+    if max_node_id >= n_nodes_current:
+        print(f"\n  ⚠️  CONNECTIVITY BUG: Max node ID {max_node_id} >= {n_nodes_current}")
+        print(f"  ❌ CANNOT CONTINUE - Stopping execution")
+        raise RuntimeError("Connectivity references non-existent nodes")
+    else:
+        print(f"  ✅ Connectivity valid (max node ID {max_node_id} < {n_nodes_current})")
+
+    print(f"  ✅ All array consistency checks passed!")
+    print(f"      → Trajectories should now be physically correct\n")
+    # ========================================================================
+
     # Compute velocity cycle parameters
     cycle_params = compute_velocity_cycle_params(
         total_steps=N_STEPS,
@@ -292,24 +441,41 @@ def main():
     print(f"    Tracking steps per velocity step: {cycle_params['steps_per_velocity']}")
 
     # ========================================================================
-    # 2. Build Global Morton Structure (CPU)
+    # 2. Build Global Space-Filling Curve Structure (CPU)
     # ========================================================================
 
-    print("\n[2/6] Building global Morton structure (CPU)...")
-    t_morton = time.time()
+    print(f"\n[2/6] Building global {CURVE_TYPE.upper()} structure (CPU)...")
+    t_octree = time.time()
 
-    morton_struct = build_global_morton_octree(
-        node_positions=node_positions,
-        connectivity=connectivity,
-        leaf_capacity=256,
-        max_depth=21,
-        verbose=False  # Disable verbose for production
-    )
+    # Select octree builder based on configuration
+    if CURVE_TYPE == 'hilbert':
+        octree_struct = build_global_hilbert_octree(
+            node_positions=node_positions,
+            connectivity=connectivity,
+            leaf_capacity=256,
+            max_depth=21,
+            verbose=False  # Disable verbose for production
+        )
+        curve_field_name = 'hilbert_sorted'
+    elif CURVE_TYPE == 'morton':
+        octree_struct = build_global_morton_octree(
+            node_positions=node_positions,
+            connectivity=connectivity,
+            leaf_capacity=256,
+            max_depth=21,
+            verbose=False  # Disable verbose for production
+        )
+        curve_field_name = 'morton_sorted'
+    else:
+        raise ValueError(f"Unknown CURVE_TYPE: {CURVE_TYPE}. Must be 'morton' or 'hilbert'.")
 
-    t_morton = time.time() - t_morton
-    print(f"  Built {morton_struct.n_leaves:,} leaves in {t_morton:.2f}s")
-    morton_memory_mb = (morton_struct.elem_ids_sorted.nbytes + morton_struct.morton_sorted.nbytes) / (1024**2)
-    print(f"  Memory: {morton_memory_mb:.1f} MB")
+    t_octree = time.time() - t_octree
+    print(f"  Built {octree_struct.n_leaves:,} leaves in {t_octree:.2f}s")
+
+    # Get curve indices array (field name differs between Morton/Hilbert structures)
+    curve_indices = getattr(octree_struct, curve_field_name)
+    octree_memory_mb = (octree_struct.elem_ids_sorted.nbytes + curve_indices.nbytes) / (1024**2)
+    print(f"  Memory: {octree_memory_mb:.1f} MB")
 
     # ========================================================================
     # 3. Upload to GPU
@@ -341,21 +507,98 @@ def main():
         verbose=False
     )
 
-    # Upload global Morton structure
-    mesh_gpu_morton = upload_global_morton_to_gpu(
-        morton_struct,
+    # Precompute data for point-in-tet methods
+    if POINT_IN_TET_METHOD == "skala_memory_opt":
+        print("\n  Precomputing element vertices for skala_memory_opt...")
+        from jaxtrace.gpu.search.aa_detection import precompute_element_vertices
+        from jaxtrace.gpu.search.point_in_tet_methods import set_corrected_metadata
+
+        t_elem_verts = time.time()
+        element_vertices = precompute_element_vertices(connectivity, node_positions, verbose=False)
+        t_elem_verts = time.time() - t_elem_verts
+
+        # Register with point-in-tet dispatcher (pass None for AA metadata since we don't use it)
+        from jaxtrace.gpu.search.aa_detection import AxisAlignedMetadata
+        dummy_aa_metadata = AxisAlignedMetadata(
+            base_vertex_indices=jax.device_put(np.zeros(1, dtype=np.int8)),
+            base_vertices=jax.device_put(np.zeros((1, 3), dtype=np.float32)),
+            inv_edge_lengths=jax.device_put(np.zeros((1, 3), dtype=np.float32)),
+            axis_indices=jax.device_put(np.zeros((1, 3), dtype=np.int8)),
+            is_axis_aligned=jax.device_put(np.zeros(1, dtype=bool))
+        )
+        set_corrected_metadata(dummy_aa_metadata, element_vertices)
+
+        elem_verts_mb = element_vertices.nbytes / (1024**2)
+        print(f"    Element vertices: {connectivity.shape[0]:,} × 4 vertices × 3 coords")
+        print(f"    Memory: {elem_verts_mb:.1f} MB")
+        print(f"    Precompute time: {t_elem_verts:.2f}s")
+
+    elif POINT_IN_TET_METHOD == "inverse":
+        print("\n  Precomputing inverse matrices for inverse method...")
+        from jaxtrace.gpu.search.point_in_tet_inverse import precompute_inverse_matrices
+        from jaxtrace.gpu.search.point_in_tet_methods import set_inverse_matrices_gpu
+
+        t_inverse = time.time()
+        M_inv_array, p0_array = precompute_inverse_matrices(connectivity, node_positions)
+        t_inverse = time.time() - t_inverse
+
+        # Upload to GPU and register with point-in-tet dispatcher
+        M_inv_gpu = jax.device_put(M_inv_array)
+        p0_gpu = jax.device_put(p0_array)
+        set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
+
+        inverse_mb = (M_inv_array.nbytes + p0_array.nbytes) / (1024**2)
+        print(f"    Inverse matrices: {connectivity.shape[0]:,} × 3×3 + p0")
+        print(f"    Memory: {inverse_mb:.1f} MB")
+        print(f"    Precompute time: {t_inverse:.2f}s")
+
+    # PHASE 1.3: Compute and upload element volumes for adaptive L1 hop count
+    print("\n  Computing element volumes for adaptive L1...")
+    t_volumes = time.time()
+
+    # Compute element volumes on CPU (tetrahedral volume formula)
+    # Volume = |det([v1-v0, v2-v0, v3-v0])| / 6
+    v0 = node_positions[connectivity[:, 0]]
+    v1 = node_positions[connectivity[:, 1]]
+    v2 = node_positions[connectivity[:, 2]]
+    v3 = node_positions[connectivity[:, 3]]
+
+    # Edge vectors from v0
+    e1 = v1 - v0
+    e2 = v2 - v0
+    e3 = v3 - v0
+
+    # Scalar triple product: e1 · (e2 × e3)
+    cross_e2_e3 = np.cross(e2, e3)
+    det = np.sum(e1 * cross_e2_e3, axis=1)
+    element_volumes_cpu = np.abs(det) / 6.0
+
+    # Upload to GPU
+    element_volumes_gpu = jax.device_put(element_volumes_cpu.astype(np.float32))
+
+    t_volumes = time.time() - t_volumes
+    print(f"    Element volumes computed: {len(element_volumes_cpu):,}")
+    print(f"    Volume range: [{element_volumes_cpu.min():.2e}, {element_volumes_cpu.max():.2e}]")
+    print(f"    Median volume: {np.median(element_volumes_cpu):.2e}")
+    print(f"    Computation time: {t_volumes:.2f}s")
+
+    # Upload global space-filling curve structure
+    # Note: upload_global_morton_to_gpu works for both Morton and Hilbert
+    # (they have identical structure, just different curve indices)
+    mesh_gpu_octree = upload_global_morton_to_gpu(
+        octree_struct,
         connectivity,
         node_positions
     )
 
     # Force transfer
     _ = jax.block_until_ready(mesh_gpu.connectivity)
-    _ = jax.block_until_ready(mesh_gpu_morton.elem_ids_sorted)
+    _ = jax.block_until_ready(mesh_gpu_octree.elem_ids_sorted)
 
     t_upload = time.time() - t_upload
     print(f"  Total upload time: {t_upload:.2f}s")
-    print(f"  Moroton GPU leaves: {mesh_gpu_morton.n_leaves:,}")
-    print(f"  Moroton Prefix Table Depth: {mesh_gpu_morton.table_depth}")
+    print(f"  {CURVE_TYPE.upper()} GPU leaves: {mesh_gpu_octree.n_leaves:,}")
+    print(f"  {CURVE_TYPE.upper()} Prefix Table Depth: {mesh_gpu_octree.table_depth}")
 
     # ========================================================================
     # 4. Initialize Particles
@@ -389,6 +632,29 @@ def main():
         include_boundaries=True
     )
 
+    # PHASE 1.1 FIX: Clip particles to mesh bounds to prevent outside-domain assignment failures
+    # Add 1% safety margin to avoid numerical issues at boundaries
+    print(f"\n  Clipping particles to mesh bounds (Phase 1.1 fix)...")
+    original_positions = particle_positions.copy()
+    mesh_bbox_min = domain_min
+    mesh_bbox_max = domain_max
+    margin = 0.01
+    bbox_min_safe = mesh_bbox_min + margin * (mesh_bbox_max - mesh_bbox_min)
+    bbox_max_safe = mesh_bbox_max - margin * (mesh_bbox_max - mesh_bbox_min)
+
+    particle_positions_clipped = np.clip(particle_positions, bbox_min_safe, bbox_max_safe)
+    particle_positions = particle_positions_clipped
+
+    # Diagnostic: How many particles were clipped?
+    n_moved = np.sum(np.any(particle_positions != original_positions, axis=1))
+    print(f"    Particles clipped to mesh bounds: {n_moved}/{N_PARTICLES}")
+    print(f"    Mesh bounds: X=[{mesh_bbox_min[0]:.6f}, {mesh_bbox_max[0]:.6f}], "
+          f"Y=[{mesh_bbox_min[1]:.6f}, {mesh_bbox_max[1]:.6f}], "
+          f"Z=[{mesh_bbox_min[2]:.6f}, {mesh_bbox_max[2]:.6f}]")
+    print(f"    Safe bounds (1% margin): X=[{bbox_min_safe[0]:.6f}, {bbox_max_safe[0]:.6f}], "
+          f"Y=[{bbox_min_safe[1]:.6f}, {bbox_max_safe[1]:.6f}], "
+          f"Z=[{bbox_min_safe[2]:.6f}, {bbox_max_safe[2]:.6f}]")
+
     # Create particle data with unknown element IDs
     particle_data = ParticleData.from_positions(particle_positions)
 
@@ -421,36 +687,43 @@ def main():
     print(f"\n[6/6] Running time integration ({N_STEPS:,} steps)...")
     print(f"\n  Search hierarchy configuration:")
     if ENABLE_L1_SEARCH:
-        if L2_SEARCH_METHOD == 'neighbors':
-            print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton neighbors, 27 octants)")
+        if L2_SEARCH_METHOD == 'hierarchical':
+            print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} hierarchical, depth 7+6)")
+        elif L2_SEARCH_METHOD == 'neighbors':
+            print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} neighbors, 27 octants)")
         else:
-            print(f"    L0 (cached element) → L1 ({N_HOPS} hops) → L2 (Morton radius, ±{L2_SEARCH_RADIUS})")
+            print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} radius, ±{L2_SEARCH_RADIUS})")
+        print(f"    ✅ PHASE 1.3: L1 uses adaptive hop count (6 hops at refinement boundaries)")
     else:
-        if L2_SEARCH_METHOD == 'neighbors':
-            print(f"    L0 (cached element) → L2 (Morton neighbors, 27 octants)")
+        if L2_SEARCH_METHOD == 'hierarchical':
+            print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} hierarchical, depth 7+6)")
+        elif L2_SEARCH_METHOD == 'neighbors':
+            print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} neighbors, 27 octants)")
         else:
-            print(f"    L0 (cached element) → L2 (Morton radius, ±{L2_SEARCH_RADIUS})")
+            print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} radius, ±{L2_SEARCH_RADIUS})")
         print(f"    ⚠️  L1 neighbor search DISABLED")
 
     print(f"    L2 method: {L2_SEARCH_METHOD}")
-    if L2_SEARCH_METHOD == 'neighbors':
-        if mesh_gpu_morton.table_depth == 0:
-            print(f"    ❌ ERROR: Morton neighbor method requires octree prefix table!")
-            print(f"             Current table_depth = 0. Check Morton structure build.")
+    if L2_SEARCH_METHOD in ['neighbors', 'hierarchical']:
+        if mesh_gpu_octree.table_depth == 0:
+            print(f"    ❌ ERROR: {L2_SEARCH_METHOD} method requires octree prefix table!")
+            print(f"             Current table_depth = 0. Check {CURVE_TYPE.upper()} structure build.")
             return 1
         else:
-            print(f"    ✅ Octree prefix table available (depth={mesh_gpu_morton.table_depth})")
+            print(f"    ✅ Octree prefix table available (depth={mesh_gpu_octree.table_depth})")
 
     # Create fully-fused time-dependent RK4 step function
     rk4_step = create_rk4_fully_fused_timedep(
         mesh_gpu_connectivity=mesh_gpu.connectivity,
         mesh_gpu_node_positions=mesh_gpu.node_positions,
         mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
-        mesh_gpu_global_morton=mesh_gpu_morton,
+        mesh_gpu_element_volumes=element_volumes_gpu,  # PHASE 1.3: For adaptive L1 hop count
+        mesh_gpu_global_morton=mesh_gpu_octree,  # Works for both Morton and Hilbert
         n_hops=N_HOPS,
         l2_search_radius=L2_SEARCH_RADIUS,
         enable_l1_search=ENABLE_L1_SEARCH,
-        l2_search_method=L2_SEARCH_METHOD
+        l2_search_method=L2_SEARCH_METHOD,
+        l2_incremental_radii=INCREMENTAL_SEARCH_RADII  # Configurable tiers for incremental search
     )
 
     # Upload velocity sequence and particle data to GPU ONCE
@@ -468,11 +741,11 @@ def main():
     # Start with radius=100 for all, then search unassigned with larger radii
     print(f"\n  Running cascading initial assignment...")
     print(f"    Initial radius: {INITIAL_SEARCH_RADIUS} (all particles)")
-    print(f"    Fallback radii: [200, 500, 1000] (only unassigned particles)")
+    print(f"    Fallback radii: {INITIAL_SEARCH_FALLBACK_RADII} (only unassigned particles)")
     t_initial_search = time.time()
     element_ids_gpu = initial_assignment_cascading_fallback(
         positions_gpu,
-        mesh_gpu_morton,
+        mesh_gpu_octree,  # Works for both Morton and Hilbert
         initial_radius=INITIAL_SEARCH_RADIUS,
         fallback_radii=INITIAL_SEARCH_FALLBACK_RADII,
         verbose=True
@@ -485,6 +758,84 @@ def main():
     initial_success_rate = (n_active_initial / N_PARTICLES) * 100
     print(f"    Initial assignment: {n_active_initial:,}/{N_PARTICLES:,} ({initial_success_rate:.2f}%)")
     print(f"    Search time: {t_initial_search:.2f}s")
+
+    # ========================================================================
+    # DIAGNOSTIC: Analyze Initial Assignment Failures (Phase 1 Priority 1)
+    # ========================================================================
+    if initial_success_rate < 95.0:
+        print(f"\n  DIAGNOSTIC: Analyzing {N_PARTICLES - n_active_initial:,} failed assignments...")
+
+        # Download positions and element IDs for analysis
+        positions_cpu = np.array(positions_gpu)
+        element_ids_cpu = np.array(element_ids_gpu)
+
+        # Identify unassigned particles
+        unassigned_mask = element_ids_cpu == -1
+        unassigned_positions = positions_cpu[unassigned_mask]
+        assigned_positions = positions_cpu[~unassigned_mask]
+
+        # Spatial distribution of unassigned particles
+        print(f"\n  Spatial distribution:")
+        print(f"    Unassigned particles ({np.sum(unassigned_mask):,}):")
+        print(f"      X: [{unassigned_positions[:, 0].min():.6f}, {unassigned_positions[:, 0].max():.6f}]")
+        print(f"      Y: [{unassigned_positions[:, 1].min():.6f}, {unassigned_positions[:, 1].max():.6f}]")
+        print(f"      Z: [{unassigned_positions[:, 2].min():.6f}, {unassigned_positions[:, 2].max():.6f}]")
+        print(f"    Assigned particles ({np.sum(~unassigned_mask):,}):")
+        print(f"      X: [{assigned_positions[:, 0].min():.6f}, {assigned_positions[:, 0].max():.6f}]")
+        print(f"      Y: [{assigned_positions[:, 1].min():.6f}, {assigned_positions[:, 1].max():.6f}]")
+        print(f"      Z: [{assigned_positions[:, 2].min():.6f}, {assigned_positions[:, 2].max():.6f}]")
+
+        # Mesh element coverage in seeded region
+        all_par_min = positions_cpu.min(axis=0)
+        all_par_max = positions_cpu.max(axis=0)
+
+        # Download mesh data for analysis
+        connectivity_cpu = np.array(mesh_gpu.connectivity)
+        node_positions_cpu = np.array(mesh_gpu.node_positions)
+        # element_volumes_cpu already computed above (no need to download from GPU)
+
+        # Count elements in seeded region
+        element_centroids = node_positions_cpu[connectivity_cpu].mean(axis=1)
+        in_region_mask = (
+            (element_centroids[:, 0] >= all_par_min[0]) & (element_centroids[:, 0] <= all_par_max[0]) &
+            (element_centroids[:, 1] >= all_par_min[1]) & (element_centroids[:, 1] <= all_par_max[1]) &
+            (element_centroids[:, 2] >= all_par_min[2]) & (element_centroids[:, 2] <= all_par_max[2])
+        )
+        n_elements_in_region = np.sum(in_region_mask)
+
+        print(f"\n  Mesh coverage in seeded region:")
+        print(f"    Seeded region: X=[{all_par_min[0]:.6f}, {all_par_max[0]:.6f}], "
+              f"Y=[{all_par_min[1]:.6f}, {all_par_max[1]:.6f}], "
+              f"Z=[{all_par_min[2]:.6f}, {all_par_max[2]:.6f}]")
+        print(f"    Elements in region: {n_elements_in_region:,}/{connectivity_cpu.shape[0]:,} "
+              f"({100.0 * n_elements_in_region / connectivity_cpu.shape[0]:.2f}%)")
+
+        # Element size distribution in seeded region
+        if n_elements_in_region > 0:
+            region_volumes = element_volumes_cpu[in_region_mask]
+            print(f"\n  Element size distribution in seeded region:")
+            print(f"    Volume range: [{region_volumes.min():.2e}, {region_volumes.max():.2e}]")
+            print(f"    Volume median: {np.median(region_volumes):.2e}")
+            print(f"    Volume mean: {np.mean(region_volumes):.2e}")
+            print(f"    Volume std: {np.std(region_volumes):.2e}")
+
+            # Characteristic length = cube root of volume
+            region_char_lengths = np.cbrt(region_volumes)
+            print(f"    Characteristic length range: [{region_char_lengths.min():.2e}, {region_char_lengths.max():.2e}]")
+            print(f"    Characteristic length median: {np.median(region_char_lengths):.2e}")
+
+            # Size ratio (largest / smallest)
+            size_ratio = region_volumes.max() / region_volumes.min()
+            print(f"    Size ratio (max/min): {size_ratio:.2f}×")
+
+            # Refinement detection (10× volume difference)
+            refined_mask = region_volumes < np.median(region_volumes) * 0.1
+            n_refined = np.sum(refined_mask)
+            if n_refined > 0:
+                print(f"    Refined elements (>10× smaller than median): {n_refined:,}/{n_elements_in_region:,} "
+                      f"({100.0 * n_refined / n_elements_in_region:.2f}%)")
+
+        print(f"\n  DIAGNOSTIC: Analysis complete. Proceeding with compilation...\n")
 
     # Run first step to trigger JIT compilation (data stays on GPU)
     print("\n  Compiling RK4 (first step)...")
@@ -656,12 +1007,12 @@ def main():
         success = False
 
     # Memory
-    total_memory_mb = morton_memory_mb + 50  # Approx for mesh data
-    print(f"✅ Memory: ~{total_memory_mb:.0f} MB (global Morton + mesh)")
+    total_memory_mb = octree_memory_mb + 50  # Approx for mesh data
+    print(f"✅ Memory: ~{total_memory_mb:.0f} MB (global {CURVE_TYPE.upper()} + mesh)")
 
     # Architecture
-    print(f"✅ Architecture: L0 (cached) + L1 ({N_HOPS}-hop) + L2 (global Morton, radius={L2_SEARCH_RADIUS})")
-    print(f"✅ Morton structure: {morton_struct.n_leaves:,} leaves, {morton_struct.leaf_capacity} capacity")
+    print(f"✅ Architecture: L0 (cached) + L1 ({N_HOPS}-hop) + L2 (global {CURVE_TYPE.upper()}, radius={L2_SEARCH_RADIUS})")
+    print(f"✅ {CURVE_TYPE.upper()} structure: {octree_struct.n_leaves:,} leaves, {octree_struct.leaf_capacity} capacity")
     print(f"✅ No JAX OOM errors")
 
     # Export summary
@@ -671,7 +1022,7 @@ def main():
 
     if success:
         print("\n🎉 PRODUCTION TEST PASSED!")
-        print("   Global Morton L2 search meets all performance targets.")
+        print(f"   Global {CURVE_TYPE.upper()} L2 search meets all performance targets.")
     else:
         print("\n⚠️  PRODUCTION TEST RESULTS")
         print("   Some metrics below target. Review L2 configuration or increase search radius.")

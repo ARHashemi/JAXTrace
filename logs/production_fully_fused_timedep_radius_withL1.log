@@ -1,0 +1,371 @@
+unset LD_PRELOAD && python production_tracking_fully_fused_timedep.py
+ERROR:2026-01-14 13:25:52,755:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Production Particle Tracking - Global MORTON L2 Search
+================================================================================
+Grid resolution: 50 × 90 × 50 = 225,000 particles
+Timesteps: 2,500
+dt: 2.50e-03
+Space-filling curve: morton
+L1 hops: 3
+L2 radius: 10
+================================================================================
+
+[1/6] Loading mesh and velocity sequence...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 120-159 (40 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_122.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_123.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_124.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_125.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_126.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_127.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_128.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_129.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_130.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 11/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_131.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_132.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_133.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_134.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_135.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_136.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_137.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_138.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_139.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_140.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 21/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_141.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_142.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_143.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_144.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_145.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_146.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_147.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_148.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_149.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_150.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 31/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_151.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_152.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_153.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_154.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_155.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_156.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_157.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 40/40 timesteps
+    Memory: 357.5 MB
+
+  Mesh: 3,048,900 elements, 780,922 nodes
+  Velocity timesteps: 40
+  Total load time: 175.12s
+
+[1.5/6] Checking for duplicate nodes (PVTU piece boundary fix)...
+
+================================================================================
+Deduplicating nodes (fixing PVTU piece boundaries)
+================================================================================
+  Original nodes: 780,922
+  Detecting exact duplicates...
+  Unique nodes:   571,173
+  Duplicate nodes: 209,749 (26.9%)
+
+  Compacting node array...
+  Remapping connectivity...
+  Remapping velocity sequence...
+    Original velocity: (40, 780922, 3)
+    Remapped velocity: (40, 571173, 3)
+  Validating...
+  ✅ No degenerate elements
+
+✅ Node deduplication complete!
+  Removed 209,749 duplicate nodes
+  Mesh size: 780,922 → 571,173 nodes
+  Velocity arrays remapped: 40 timesteps
+================================================================================
+
+  ✅ Fixed PVTU piece boundaries: removed 209,749 duplicates in 5.53s
+  This should significantly improve particle retention!
+
+[DIAGNOSTIC] Verifying array consistency after deduplication...
+  node_positions shape:   (571173, 3)
+  connectivity shape:     (3048900, 4)
+  velocity_sequence shape: (40, 571173, 3)
+  ✅ Velocity array correctly remapped (571,173 nodes)
+  ✅ Connectivity valid (max node ID 571172 < 571173)
+  ✅ All array consistency checks passed!
+      → Trajectories should now be physically correct
+
+
+  Velocity cycle parameters:
+    Cycle period: 0.100 time units
+    Number of cycles: 62.50
+    Tracking steps per velocity step: 1
+
+[2/6] Building global MORTON structure (CPU)...
+  Built 24,550 leaves in 13.02s
+  Memory: 34.9 MB
+
+[3/6] Uploading mesh and Morton structure to GPU...
+  Computing element neighbors (FACE-BASED)...
+
+Building element neighbors array for 3,048,900 elements...
+  Method: face
+
+Extracting element neighbors for 3,048,900 elements...
+Building face-to-element map for 3,048,900 elements...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+  Total unique faces: 6,278,115
+Building neighbor lists...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+
+AdjacencyStats(
+  Elements: 3,048,900
+  Total faces: 6,278,115
+  Internal faces: 5,917,485
+  Boundary faces: 360,630
+  Neighbors per element: min=1, max=4, avg=3.88
+)
+  Converting to padded array (3048900, 4)...
+  Elements with max neighbors: 2,691,163 (88.3%)
+  Elements with < max neighbors: 357,737 (11.7%)
+  Avg neighbors per element: 3.88
+  Element neighbors array built successfully!
+    Neighbor computation: 50.79s
+    Neighbor memory: 46.5 MB
+    Neighbor array shape: (3048900, 4)
+    Max neighbors per element: 4
+    ⚠  WARNING: Face-based neighbors may NOT work for 1:2 octree refinement!
+              If trajectories are linear, switch to NEIGHBOR_METHOD='node'
+
+  Computing element volumes for adaptive L1...
+    Element volumes computed: 3,048,900
+    Volume range: [8.12e-14, 2.13e-08]
+    Median volume: 8.12e-14
+    Computation time: 0.42s
+  Total upload time: 51.43s
+  MORTON GPU leaves: 24,550
+  MORTON Prefix Table Depth: 7
+
+[4/6] Initializing 225,000 particles (uniform grid 50×90×50)...
+  Particle bounds:
+    X: [-0.018000, -0.009000] (domain fraction: (0.2, 0.35))
+    Y: [-0.013800, 0.013800] (domain fraction: (0.2, 0.8))
+    Z: [-0.007000, 0.000000] (domain fraction: (0.3, 1.0))
+
+  Clipping particles to mesh bounds (Phase 1.1 fix)...
+    Particles clipped to mesh bounds: 4500/225000
+    Mesh bounds: X=[-0.030000, 0.030000], Y=[-0.023000, 0.023000], Z=[-0.010000, 0.000000]
+    Safe bounds (1% margin): X=[-0.029400, 0.029400], Y=[-0.022540, 0.022540], Z=[-0.009900, -0.000100]
+  Created 225,000 particles in uniform grid
+
+[5/6] Setting up async VTK export...
+  Output directory: output/global_morton_timedep_optimized
+  Export frequency: every 10 steps
+  Store velocities: No
+  Expected exports: 250
+
+[6/6] Running time integration (2,500 steps)...
+
+  Search hierarchy configuration:
+    L0 (cached element) → L1 (adaptive 3-6 hops) → L2 (MORTON radius, ±10)
+    ✅ PHASE 1.3: L1 uses adaptive hop count (6 hops at refinement boundaries)
+    L2 method: radius
+
+  Uploading data to GPU...
+    Velocity sequence upload: 0.17s (261.5 MB)
+    Particle data upload: minimal
+
+  Running cascading initial assignment...
+    Initial radius: 500 (all particles)
+    Fallback radii: [1000, 2000, 5000, 10000, 100000] (only unassigned particles)
+
+  Initial search (radius=500) for all particles...
+    Assigned: 188,635/225,000 (83.84%)
+
+  Cascading fallback search for 36,365 unassigned particles...
+    radius=1000: Searching 36,365 particles...
+               Found: 11,211 (total: 199,846/225,000, 88.82%)
+    radius=2000: Searching 25,154 particles...
+               Found: 12,294 (total: 212,140/225,000, 94.28%)
+    radius=5000: Searching 12,860 particles...
+               Found: 10,461 (total: 222,601/225,000, 98.93%)
+    radius=10000: Searching 2,399 particles...
+               Found: 488 (total: 223,089/225,000, 99.15%)
+    radius=100000: Searching 1,911 particles...
+               Found: 1,911 (total: 225,000/225,000, 100.00%)
+
+  Final assignment: 225,000/225,000 (100.00%)
+    Initial assignment: 225,000/225,000 (100.00%)
+    Search time: 423.31s
+
+  Compiling RK4 (first step)...
+    Compilation time: 52.81s
+
+  Running 2,500 timesteps...
+    Step     Active  Retention    Step Time      Throughput
+  ------ ---------- ---------- ------------ ---------------
+     100    210,522     93.57%   11623.43 ms        19357 p/s | Exported:    9
+     200    196,536     87.35%   11703.15 ms        19226 p/s | Exported:   19
+Killed

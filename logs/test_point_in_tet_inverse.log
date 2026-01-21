@@ -1,0 +1,104 @@
+python test_point_in_tet_inverse.py
+ERROR:2026-01-18 14:11:27,100:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+POINT-IN-TET INVERSE MATRIX VALIDATION & BENCHMARK
+================================================================================
+
+1. Loading production mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+   ✓ Loaded mesh from PVTU sequence
+   Elements: 3,048,900
+   Nodes: 571,173
+   Duplicates removed: 209,749
+
+2. Precomputing inverse matrices...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+   ✓ Precomputed inverse matrices
+
+3. Uploading to GPU...
+   ✓ Uploaded to GPU
+   Total GPU memory: 199.2 MB
+
+4. Generating test positions...
+   ✓ Generated 100,000 test queries
+   Distribution:
+   - Interior random: 50,000 (50%)
+   - Near centers: 30,000 (30%)
+   - Near boundary: 20,000 (20%)
+
+5. Validating correctness (100% agreement required)...
+   Comparing: inverse vs current (baseline)
+   Running validation...
+
+   Agreement: 100,000 / 100,000 (100.000000%)
+   ✓ VALIDATION PASSED: 100% agreement!
+
+6. Benchmarking performance...
+   Testing 100,000 queries × 5 iterations
+
+   Current (baseline) method:
+   Iteration 1: 0.002s (43,901,026 queries/s)
+   Iteration 2: 0.002s (43,151,276 queries/s)
+   Iteration 3: 0.002s (44,356,007 queries/s)
+   Iteration 4: 0.002s (45,182,635 queries/s)
+   Iteration 5: 0.002s (45,496,301 queries/s)
+
+   Inverse matrix method:
+   Iteration 1: 0.001s (195,995,514 queries/s)
+   Iteration 2: 0.000s (233,016,889 queries/s)
+   Iteration 3: 0.000s (209,505,694 queries/s)
+   Iteration 4: 0.000s (230,963,877 queries/s)
+   Iteration 5: 0.000s (216,984,170 queries/s)
+
+   Current:  0.002s ± 0.000s (44,401,084 queries/s)
+   Inverse:  0.000s ± 0.000s (216,402,022 queries/s)
+   Speedup:  4.87×
+
+7. Comparing to skala_memory_opt...
+   (Skipped: cannot import name 'AxisAlignedMetadata' from 'jaxtrace.gpu.search.point_in_tet_methods' (/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/point_in_tet_methods.py))
+
+================================================================================
+SUMMARY
+================================================================================
+✓ Correctness: 100% agreement with baseline
+✓ Performance: 4.87× speedup over current method
+  - Current:  44,401,084 queries/s
+  - Inverse:  216,402,022 queries/s
+
+✓ EXCELLENT: Achieved 4.87× speedup (target: 3-4×)
+
+Next steps:
+1. Run production test with POINT_IN_TET_METHOD='inverse'
+2. Verify retention % is identical to current method
+3. Measure end-to-end speedup in RK4 tracking
+================================================================================

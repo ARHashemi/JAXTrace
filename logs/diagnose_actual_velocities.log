@@ -1,0 +1,61 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+DIAGNOSING ACTUAL VELOCITIES USED BY PARTICLES
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_122.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+
+Classifying mesh regions...
+  Fine elements (<0.1363mm): 288,749
+  Coarse elements (>0.2727mm): 304,309
+
+  Fine region mean |vel|: 2.846431e-01 m/s
+  Coarse region mean |vel|: 8.463584e-02 m/s
+  Ratio: 3.36x
+
+Setting up tracking structures...
+
+Performing initial assignment...
+  Fine region: 100/100 assigned (100.0%)
+  Coarse region: 100/100 assigned (100.0%)
+
+Assignment correctness:
+  Fine region: 100/100 correct (100.0%)
+  Coarse region: 100/100 correct (100.0%)
+
+================================================================================
+TRACKING ONE PARTICLE FOR 10 STEPS
+================================================================================
+
+Starting in fine region:
+  Element: 2584814
+  Element size: 0.1363 mm
+  Element velocity: 3.977237e-01 m/s
+  Step 0: elem 2584814, |v|=3.977237e-01, disp=1.076138mm, ratio=1.082
+  Step 1: elem 2584814, |v|=3.977237e-01, disp=1.076127mm, ratio=1.082
+  Step 2: elem 2584814, |v|=3.977237e-01, disp=1.076116mm, ratio=1.082
+  Step 3: elem 2584814, |v|=3.977237e-01, disp=1.076138mm, ratio=1.082
+  Step 4: elem 2584814, |v|=3.977237e-01, disp=1.076127mm, ratio=1.082
+  Step 5: elem 2584814, |v|=3.977237e-01, disp=1.076116mm, ratio=1.082
+  Step 6: elem 2584814, |v|=3.977237e-01, disp=1.076138mm, ratio=1.082
+  Step 7: elem 2584814, |v|=3.977237e-01, disp=1.076127mm, ratio=1.082
+  Step 8: elem 2584814, |v|=3.977237e-01, disp=1.076116mm, ratio=1.082
+  Step 9: elem 2584814, |v|=3.977237e-01, disp=1.076138mm, ratio=1.082
+================================================================================
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/diagnose_actual_velocities_used.py", line 211, in <module>
+    EOF
+NameError: name 'EOF' is not defined

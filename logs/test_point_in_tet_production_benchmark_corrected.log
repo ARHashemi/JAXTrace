@@ -1,0 +1,339 @@
+python3 test_point_in_tet_production_benchmark.py
+ERROR:2026-01-16 13:06:10,279:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Point-in-Tetrahedron PRODUCTION Benchmark
+Testing within REAL initial assignment (cascading radius search)
+================================================================================
+JAX version: 0.8.2
+JAX devices: [CudaDevice(id=0)]
+================================================================================
+
+[1/7] Loading mesh from PVTU...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Mesh loaded in 9.10s
+  Elements: 3,048,900, Nodes: 780,922
+
+[2/7] Deduplicating nodes...
+  Removed 209,749 duplicates in 5.42s
+  Nodes: 571,173
+
+[3/9] Precomputing corrected AA metadata...
+
+================================================================================
+Precomputing Axis-Aligned Metadata (Corrected Algorithm)
+================================================================================
+  Elements: 3,048,900
+  Sampling edge lengths to determine adaptive tolerance...
+  Edge length range: 7.81e-05 to 4.36e-03
+  Dynamic range: 55.8×
+  Base tolerance: 1.00e-10 (relative)
+
+  Processing 3,048,900 elements...
+    Progress: 100.0% (3,048,900/3,048,900)
+
+  ✅ Detection complete!
+  Axis-aligned elements: 1,820/3,048,900 (0.06%)
+  ❌ Only 0.1% AA → Skip AA optimization
+================================================================================
+  AA metadata precomputed in 29.04s
+  Axis-aligned elements: 1,820/3,048,900 (0.06%)
+  ⚠  Mesh is mostly non-AA (0.1% AA) - skala_memory_opt recommended
+
+[4/9] Precomputing element vertices (memory optimization)...
+
+Precomputing element vertices for memory optimization...
+  Elements: 3,048,900
+  Progress: 100.0% (3,048,900/3,048,900)
+  ✅ Complete! Memory: 139.6 MB
+  Element vertices precomputed in 3.75s
+
+[5/9] Building Morton octree...
+  Built 24,550 leaves in 13.01s
+
+[6/9] Uploading to GPU...
+  Uploaded mesh and Morton octree to GPU
+  Corrected AA metadata registered for new methods
+
+[7/9] Generating particles...
+  Generated 30,000 particles
+
+[8/9] Benchmarking initial assignment with 6 methods...
+  Configuration:
+    Initial radius: 500
+    Fallback radii: [1000, 2000, 5000, 10000, 100000]
+    Particles: 30,000
+
+  Methods to test:
+    OLD (broken): current, skala, axis_aligned
+    NEW (corrected): pure_aa, skala_memory_opt, branchless_hybrid
+
+  Testing method: current
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 28,400/30,000 (94.67%)
+    Search Time: 18.09 s
+
+  Cascading fallback search for 1,600 unassigned particles...
+    radius=1000: Searching 1,600 particles...
+               Search Time: 8.16 s
+               Found: 1,053 (total: 29,453/30,000, 98.18%)
+    radius=2000: Searching 547 particles...
+               Search Time: 12.17 s
+               Found: 175 (total: 29,628/30,000, 98.76%)
+    radius=5000: Searching 372 particles...
+               Search Time: 24.89 s
+               Found: 307 (total: 29,935/30,000, 99.78%)
+    radius=10000: Searching 65 particles...
+               Search Time: 43.60 s
+               Found: 9 (total: 29,944/30,000, 99.81%)
+    radius=100000: Searching 56 particles...
+               Search Time: 162.12 s
+               Found: 56 (total: 30,000/30,000, 100.00%)
+
+  Final assignment: 30,000/30,000 (100.00%)
+    Time: 271.64s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 110 particles/s
+
+  Testing method: skala
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 28,400/30,000 (94.67%)
+    Search Time: 22.57 s
+
+  Cascading fallback search for 1,600 unassigned particles...
+    radius=1000: Searching 1,600 particles...
+               Search Time: 7.70 s
+               Found: 1,053 (total: 29,453/30,000, 98.18%)
+    radius=2000: Searching 547 particles...
+               Search Time: 11.90 s
+               Found: 175 (total: 29,628/30,000, 98.76%)
+    radius=5000: Searching 372 particles...
+               Search Time: 30.03 s
+               Found: 307 (total: 29,935/30,000, 99.78%)
+    radius=10000: Searching 65 particles...
+               Search Time: 41.83 s
+               Found: 9 (total: 29,944/30,000, 99.81%)
+    radius=100000: Searching 56 particles...
+               Search Time: 189.15 s
+               Found: 56 (total: 30,000/30,000, 100.00%)
+
+  Final assignment: 30,000/30,000 (100.00%)
+    Time: 303.20s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 99 particles/s
+
+  Testing method: axis_aligned
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 28,242/30,000 (94.14%)
+    Search Time: 69.20 s
+
+  Cascading fallback search for 1,758 unassigned particles...
+    radius=1000: Searching 1,758 particles...
+               Search Time: 13.46 s
+               Found: 1,031 (total: 29,273/30,000, 97.58%)
+    radius=2000: Searching 727 particles...
+               Search Time: 23.38 s
+               Found: 183 (total: 29,456/30,000, 98.19%)
+    radius=5000: Searching 544 particles...
+               Search Time: 55.43 s
+               Found: 298 (total: 29,754/30,000, 99.18%)
+    radius=10000: Searching 246 particles...
+               Search Time: 96.06 s
+               Found: 10 (total: 29,764/30,000, 99.21%)
+    radius=100000: Searching 236 particles...
+               Search Time: 349.79 s
+               Found: 56 (total: 29,820/30,000, 99.40%)
+
+  Final assignment: 29,820/30,000 (99.40%)
+  ⚠  180 particles could not be assigned
+     These particles are likely outside the mesh domain
+    Time: 609.50s
+    Assigned: 29,820/30,000 (99.40%)
+    Throughput: 49 particles/s
+
+  Testing method: pure_aa
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 30,000/30,000 (100.00%)
+    Search Time: 9.87 s
+
+  Final assignment: 30,000/30,000 (100.00%)
+    Time: 9.88s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 3,036 particles/s
+
+  Testing method: skala_memory_opt
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 28,400/30,000 (94.67%)
+    Search Time: 16.66 s
+
+  Cascading fallback search for 1,600 unassigned particles...
+    radius=1000: Searching 1,600 particles...
+               Search Time: 10.66 s
+               Found: 1,053 (total: 29,453/30,000, 98.18%)
+    radius=2000: Searching 547 particles...
+               Search Time: 14.78 s
+               Found: 175 (total: 29,628/30,000, 98.76%)
+    radius=5000: Searching 372 particles...
+               Search Time: 27.64 s
+               Found: 307 (total: 29,935/30,000, 99.78%)
+    radius=10000: Searching 65 particles...
+               Search Time: 44.57 s
+               Found: 9 (total: 29,944/30,000, 99.81%)
+    radius=100000: Searching 56 particles...
+               Search Time: 164.38 s
+               Found: 56 (total: 30,000/30,000, 100.00%)
+
+  Final assignment: 30,000/30,000 (100.00%)
+    Time: 278.75s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 108 particles/s
+
+  Testing method: branchless_hybrid
+    Warming up JIT...
+    Running full initial assignment...
+
+  Initial search (radius=500) for all particles...
+    Assigned: 26,520/30,000 (88.40%)
+    Search Time: 21.97 s
+
+  Cascading fallback search for 3,480 unassigned particles...
+    radius=1000: Searching 3,480 particles...
+               Search Time: 12.78 s
+               Found: 1,053 (total: 27,573/30,000, 91.91%)
+    radius=2000: Searching 2,427 particles...
+               Search Time: 21.28 s
+               Found: 175 (total: 27,748/30,000, 92.49%)
+    radius=5000: Searching 2,252 particles...
+               Search Time: 44.81 s
+               Found: 307 (total: 28,055/30,000, 93.52%)
+    radius=10000: Searching 1,945 particles...
+               Search Time: 71.38 s
+               Found: 9 (total: 28,064/30,000, 93.55%)
+    radius=100000: Searching 1,936 particles...
+               Search Time: 264.69 s
+               Found: 56 (total: 28,120/30,000, 93.73%)
+
+  Final assignment: 28,120/30,000 (93.73%)
+  ⚠  1,880 particles could not be assigned
+     These particles are likely outside the mesh domain
+    Time: 439.31s
+    Assigned: 28,120/30,000 (93.73%)
+    Throughput: 68 particles/s
+
+
+[9/9] Results Summary
+================================================================================
+INITIAL ASSIGNMENT BENCHMARK
+================================================================================
+Mesh: 3,048,900 elements, 571,173 nodes
+Particles: 30,000
+Morton leaves: 24,550
+
+Timing Results:
+================================================================================
+OLD Methods (original implementation):
+--------------------------------------------------------------------------------
+  current                 271.64s           110 p/s  [1.00× speedup]  (100.00% assigned)
+  skala                   303.20s            99 p/s  [0.90× speedup]  (100.00% assigned)
+  axis_aligned            609.50s            49 p/s  [0.45× speedup]  (99.40% assigned)
+
+NEW Methods (corrected implementation):
+--------------------------------------------------------------------------------
+  pure_aa                   9.88s         3,036 p/s  [27.49× speedup]  (100.00% assigned)
+  skala_memory_opt        278.75s           108 p/s  [0.97× speedup]  (100.00% assigned)
+  branchless_hybrid       439.31s            68 p/s  [0.62× speedup]  (93.73% assigned)
+
+Assignment Agreement:
+================================================================================
+  current    ↔ skala                 ✅ PASS
+  current    ↔ axis_aligned          ❌ FAIL
+    Different assignment status: 180
+    Different elements: 1426
+  current    ↔ pure_aa               ❌ FAIL
+    Different assignment status: 0
+    Different elements: 30000
+  current    ↔ skala_memory_opt      ✅ PASS
+  current    ↔ branchless_hybrid     ❌ FAIL
+    Different assignment status: 1880
+    Different elements: 828
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+Best Corrected Method: pure_aa
+  Speedup: 27.49×
+  Throughput: 3,036 p/s
+  Assignment rate: 100.00%
+
+✅ EXCELLENT: pure_aa achieves 27.49× speedup (target: 3-4×)
+   Recommend: Use POINT_IN_TET_METHOD='pure_aa' in production
+
+Corrected vs OLD axis_aligned:
+  OLD axis_aligned: 0.45× speedup (BROKEN)
+  NEW pure_aa: 27.49× speedup
+  Improvement: 61.68× faster than OLD implementation
+
+❌ WARNING: Methods disagree on assignments - investigate before production use
+
+================================================================================
+Production Extrapolation (2,500 timesteps):
+================================================================================
+Assumptions:
+  - Initial assignment: 1× (one-time cost)
+  - RK4 integration: 2,500 steps
+  - Point-in-tet is 60% of RK4 time
+  - Speedup applies to point-in-tet portion only
+
+OLD Methods:
+  current               Initial: 271.64s, Expected RK4 speedup: 1.00×
+  skala                 Initial: 303.20s, Expected RK4 speedup: 0.90×
+  axis_aligned          Initial: 609.50s, Expected RK4 speedup: 0.45×
+
+NEW Methods (corrected):
+  pure_aa               Initial: 9.88s, Expected RK4 speedup: 27.49×
+  skala_memory_opt      Initial: 278.75s, Expected RK4 speedup: 0.97×
+  branchless_hybrid     Initial: 439.31s, Expected RK4 speedup: 0.62×
+
+================================================================================
+Test complete!
+================================================================================

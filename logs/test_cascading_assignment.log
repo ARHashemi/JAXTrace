@@ -1,0 +1,229 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+TESTING CASCADING INITIAL ASSIGNMENT
+================================================================================
+
+[1/4] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_122.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_123.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_124.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_125.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_126.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_127.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_128.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_129.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_130.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_131.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_132.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_133.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_134.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_135.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_136.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_137.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_138.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_139.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_140.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_141.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_142.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_143.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_144.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_145.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_146.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_147.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_148.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_149.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_150.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_151.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_152.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_153.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_154.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_155.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_156.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_157.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 184.62s
+  Nodes: 780,922
+  Elements: 3,048,900
+  Velocity timesteps: 40
+
+  Element size distribution:
+    Min: 0.1363 mm
+    10th percentile (refined): 0.1363 mm
+    Median: 0.1363 mm
+    90th percentile (coarse): 0.2727 mm
+    Max: 8.7249 mm
+  Fine elements (<0.1363mm): 288,749 (9.5%)
+
+[2/4] Setting up GPU structures...
+  Morton octree built in 11.60s
+
+[3/4] Generating particles...
+  Generated 225,000 particles (50×90×50)
+  Seeding region: [-24.00, -12.00] × [-13.80, 13.80] × [-7.00, 0.00] mm
+
+  Refined region bounding box:
+    X: [-9.04, 9.02] mm
+    Y: [-9.16, 9.16] mm
+    Z: [-4.51, -0.02] mm
+  Particles in refined region: 0/225,000 (0.00%)
+
+  ⚠️  WARNING: Only 0 particles in refined region!
+      This may be insufficient to capture rotating velocities.
+
+[4/4] Running cascading initial assignment...
+  Initial radius: 100 (all particles)
+  Fallback radii: [200, 500, 1000] (only unassigned particles)W1218 01:23:24.406339 2835865 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 2.24GiB (rounded to 2400720640)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W1218 01:23:24.406559 2835865 bfc_allocator.cc:512] _______________________________________________________________________________**________***********
+E1218 01:23:24.406579 2835865 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 2400720440 bytes. [tf-allocator-allocation-error='']
+
+
+  Initial search (radius=100) for all particles...
+    Assigned: 176,221/225,000 (78.32%)
+
+  Cascading fallback search for 48,779 unassigned particles...
+    radius= 200: Searching 48,779 particles...
+               Found: 437 (total: 176,658/225,000, 78.51%)
+    radius= 500: Searching 48,342 particles...
+               Found: 367 (total: 177,025/225,000, 78.68%)
+    radius=1000: Searching 47,975 particles...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_cascading_initial_assignment.py", line 160, in <module>
+    element_ids = initial_assignment_cascading_fallback(
+        positions_gpu,
+    ...<3 lines>...
+        verbose=True
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/initial_assignment_cascading.py", line 180, in initial_assignment_cascading_fallback
+    found_elements = search_unassigned_batch(unassigned_positions)
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 2400720440 bytes.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

@@ -267,13 +267,23 @@ def build_prefix_table(
     # Find maximum prefix_bits among all leaves (deepest level)
     max_prefix_bits = max(leaf.prefix_bits for leaf in leaves)
 
-    # Determine table depth: use minimum depth where table size reasonable
-    for table_depth_bits in range(max_prefix_bits, 2, -3):  # Step by 3 (one octree level)
-        table_size = 8 ** (table_depth_bits // 3)
-        if table_size <= 1_000_000:  # 1M entries ≈ 8 MB for two int32 arrays
-            break
+    # Determine table depth: prioritize accuracy for refined meshes
+    # For refined meshes (many leaves), use depth 7 (2M entries = 16 MB)
+    # This ensures each prefix maps to only 1-3 leaves for accurate Morton neighbor search
 
-    table_depth = table_depth_bits // 3
+    # Find most common leaf depth (where most elements are)
+    from collections import Counter
+    leaf_depths = [leaf.prefix_bits // 3 for leaf in leaves]
+    depth_counts = Counter(leaf_depths)
+    most_common_depth = depth_counts.most_common(1)[0][0]
+
+    # Use most common depth, but cap at depth 8 (128 MB memory limit)
+    table_depth = min(most_common_depth, 8)
+
+    # For small meshes (<10K leaves), can use depth 6 to save memory
+    if len(leaves) < 10_000 and table_depth > 6:
+        table_depth = 6
+
     table_size = 8 ** table_depth
 
     # Create prefix tables (initialize to 0)

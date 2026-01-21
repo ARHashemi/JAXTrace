@@ -1,0 +1,97 @@
+python test_hierarchical_conditional.py
+ERROR:2026-01-18 14:09:30,762:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda12.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda12/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+HIERARCHICAL CONDITIONAL EXECUTION VALIDATION & BENCHMARK
+================================================================================
+
+1. Loading production mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+   ✓ Loaded mesh from PVTU sequence
+   Elements: 3,048,900
+   Nodes: 571,173
+   Duplicates removed: 209,749
+
+2. Building Morton octree structure...
+   ✓ Built octree structure
+   Table depth: 7
+   Leaves: 24,550
+   Leaf capacity: 256
+
+3. Uploading to GPU...
+   ✓ Uploaded to GPU
+
+4. Generating test positions...
+   ✓ Generated 10,000 test positions
+   BBox: [-0.03, 0.03] × [-0.02, 0.02] × [-0.01, 0.00]
+
+5. Compiling search function...
+   Running warmup...
+   ✓ Compiled and warmed up
+
+6. Benchmarking performance...
+   Running 5 iterations...
+   Iteration 1: 5.463s (1,830 queries/s)
+   Iteration 2: 2.423s (4,126 queries/s)
+   Iteration 3: 2.454s (4,076 queries/s)
+   Iteration 4: 2.426s (4,121 queries/s)
+   Iteration 5: 2.427s (4,120 queries/s)
+
+   Average: 3.039s ± 1.212s
+   Throughput: 3,291 queries/s
+
+7. Analyzing results...
+   Found: 8,012 / 10,000 (80.1%)
+   Not found: 1,988 (19.9%)
+   Unique elements found: 3,155
+
+8. Estimating depth-7 hit rate...
+   (Heuristic: based on performance characteristics)
+   Theoretical leaves searched:
+   - If 100% hit at depth-7: 216 leaves avg
+   - If 0% hit at depth-7: 432 leaves avg
+   - If 70% hit at depth-7: 281 leaves avg
+
+   Estimated depth-7 hit rate: ~70%
+   (This is a conservative estimate for graded mesh)
+   Expected speedup vs unconditional: ~1.54×
+
+================================================================================
+SUMMARY
+================================================================================
+Performance: 3,291 queries/s
+Success rate: 80.1%
+Estimated depth-7 hit rate: ~70%
+Expected speedup from conditional execution: ~1.54×
+
+✓ Hierarchical conditional execution is working!
+
+Next steps:
+1. Run production test to measure real-world impact
+2. Compare retention % (should be identical to unconditional version)
+3. Proceed to point-in-tet inverse matrix optimization
+================================================================================

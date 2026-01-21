@@ -1,0 +1,476 @@
+unset LD_PRELOAD && python diagnose_lost_particles.py
+ERROR:2026-01-20 16:57:53,328:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda12.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda12/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Lost Particles Diagnostic
+================================================================================
+
+[1/6] Loading mesh...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 120-159 (40 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_121.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_122.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_123.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_124.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_125.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_126.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_127.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_128.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_129.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_130.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 11/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_131.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_132.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_133.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_134.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_135.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_136.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_137.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_138.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_139.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_140.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 21/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_141.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_142.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_143.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_144.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_145.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_146.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_147.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_148.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_149.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_150.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 31/40 timesteps...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_151.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_152.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_153.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_154.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_155.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_156.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_157.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 40/40 timesteps
+    Memory: 357.5 MB
+  Loaded in 182.47s
+  Elements: 3,048,900, Nodes: 780,922, Timesteps: 40
+
+[2/6] Deduplicating...
+  Removed 209,749 duplicates
+  Final: 3,048,900 elements, 571,173 nodes
+
+[3/6] Building octree...
+  Built octree in 13.92s
+  Leaves: 24,550
+  Table depth: 7
+
+[4/6] Tracking particles...
+  Generated 30,000 particles
+  Initial assignment: 24615/30000 (82.05%)
+  Tracking for 10 steps...
+    Step   1:  24615 active (82.05%)
+    Step   2:  24615 active (82.05%)
+    Step   3:  24609 active (82.03%)
+    Step   4:  24605 active (82.02%)
+    Step   5:  24603 active (82.01%)
+    Step   6:  24602 active (82.01%)
+    Step   7:  24601 active (82.00%)
+    Step   8:  24600 active (82.00%)
+    Step   9:  24599 active (82.00%)
+    Step  10:  24598 active (81.99%)
+
+[5/6] Analyzing lost particles...
+  Total lost particles: 5402/30000 (18.01%)
+  Analyzing first 20 lost particles...
+/home/arhashemi/Workspace/welding/JAXTrace/diagnose_lost_particles.py:333: RuntimeWarning: overflow encountered in scalar subtract
+  octant_dist_manhattan = sum(abs(a - b) for a, b in zip(query_octant, nearest_octant))
+/home/arhashemi/Workspace/welding/JAXTrace/diagnose_lost_particles.py:333: RuntimeWarning: overflow encountered in scalar add
+  octant_dist_manhattan = sum(abs(a - b) for a, b in zip(query_octant, nearest_octant))
+/home/arhashemi/Workspace/welding/JAXTrace/diagnose_lost_particles.py:334: RuntimeWarning: overflow encountered in scalar subtract
+  octant_dist_max = max(abs(a - b) for a, b in zip(query_octant, nearest_octant))
+
+[6/6] Diagnostic Summary
+================================================================================
+
+Individual Lost Particle Analysis (first 20):
+--------------------------------------------------------------------------------
+
+Particle 1:
+  Position: (-0.029400, -0.022540, -0.002466)
+  Nearest element: 39628, distance: 2.434881e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(96))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=11, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 2:
+  Position: (-0.029400, -0.022540, -0.002128)
+  Nearest element: 39628, distance: 2.628874e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(100))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=15, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 3:
+  Position: (-0.029400, -0.022540, -0.001790)
+  Nearest element: 39628, distance: 2.849860e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(105))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=20, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 4:
+  Position: (-0.029400, -0.022540, -0.001452)
+  Nearest element: 39628, distance: 3.092058e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(109))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=24, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 5:
+  Position: (-0.029400, -0.022540, -0.001114)
+  Nearest element: 39628, distance: 3.350871e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(113))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=28, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 6:
+  Position: (-0.029400, -0.022540, -0.000776)
+  Nearest element: 39628, distance: 3.622740e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(1), np.uint64(118))
+  Nearest element → Leaf 156, Octant (np.uint64(5), np.uint64(3), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=33, Max=18446744073709551614
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 7:
+  Position: (-0.029400, -0.021620, -0.002466)
+  Nearest element: 39629, distance: 1.858578e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(96))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(7), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=12, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 8:
+  Position: (-0.029400, -0.021620, -0.002128)
+  Nearest element: 39629, distance: 2.106334e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(100))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(7), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=16, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 9:
+  Position: (-0.029400, -0.021620, -0.001790)
+  Nearest element: 39629, distance: 2.376419e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(105))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(7), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=21, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 10:
+  Position: (-0.029400, -0.021620, -0.001452)
+  Nearest element: 39629, distance: 2.662046e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(109))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(7), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=25, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 11:
+  Position: (-0.029400, -0.021620, -0.001114)
+  Nearest element: 39624, distance: 2.891863e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(113))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=10, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 12:
+  Position: (-0.029400, -0.021620, -0.000776)
+  Nearest element: 39624, distance: 3.068217e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(3), np.uint64(118))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=15, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 13:
+  Position: (-0.029400, -0.020700, -0.002466)
+  Nearest element: 39629, distance: 1.462088e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(96))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(7), np.uint64(79))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=15, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 14:
+  Position: (-0.029400, -0.020700, -0.002128)
+  Nearest element: 39624, distance: 1.706540e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(100))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=0, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 15:
+  Position: (-0.029400, -0.020700, -0.001790)
+  Nearest element: 39624, distance: 1.810573e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(105))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=5, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 16:
+  Position: (-0.029400, -0.020700, -0.001452)
+  Nearest element: 39624, distance: 1.967858e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(109))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=9, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 17:
+  Position: (-0.029400, -0.020700, -0.001114)
+  Nearest element: 39624, distance: 2.166831e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(113))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=13, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 18:
+  Position: (-0.029400, -0.020700, -0.000776)
+  Nearest element: 39624, distance: 2.397131e-03
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(6), np.uint64(118))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=18, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+  ⚠  DIAGNOSIS: Large distance to nearest element - particle may have left domain
+
+Particle 19:
+  Position: (-0.029400, -0.019780, -0.002466)
+  Nearest element: 39624, distance: 8.943455e-04
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(8), np.uint64(96))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=18446744073709551614, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+
+Particle 20:
+  Position: (-0.029400, -0.019780, -0.002128)
+  Nearest element: 39624, distance: 9.681720e-04
+  Query position → Leaf 1911, Octant (np.uint64(1), np.uint64(8), np.uint64(100))
+  Nearest element → Leaf 156, Octant (np.uint64(2), np.uint64(10), np.uint64(95))
+  Leaf distance: 1755 leaves apart in Morton order
+  Octant distance: Manhattan=2, Max=18446744073709551615
+  ⚠  DIAGNOSIS: Nearest element >2 octants away - beyond 5×5×5 search range
+
+================================================================================
+Aggregate Statistics:
+--------------------------------------------------------------------------------
+
+Distance to nearest element:
+  Mean:   2.315814e-03
+  Median: 2.386775e-03
+  Max:    3.622740e-03
+  Min:    8.943455e-04
+
+Octant distance (max-norm):
+  Within 3×3×3 (≤1): 0 (0.0%)
+  Within 5×5×5 (≤2): 0 (0.0%)
+  Beyond 5×5×5 (>2): 20 (100.0%)
+
+Leaf distance (Morton order):
+  Mean:   1755.0 leaves
+  Median: 1755.0 leaves
+  Max:    1755 leaves
+
+================================================================================
+ROOT CAUSE ANALYSIS:
+--------------------------------------------------------------------------------
+
+✅  20 (100.0%) lost particles have nearest element >2 octants away
+   This is expected - beyond search coverage.
+   To improve retention:
+     - Increase L1 depth: N_HOPS=7 (expensive)
+     - Use larger L2 radius (radius=64+)
+     - Use hierarchical search at multiple depths
+
+================================================================================
+DONE
+================================================================================

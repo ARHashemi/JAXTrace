@@ -1,0 +1,218 @@
+python3 production_tracking_fully_fused_timedep.py
+✅ Enhanced VTK I/O available
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Production Particle Tracking - Global MORTON L2 Search
+================================================================================
+Grid resolution: 50 × 90 × 50 = 225,000 particles
+Timesteps: 2,500
+dt: 2.50e-03
+Space-filling curve: morton
+Point-in-tet method: inverse
+L1 hops: 5
+L2 radius: 10
+================================================================================
+
+[1/6] Loading mesh and velocity sequence...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 158-159 (2 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_158.pvtu
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 2/2 timesteps
+    Memory: 17.9 MB
+
+  Mesh: 3,048,900 elements, 780,922 nodes
+  Velocity timesteps: 2
+  Total load time: 7.09s
+
+[1.5/6] Checking for duplicate nodes (PVTU piece boundary fix)...
+
+================================================================================
+Deduplicating nodes (fixing PVTU piece boundaries)
+================================================================================
+  Original nodes: 780,922
+  Detecting exact duplicates...
+  Unique nodes:   571,173
+  Duplicate nodes: 209,749 (26.9%)
+
+  Compacting node array...
+  Remapping connectivity...
+  Remapping velocity sequence...
+    Original velocity: (2, 780922, 3)
+    Remapped velocity: (2, 571173, 3)
+  Validating...
+  ✅ No degenerate elements
+
+✅ Node deduplication complete!
+  Removed 209,749 duplicate nodes
+  Mesh size: 780,922 → 571,173 nodes
+  Velocity arrays remapped: 2 timesteps
+================================================================================
+
+  ✅ Fixed PVTU piece boundaries: removed 209,749 duplicates in 4.94s
+  This should significantly improve particle retention!
+
+[DIAGNOSTIC] Verifying array consistency after deduplication...
+  node_positions shape:   (571173, 3)
+  connectivity shape:     (3048900, 4)
+  velocity_sequence shape: (2, 571173, 3)
+  ✅ Velocity array correctly remapped (571,173 nodes)
+  ✅ Connectivity valid (max node ID 571172 < 571173)
+  ✅ All array consistency checks passed!
+      → Trajectories should now be physically correct
+
+
+  Velocity cycle parameters:
+    Cycle period: 0.005 time units
+    Number of cycles: 1250.00
+    Tracking steps per velocity step: 1
+
+[2/6] Building global MORTON structure (CPU)...
+  Built 24,550 leaves in 11.38s
+  Memory: 34.9 MB
+
+[3/6] Uploading mesh and Morton structure to GPU...
+  Computing element neighbors (FACE-BASED)...
+
+Building element neighbors array for 3,048,900 elements...
+  Method: face
+
+Extracting element neighbors for 3,048,900 elements...
+Building face-to-element map for 3,048,900 elements...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+  Total unique faces: 6,278,115
+Building neighbor lists...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+
+AdjacencyStats(
+  Elements: 3,048,900
+  Total faces: 6,278,115
+  Internal faces: 5,917,485
+  Boundary faces: 360,630
+  Neighbors per element: min=1, max=4, avg=3.88
+)
+  Converting to padded array (3048900, 4)...
+  Elements with max neighbors: 2,691,163 (88.3%)
+  Elements with < max neighbors: 357,737 (11.7%)
+  Avg neighbors per element: 3.88
+  Element neighbors array built successfully!
+    Neighbor computation: 41.05s
+    Neighbor memory: 46.5 MB
+    Neighbor array shape: (3048900, 4)
+    Max neighbors per element: 4
+    ⚠  WARNING: Face-based neighbors may NOT work for 1:2 octree refinement!
+              If trajectories are linear, switch to NEIGHBOR_METHOD='node'
+
+  Precomputing inverse matrices for inverse method...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+    Inverse matrices: 3,048,900 × 3×3 + p0
+    Memory: 139.6 MB
+    Precompute time: 26.39s
+
+  Computing element volumes for adaptive L1...
+    Element volumes computed: 3,048,900
+    Volume range: [8.12e-14, 2.13e-08]
+    Median volume: 8.12e-14
+    Computation time: 0.24s
+  Total upload time: 68.04s
+  MORTON GPU leaves: 24,550
+  MORTON Prefix Table Depth: 7
+
+[4/6] Initializing 225,000 particles (uniform grid 50×90×50)...
+  Particle bounds:
+    X: [-0.018000, -0.009000] (domain fraction: (0.2, 0.35))
+    Y: [-0.013800, 0.013800] (domain fraction: (0.2, 0.8))
+    Z: [-0.007000, 0.000000] (domain fraction: (0.3, 1.0))
+
+  Clipping particles to mesh bounds (Phase 1.1 fix)...
+    Particles clipped to mesh bounds: 4500/225000
+    Mesh bounds: X=[-0.030000, 0.030000], Y=[-0.023000, 0.023000], Z=[-0.010000, 0.000000]
+    Safe bounds (1% margin): X=[-0.029400, 0.029400], Y=[-0.022540, 0.022540], Z=[-0.009900, -0.000100]
+  Created 225,000 particles in uniform grid
+
+[5/6] Setting up async VTK export...
+  Output directory: output/global_morton_timedep_optimized
+  Export frequency: every 10 steps
+  Store velocities: No
+  Expected exports: 250
+
+[6/6] Running time integration (2,500 steps)...
+
+  Search hierarchy configuration:
+    L0 (cached element) → L1 (adaptive 5-6 hops) → L2 (MORTON radius, ±10)
+    ✅ PHASE 1.3: L1 uses adaptive hop count (6 hops at refinement boundaries)
+    L2 method: incremental
+
+  Uploading data to GPU...
+    Velocity sequence upload: 0.00s (13.1 MB)
+    Particle data upload: minimal
+
+  Running cascading initial assignment...
+    Initial radius: 500 (all particles)
+    Fallback radii: [1000, 2000, 5000, 10000, 100000] (only unassigned particles)
+
+  Initial search (radius=500) for all particles...
+    Assigned: 188,560/225,000 (83.80%)
+    Search Time: 6.65 s
+
+  Cascading fallback search for 36,440 unassigned particles...
+    radius=1000: Searching 36,440 particles...
+               Search Time: 10.26 s
+               Found: 11,221 (total: 199,781/225,000, 88.79%)
+    radius=2000: Searching 25,219 particles...
+               Search Time: 17.40 s
+               Found: 12,329 (total: 212,110/225,000, 94.27%)
+    radius=5000: Searching 12,890 particles...
+               Search Time: 38.44 s
+               Found: 10,487 (total: 222,597/225,000, 98.93%)
+    radius=10000: Searching 2,403 particles...
+               Search Time: 53.25 s
+               Found: 492 (total: 223,089/225,000, 99.15%)
+    radius=100000: Searching 1,911 particles...
+               Search Time: 151.61 s
+               Found: 1,911 (total: 225,000/225,000, 100.00%)
+
+  Final assignment: 225,000/225,000 (100.00%)
+    Initial assignment: 225,000/225,000 (100.00%)
+    Search time: 279.83s
+
+  Compiling RK4 (first step)...
+    Compilation time: 59.31s
+
+  Running 2,500 timesteps...
+    Step     Active  Retention    Step Time      Throughput
+  ------ ---------- ---------- ------------ ---------------
+     100    214,543     95.35%    6215.74 ms        36198 p/s | Exported:    9
+killed

@@ -1,0 +1,99 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Production Particle Tracking - Global Morton L2 Search
+================================================================================
+Grid resolution: 50 × 70 × 30 = 105,000 particles
+Timesteps: 2,500
+dt: 2.50e-03
+L1 hops: 3
+L2 radius: 2
+================================================================================
+
+[1/5] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)
+  Mesh: 3,512,279 elements, 900,658 nodes
+  Load time: 5.37s
+
+[2/5] Building global Morton structure (CPU)...
+  Built 32,168 leaves in 13.88s
+  Memory: 40.2 MB
+
+[3/5] Uploading mesh and Morton structure to GPU...
+  Computing element neighbors...
+    Neighbor computation: 60.61s
+  Total upload time: 60.90s
+
+[4/5] Initializing 105,000 particles (uniform grid 50×70×30)...
+  Particle bounds:
+    X: [-0.024000, -0.012000] (domain fraction: (0.1, 0.3))
+    Y: [-0.023000, 0.023000] (domain fraction: (0.0, 1.0))
+    Z: [-0.010000, 0.000000] (domain fraction: (0.0, 1.0))
+  Created 105,000 particles in uniform grid
+
+[5/6] Setting up async VTK export...
+  Output directory: output/global_morton
+  Export frequency: every 10 steps
+  Store velocities: No
+  Expected exports: 250
+
+[6/6] Running time integration (2,500 steps)...
+
+  Uploading data to GPU...
+    Initial upload time: 0.00s
+
+  Compiling (first step)...
+    Compilation time: 25.31s
+    Initial assignment: 75,522/105,000 (71.93%)
+
+❌ WARNING: Initial assignment <95%. Continuing anyway...
+
+  Running 2,500 timesteps...
+    Step     Active  Retention    Step Time      Throughput
+  ------ ---------- ---------- ------------ ---------------
+     100     75,522     71.93%    1912.84 ms        54892 p/s | Exported:    9
+     200     75,522     71.93%    1916.47 ms        54788 p/s | Exported:   19
+     300     75,522     71.93%    1919.18 ms        54711 p/s | Exported:   29
+     400     75,522     71.93%    1922.87 ms        54606 p/s | Exported:   39
+     500     75,522     71.93%    1931.52 ms        54361 p/s | Exported:   49
+     600     75,522     71.93%    1945.14 ms        53981 p/s | Exported:   59
+     700     75,522     71.93%    1954.87 ms        53712 p/s | Exported:   69
+     800     75,522     71.93%    1968.43 ms        53342 p/s | Exported:   79
+     900     75,522     71.93%    1981.79 ms        52982 p/s | Exported:   89
+    1000     75,522     71.93%    1990.76 ms        52744 p/s | Exported:   99
+    1100     75,522     71.93%    1994.75 ms        52638 p/s | Exported:  109
+    1200     75,522     71.93%    2003.66 ms        52404 p/s | Exported:  119
+    1300     75,522     71.93%    1990.33 ms        52755 p/s | Exported:  129
+    1400     75,522     71.93%    1982.46 ms        52965 p/s | Exported:  139
+    1500     75,522     71.93%    1969.41 ms        53315 p/s | Exported:  149
+    1600     75,522     71.93%    1956.93 ms        53655 p/s | Exported:  159
+    1700     75,522     71.93%    1944.26 ms        54005 p/s | Exported:  169
+    1800     75,522     71.93%    1936.67 ms        54217 p/s | Exported:  179
+    1900     75,522     71.93%    1929.76 ms        54411 p/s | Exported:  189
+    2000     75,522     71.93%    1927.36 ms        54479 p/s | Exported:  199
+    2100     75,522     71.93%    1925.32 ms        54536 p/s | Exported:  209
+    2200     75,522     71.93%    1921.68 ms        54640 p/s | Exported:  219
+    2300     75,522     71.93%    1922.52 ms        54616 p/s | Exported:  229
+    2400     75,522     71.93%    1920.81 ms        54664 p/s | Exported:  239
+    2500     75,522     71.93%    1919.65 ms        54697 p/s | Exported:  249
+
+  Waiting for exports to complete...
+  ✅ All exports complete
+    Files exported: 250
+    Mean export time: 0.225 s
+    Total export time: 56.4 s
+
+================================================================================
+PRODUCTION RESULTS
+================================================================================
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_fully_fused.py", line 569, in <module>
+    exit_code = main()
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_fully_fused.py", line 474, in main
+    particle_data_final = ParticleData(positions_final_cpu, element_ids_final_cpu)
+TypeError: ParticleData.__init__() missing 3 required positional arguments: 'element_ids', 'block_ids', and 'active_mask'

@@ -1,0 +1,109 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/numpy/_core/_methods.py:144: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+L1 ALGORITHM FIX TEST
+================================================================================
+
+Configuration:
+  Mesh path: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule
+  Particles: 500
+  Time step: 5.00e-06 s
+  Steps: 5
+  Refined region center: [30.  15.   0.3]
+  Refined region radius: 2.0 mm
+
+Loading mesh and velocity field...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_120.pvtu
+  Nodes: 900,671
+  Elements: 3,512,384
+  Loaded field 'Displacement': (900671, 3)
+  Loaded 3,512,384 elements, 900,671 nodes
+
+Building Morton structure...
+  Built 27,428 leaves
+
+Building element neighbors...
+
+Uploading to GPU...
+
+Initializing particles in refined region...
+  Initial assignment success: 0.0%
+
+Initial Element Assignment:
+  Particles in refined region: 406
+  Valid assignments: 0
+  Fine elements: 0 (0.0%)
+  Medium elements: 0 (0.0%)
+  Coarse elements: 0 (0.0%)
+  Mean dist to centroid: nan mm
+
+================================================================================
+TEST 1: L1 ENABLED (WITH FIX)
+================================================================================
+
+Running tracking with L1 enabled...
+  Step 1/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 2/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 3/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 4/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 5/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+
+Total time: 23.23 s
+Time per step: 4.65 s
+Throughput: 108 particle-steps/s
+
+Final Element Assignment (L1 Enabled):
+  Fine elements: 0 (0.0%)
+  Medium elements: 0 (0.0%)
+  Coarse elements: 0 (0.0%)
+
+================================================================================
+TEST 2: L1 DISABLED (BASELINE)
+================================================================================
+
+Running tracking with L1 disabled...
+  Step 1/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 2/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 3/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 4/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+  Step 5/5: Fine=0 (0.0%), Medium=0 (0.0%), Coarse=0 (0.0%)
+
+Total time: 18.48 s
+Time per step: 3.70 s
+Throughput: 135 particle-steps/s
+
+Final Element Assignment (L1 Disabled):
+  Fine elements: 0 (0.0%)
+  Medium elements: 0 (0.0%)
+  Coarse elements: 0 (0.0%)
+
+================================================================================
+COMPARISON
+================================================================================
+
+Element Assignment:
+  L1 Enabled:  Fine=  0.0%, Medium=  0.0%, Coarse=  0.0%
+  L1 Disabled: Fine=  0.0%, Medium=  0.0%, Coarse=  0.0%
+
+Performance:
+  L1 Enabled:  23.23 s (108 particle-steps/s)
+  L1 Disabled: 18.48 s (135 particle-steps/s)
+  Speedup: 0.80x
+
+================================================================================
+SUCCESS CRITERIA
+================================================================================
+✗ L1 does NOT improve fine element assignment
+✗ L1 does NOT reduce coarse element assignment
+✓ L1 and L2 produce similar assignments (diff=0.0%)
+✓ L1 does not significantly degrade performance (1.26x)
+
+================================================================================
+❌ SOME TESTS FAILED - L1 FIX NEEDS INVESTIGATION
+================================================================================

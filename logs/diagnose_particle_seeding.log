@@ -1,0 +1,14 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/vtk_reader.py:39: UserWarning: VTK not available - VTK file reading will be disabled
+  warnings.warn("VTK not available - VTK file reading will be disabled")
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/vtk_writer.py:22: UserWarning: VTK not available - VTK file writing will be disabled
+  warnings.warn("VTK not available - VTK file writing will be disabled")
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/diagnose_particle_seeding.py", line 14, in <module>
+    from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/mesh_loader_timedep.py", line 12, in <module>
+    from jaxtrace.gpu.mesh_loader import load_mesh_from_pvtu
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/mesh_loader.py", line 19, in <module>
+    import vtk
+ModuleNotFoundError: No module named 'vtk'

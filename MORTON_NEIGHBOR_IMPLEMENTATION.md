@@ -2,13 +2,41 @@
 
 **Branch**: `feature/morton-neighbor-arithmetic`
 **Date**: 2025-12-25
-**Status**: ✅ Implementation Complete, Ready for Testing
+**Status**: ✅ Implementation Fixed - Depth 7 Prefix Table + Single-Leaf Search
+
+---
+
+## Critical Fix Applied (2025-12-25 Evening)
+
+**Problem Identified**: Initial implementation used depth-6 prefix table (too coarse) + multi-leaf search (too slow):
+- Depth 6 table: Each prefix could map to 50-200 leaves in refined region
+- Multi-leaf search: 27 prefixes × 8 leaves = 216 leaf searches per particle
+- **Result**: 67.57% retention (12% worse!), 3K p/s (4× slower!)
+
+**Root Cause**: Prefix table depth selection prioritized memory over accuracy:
+```python
+# OLD: Choose minimum depth to fit 1M entries (depth 6 = 262K entries)
+if table_size <= 1_000_000:  break  # Picked depth 6 for your mesh
+```
+
+**Fix Applied**:
+1. **Increased prefix table depth** to match most common leaf depth (depth 7):
+   - Depth 7 = 2M entries = 16 MB (acceptable)
+   - Each prefix now maps to only 1-3 leaves (vs 50-200 before)
+
+2. **Removed multi-leaf search loop**:
+   - Search only first leaf per prefix (sufficient with depth 7)
+   - 27 prefixes × 1 leaf = 27 searches (vs 216 before!)
+
+**Expected Results**:
+- Retention: **85-90%** @ step 100 (vs 67% broken, 79% baseline)
+- Throughput: **20-25K p/s** (vs 3K broken, 13K baseline)
 
 ---
 
 ## Overview
 
-Implemented Morton neighbor arithmetic to replace linear ±radius search in L2 with geometrically correct spatial neighbor finding. This provides 10-15× expected speedup for L2 search operations.
+Implemented Morton neighbor arithmetic to replace linear ±radius search in L2 with geometrically correct spatial neighbor finding.
 
 ---
 

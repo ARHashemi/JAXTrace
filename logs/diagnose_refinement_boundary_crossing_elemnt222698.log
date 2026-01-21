@@ -1,0 +1,114 @@
+python diagnose_refinement_boundary_crossing.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Refinement Boundary Crossing Diagnostic
+================================================================================
+
+[1/4] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Elements: 3,048,900
+  Nodes: 780,922
+
+[2/4] Building element neighbors...
+  Build time: 50.01s
+
+[3/4] Computing element volumes...
+  Volume range: [8.12e-14, 2.13e-08]
+  Size ratio: 262146×
+
+[4/4] Building Morton octree...
+  Leaves: 24,550
+
+================================================================================
+RUNNING DIAGNOSTICS
+================================================================================
+
+================================================================================
+ANALYSIS 1: Element Neighbor Construction at Refinement Boundaries
+================================================================================
+
+[1.1] Checking element volume distribution...
+  Volume range: [8.12e-14, 2.13e-08]
+  Volume median: 8.12e-14
+  Unique volumes: 633
+
+[1.2] Identifying refinement boundary elements...
+  Sampling 10,000 elements for speed...
+    Checked 0/10000 elements, found 0 boundaries...
+    Checked 2000/10000 elements, found 0 boundaries...
+    Checked 4000/10000 elements, found 0 boundaries...
+    Checked 6000/10000 elements, found 0 boundaries...
+    Checked 8000/10000 elements, found 0 boundaries...
+  Found 0 boundary elements in 10,000 sampled
+  Estimated total: 0 (0.00%)
+
+[1.3] Neighbor count distribution at boundaries...
+  ⚠  No refinement boundary elements found!
+  This suggests either:
+    1. All elements are similar size (no refinement)
+    2. Face-based neighbors don't capture size transitions
+
+================================================================================
+ANALYSIS 2: L1 Face-Based Neighbor Search Coverage
+================================================================================
+
+[2.1] Finding small→large element transitions...
+  Sampling 10,000 elements for speed...
+    Checked 0/10000 elements, found 0 transitions...
+    Checked 2000/10000 elements, found 0 transitions...
+    Checked 4000/10000 elements, found 0 transitions...
+    Checked 6000/10000 elements, found 0 transitions...
+    Checked 8000/10000 elements, found 0 transitions...
+  Found 0 small→large transitions in 10,000 sampled
+  ⚠  No small→large transitions found!
+  This is VERY unexpected - refinement should create size transitions
+
+================================================================================
+ANALYSIS 4: Problem Element 222698 and All Neighbors
+================================================================================
+
+[4.1] Analyzing element 222698...
+  Volume: 8.12e-14
+  Char length: 4.33e-05
+  Nodes: [54148 55337 59597 59601]
+  Direct neighbors: 4
+  Neighbor size ratios: 1.00× to 1.00×
+  Neighbor IDs: [222667 222689 222702 246966]
+  ⚠  NO REFINEMENT BOUNDARY (all neighbors similar size)
+
+[4.2] Finding all shared nodes...
+  Total unique nodes: 8
+  Node IDs: [np.int32(54148), np.int32(55325), np.int32(55337), np.int32(55339), np.int32(59597), np.int32(59601), np.int32(59602), np.int32(59604)]
+
+[4.3] Detailed analysis for each shared node...
+  (Analyzing 8 nodes)
+    Analyzed 1/8 nodes...
+    Analyzed 2/8 nodes...
+    Analyzed 3/8 nodes...
+    Analyzed 4/8 nodes...
+    Analyzed 5/8 nodes...
+    Analyzed 6/8 nodes...
+    Analyzed 7/8 nodes...
+
+[4.4] Summary of shared node analysis...
+  Nodes at refinement boundaries: 0/8
+  Maximum size ratio found: 1.00×
+
+  ⚠  NO PROBLEM NODES FOUND
+     This suggests:
+       1. Element 222698 is NOT at refinement boundary
+       2. Face-based neighbors miss the actual size transitions
+       3. Particle loss may be due to missing neighbors, not size jumps
+
+================================================================================
+DIAGNOSTIC SUMMARY
+================================================================================
+
+1. Refinement boundary elements: 0
+2. L1 3-hop search failures: 0/100 tested

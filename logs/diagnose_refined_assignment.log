@@ -1,0 +1,99 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+REFINED REGION ASSIGNMENT DIAGNOSIS
+================================================================================
+
+[1/4] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+
+[2/4] Analyzing mesh refinement...
+
+Element size distribution:
+  Min: 1.363260e-04 m = 0.136326 mm
+  Mean: 1.720872e-04 m = 0.172087 mm
+  Max: 8.724887e-03 m = 8.724887 mm
+  Std: 2.143439e-04 m
+
+Refinement analysis:
+  Fine elements (< 0.136326 mm): 288,749 (9.5%)
+  Coarse elements (> 0.272652 mm): 304,309 (10.0%)
+
+Fine (refined) element velocity statistics:
+  Mean |vel|: 2.852758e-01 m/s
+  Max |vel|: 7.520790e-01 m/s
+  Min |vel|: 2.573137e-03 m/s
+  Std |vel|: 1.498959e-01 m/s
+
+Coarse element velocity statistics:
+  Mean |vel|: 8.716135e-02 m/s
+  Max |vel|: 2.652868e-01 m/s
+  Min |vel|: 2.035479e-03 m/s
+  Std |vel|: 8.484990e-02 m/s
+
+[3/4] Setting up search structures...
+[1/5] Computing element centroids...
+  Bounding box: min=[-0.02875006 -0.02172227 -0.00937501], max=[ 2.8750056e-02  2.1722268e-02 -1.9521895e-05]
+[2/5] Computing Morton codes for 3,048,900 elements...
+[3/5] Sorting elements by Morton code...
+[4/5] Building adaptive octree (capacity=256)...
+  Built 28,330 octree leaves
+  Depth distribution:
+    Depth 2: 51 leaves
+    Depth 3: 59 leaves
+    Depth 4: 179 leaves
+    Depth 5: 529 leaves
+    Depth 6: 4,019 leaves
+    Depth 7: 23,493 leaves
+[5/5] Building prefix table...
+  Prefix table: 262,144 entries (depth=6)
+  Memory: 2.0 MB (start + length arrays)
+  Prefix sharing: 2,941 prefixes map to multiple leaves (max: 8)
+
+[4/4] Testing particle assignment accuracy...
+
+FINE ELEMENTS (refined regions):
+  Tested 100 particles at element centroids
+  Correct assignments: 0/100 (0.00%)
+  Incorrect assignments: 100/100 (100.00%)
+
+  Analyzing incorrect assignments:
+    Case 1: True elem 2565178 (size=0.1363mm, vel=3.447656e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 2: True elem 1311363 (size=0.1363mm, vel=3.029515e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 3: True elem 2399970 (size=0.1363mm, vel=3.033187e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 4: True elem 1779822 (size=0.1363mm, vel=1.472829e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 5: True elem 2955368 (size=0.1363mm, vel=2.891279e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 6: True elem 2584469 (size=0.1363mm, vel=2.604602e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 7: True elem 1488273 (size=0.1363mm, vel=2.623767e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 8: True elem 1898974 (size=0.1363mm, vel=3.826075e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 9: True elem 1929867 (size=0.1363mm, vel=2.409225e-01) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+    Case 10: True elem 1923861 (size=0.1363mm, vel=7.034495e-02) -> Found elem -1 (size=-1000.0000mm, vel=0.000000e+00)
+
+COARSE ELEMENTS:
+  Tested 100 particles at element centroids
+  Correct assignments: 100/100 (100.00%)
+  Incorrect assignments: 0/100 (0.00%)
+
+================================================================================
+SUMMARY
+================================================================================
+
+❌ CRITICAL: Fine element assignment accuracy is LOW (0.0%)
+   Particles in refined regions are being assigned to WRONG elements!
+   This explains why fine element velocities are not being used.
+
+   Possible causes:
+   1. Morton octree search failing in refined regions
+   2. L2 search radius too small for small elements
+   3. Point-in-tet test failing due to numerical precision
+   4. Element neighbor search not covering refined regions
+
+⚠️  Accuracy differs significantly between fine and coarse regions:
+   Fine: 0.0%, Coarse: 100.0%
+   This indicates mesh-resolution-dependent search issues.
+================================================================================

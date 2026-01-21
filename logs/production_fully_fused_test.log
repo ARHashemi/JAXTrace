@@ -1,0 +1,96 @@
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Production Particle Tracking - Global Morton L2 Search
+================================================================================
+Grid resolution: 50 × 70 × 30 = 105,000 particles
+Timesteps: 2,500
+dt: 2.50e-03
+L1 hops: 3
+L2 radius: 2
+================================================================================
+
+[1/5] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule/threadedAvtk_159.pvtu
+  Nodes: 900,658
+  Elements: 3,512,279
+  Loaded field 'Displacement': (900658, 3)
+  Mesh: 3,512,279 elements, 900,658 nodes
+  Load time: 5.50s
+
+[2/5] Building global Morton structure (CPU)...
+  Built 32,168 leaves in 14.04s
+  Memory: 40.2 MB
+
+[3/5] Uploading mesh and Morton structure to GPU...
+  Computing element neighbors...
+    Neighbor computation: 61.79s
+  Total upload time: 62.01s
+
+[4/5] Initializing 105,000 particles (uniform grid 50×70×30)...
+  Particle bounds:
+    X: [-0.024000, -0.012000] (domain fraction: (0.1, 0.3))
+    Y: [-0.023000, 0.023000] (domain fraction: (0.0, 1.0))
+    Z: [-0.010000, 0.000000] (domain fraction: (0.0, 1.0))
+  Created 105,000 particles in uniform grid
+
+[5/6] Setting up async VTK export...
+  Output directory: output/global_morton
+  Export frequency: every 10 steps
+  Store velocities: No
+  Expected exports: 250
+
+[6/6] Running time integration (2,500 steps)...
+
+  Uploading data to GPU...
+    Initial upload time: 0.00s
+
+  Compiling (first step)...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_fully_fused.py", line 560, in <module>
+    exit_code = main()
+  File "/home/arhashemi/Workspace/welding/JAXTrace/production_tracking_fully_fused.py", line 374, in main
+    positions_gpu, element_ids_gpu = rk4_step(
+                                     ~~~~~~~~^
+        positions_gpu,
+        ^^^^^^^^^^^^^^
+    ...<2 lines>...
+        velocity_field_gpu
+        ^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_fully_fused.py", line 319, in rk4_fully_fused_step
+    positions_final, element_ids_final = jax.vmap(rk4_single_particle)(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        positions_gpu, element_ids_gpu
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_fully_fused.py", line 292, in rk4_single_particle
+    elem_k1 = search_l0_l1_l2_single(pos, elem_id)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_fully_fused.py", line 199, in search_l0_l1_l2_single
+    search_l2_single(pos)
+    ~~~~~~~~~~~~~~~~^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/tracking/rk4_fully_fused.py", line 166, in search_l2_single
+    offsets = offsets[offsets != 0]  # Exclude center (already searched)
+              ~~~~~~~^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 1141, in op
+    return getattr(self.aval, f"_{name}")(self, *args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/array_methods.py", line 678, in _getitem
+    return indexing.rewriting_take(self, item)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 655, in rewriting_take
+    treedef, static_idx, dynamic_idx = split_index_for_jit(idx, arr.shape)
+                                       ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 755, in split_index_for_jit
+    idx = _expand_bool_indices(idx, shape)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/numpy/indexing.py", line 1092, in _expand_bool_indices
+    raise errors.NonConcreteBooleanIndexError(abstract_i)
+jax.errors.NonConcreteBooleanIndexError: Array boolean indices must be concrete; got bool[5]
+
+See https://docs.jax.dev/en/latest/errors.html#jax.errors.NonConcreteBooleanIndexError
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

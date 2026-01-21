@@ -1,0 +1,97 @@
+ERROR:2026-01-08 11:18:03,499:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+TESTING MERGED MESH NEIGHBOR CONNECTIVITY
+================================================================================
+Loading merged mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120_merged.npz
+  Nodes: 571,173
+  Elements: 3,048,900
+
+================================================================================
+Building neighbor graph for MERGED mesh
+================================================================================
+
+Building element neighbors array for 3,048,900 elements...
+  Method: face
+
+Extracting element neighbors for 3,048,900 elements...
+Building face-to-element map for 3,048,900 elements...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+  Total unique faces: 6,278,115
+Building neighbor lists...
+  Processed 500,000/3,048,900 elements...
+  Processed 1,000,000/3,048,900 elements...
+  Processed 1,500,000/3,048,900 elements...
+  Processed 2,000,000/3,048,900 elements...
+  Processed 2,500,000/3,048,900 elements...
+  Processed 3,000,000/3,048,900 elements...
+
+AdjacencyStats(
+  Elements: 3,048,900
+  Total faces: 6,278,115
+  Internal faces: 5,917,485
+  Boundary faces: 360,630
+  Neighbors per element: min=1, max=4, avg=3.88
+)
+  Converting to padded array (3048900, 4)...
+  Elements with max neighbors: 2,691,163 (88.3%)
+  Elements with < max neighbors: 357,737 (11.7%)
+  Avg neighbors per element: 3.88
+  Element neighbors array built successfully!
+
+================================================================================
+MERGED MESH STATISTICS
+================================================================================
+
+Neighbor distribution:
+  Elements with 0 neighbors:          0
+  Elements with 1 neighbor:           2
+  Elements with 2 neighbors:      2,889
+  Elements with 3 neighbors:    354,846
+  Elements with 4 neighbors:  2,691,163
+
+  Under-connected (<4):         357,737 (11.73%)
+  Fully connected (4):        2,691,163 (88.27%)
+
+================================================================================
+EXPECTED RESULTS
+================================================================================
+
+Based on previous diagnostics:
+  Original mesh (with duplicates):
+    - Under-connected elements: ~649,444 (21.3%)
+    - These were clustered at piece boundaries
+
+  Merged mesh (duplicates removed):
+    - Under-connected: 357,737 (11.73%)
+    - These should be ONLY at domain boundaries (not piece boundaries)
+
+⚠️  PARTIAL: Under-connectivity at 11.73%
+   Better than original (21.3%), but still higher than expected
+   May need node-based neighbors for full connectivity
+
+================================================================================
+

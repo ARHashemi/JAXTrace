@@ -1,0 +1,225 @@
+python3 benchmark_l2_search_methods.py
+✅ Enhanced VTK I/O available
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Comprehensive L2 Search Methods Benchmark
+Fair comparison of all L2 search strategies
+================================================================================
+JAX version: 0.8.2
+JAX devices: [CudaDevice(id=0)]
+================================================================================
+
+[1/10] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 6.96s
+  Elements: 3,048,900, Nodes: 780,922, Timesteps: 2
+
+[2/10] Deduplicating...
+  Removed 209,749 duplicates
+
+[3/10] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready
+
+[4/10] Building octree...
+  Built 24,550 leaves
+
+[5/10] Uploading to GPU...
+  Uploaded to GPU
+
+[6/10] Generating particles...
+  Generated 30,000 particles
+
+[7/10] Defining test configurations...
+================================================================================
+1. Fixed radius=10 (baseline)
+   Fixed radius search (21 leaves)
+   Expected work: 21
+
+2. Fixed radius=30 (max coverage)
+   Large radius for maximum retention (61 leaves)
+   Expected work: 61
+
+3. Incremental (2,4,8,15,30) - PRODUCTION
+   5-tier cascading (production config)
+   Expected work: 22.5 avg (conservative)
+
+4. Incremental (2,5,10) - 3-tier
+   3-tier cascading (simpler alternative)
+   Expected work: 11.5 avg (60/30/10)
+
+5. Neighbors (Morton arithmetic)
+   Morton neighbor arithmetic
+   Expected work: Variable
+
+6. Hierarchical (multi-depth)
+   Multi-depth conditional search
+   Expected work: Variable
+
+
+[8/10] Running initial assignment for all configurations...
+================================================================================
+
+  Config: Fixed radius=10 (baseline)
+    Time: 208.407s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 144 p/s
+
+  Config: Fixed radius=30 (max coverage)
+    Time: 205.481s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 146 p/s
+
+  Config: Incremental (2,4,8,15,30) - PRODUCTION
+    Time: 207.453s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 145 p/s
+
+  Config: Incremental (2,5,10) - 3-tier
+    Time: 205.897s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 146 p/s
+
+  Config: Neighbors (Morton arithmetic)
+    Time: 205.668s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 146 p/s
+
+  Config: Hierarchical (multi-depth)
+^[[21~    Time: 206.807s
+    Assigned: 30,000/30,000 (100.00%)
+    Throughput: 145 p/s
+
+[9/10] Running RK4 tracking for all configurations...
+================================================================================
+Configuration: 100 steps, dt=0.0005, point-in-tet=inverse
+
+
+  Config: Fixed radius=10 (baseline)
+      Compiling...
+      Compilation time: 16.63s
+      Running 100 RK4 steps...
+    Time: 57.810s
+    Final active: 29,089/30,000 (96.96%)
+    Throughput: 51,894 p/s
+
+  Config: Fixed radius=30 (max coverage)
+      Compiling...
+      Compilation time: 16.87s
+      Running 100 RK4 steps...
+    Time: 167.645s
+    Final active: 29,463/30,000 (98.21%)
+    Throughput: 17,895 p/s
+
+  Config: Incremental (2,4,8,15,30) - PRODUCTION
+      Compiling...
+      Compilation time: 53.96s
+      Running 100 RK4 steps...
+    Time: 328.383s
+    Final active: 29,463/30,000 (98.21%)
+    Throughput: 9,136 p/s
+
+  Config: Incremental (2,5,10) - 3-tier
+      Compiling...
+      Compilation time: 32.20s
+      Running 100 RK4 steps...
+    Time: 96.535s
+    Final active: 29,089/30,000 (96.96%)
+    Throughput: 31,077 p/s
+
+  Config: Neighbors (Morton arithmetic)
+      Compiling...
+      Compilation time: 28.33s
+      Running 100 RK4 steps...
+    Time: 1261.779s
+    Final active: 29,462/30,000 (98.21%)
+    Throughput: 2,378 p/s
+
+  Config: Hierarchical (multi-depth)
+      Compiling...
+      Compilation time: 27.34s
+      Running 100 RK4 steps...
+    Time: 1186.260s
+    Final active: 29,441/30,000 (98.14%)
+    Throughput: 2,529 p/s
+
+[10/10] Results Analysis
+================================================================================
+
+INITIAL ASSIGNMENT RESULTS
+================================================================================
+Configuration                             Success Rate      Throughput      Time
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                     100.00%            144 p/s  208.407s
+Fixed radius=30 (max coverage)                 100.00%            146 p/s  205.481s
+Incremental (2,4,8,15,30) - PRODUCTION         100.00%            145 p/s  207.453s
+Incremental (2,5,10) - 3-tier                  100.00%            146 p/s  205.897s
+Neighbors (Morton arithmetic)                  100.00%            146 p/s  205.668s
+Hierarchical (multi-depth)                     100.00%            145 p/s  206.807s
+
+
+RK4 TRACKING RESULTS (100 steps)
+================================================================================
+Configuration                              Retention      Throughput   Speedup
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                    96.96%         51,894 p/s     1.00× ★
+Fixed radius=30 (max coverage)                98.21%         17,895 p/s     0.34×
+Incremental (2,4,8,15,30) - PRODUCTION        98.21%          9,136 p/s     0.18×
+Incremental (2,5,10) - 3-tier                 96.96%         31,077 p/s     0.60×
+Neighbors (Morton arithmetic)                 98.21%          2,378 p/s     0.05×
+Hierarchical (multi-depth)                    98.14%          2,529 p/s     0.05×
+
+
+ACCURACY vs PERFORMANCE TRADE-OFF
+================================================================================
+Configuration                              Retention   Speedup      Rating
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                    96.96%     1.00×        POOR
+Fixed radius=30 (max coverage)                98.21%     0.34×        POOR
+Incremental (2,4,8,15,30) - PRODUCTION        98.21%     0.18×        POOR
+Incremental (2,5,10) - 3-tier                 96.96%     0.60×        POOR
+Neighbors (Morton arithmetic)                 98.21%     0.05×        POOR
+Hierarchical (multi-depth)                    98.14%     0.05×        POOR
+
+
+RECOMMENDATIONS
+================================================================================
+
+Best Throughput: Fixed radius=10 (baseline)
+  Retention: 96.96%
+  Speedup: 1.00×
+  Throughput: 51,894 p/s
+
+Best Retention: Fixed radius=30 (max coverage)
+  Retention: 98.21%
+  Speedup: 0.34×
+
+
+PRODUCTION RECOMMENDATION
+================================================================================
+
+Current Production Config: Incremental (2,4,8,15,30) - PRODUCTION
+  Retention: 98.21%
+  Speedup: 0.18×
+  Throughput: 9,136 p/s
+
+⚠  Production config achieves 0.18× speedup
+   Consider alternative: Fixed radius=10 (baseline) (1.00×)
+
+================================================================================
+Benchmark complete!
+================================================================================

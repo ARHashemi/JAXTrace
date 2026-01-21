@@ -1,0 +1,128 @@
+python test_point_in_tet_methods.py
+ERROR:2026-01-14 15:58:13,834:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Point-in-Tetrahedron Method Validation & Benchmark
+================================================================================
+JAX version: 0.8.2
+JAX devices: [CudaDevice(id=0)]
+
+================================================================================
+TEST 1: Method Agreement (Axis-Aligned Tetrahedron)
+================================================================================
+
+Testing 10 points...
+Node positions:
+[[0. 0. 0.]
+ [1. 0. 0.]
+ [0. 1. 0.]
+ [0. 0. 1.]]
+✅ Point 0: [0.25 0.25 0.25] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 1: [0.1 0.1 0.1] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 2: [0.5 0.  0. ] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 3: [0.  0.5 0. ] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 4: [0.  0.  0.5] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 5: [1. 0. 0.] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 6: [0.33 0.33 0.  ] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 7: [0.5 0.5 0.5] -> current=False, skala=False, axis_aligned=False, expected=False
+✅ Point 8: [1. 1. 1.] -> current=False, skala=False, axis_aligned=False, expected=False
+✅ Point 9: [-0.1  0.   0. ] -> current=False, skala=False, axis_aligned=False, expected=False
+
+================================================================================
+Agreement Summary:
+  current ↔ skala:         ✅ PASS
+  skala ↔ axis_aligned:    ✅ PASS
+  current ↔ expected:      ✅ PASS
+
+✅ All methods agree on axis-aligned tetrahedron!
+
+================================================================================
+TEST 2: General Tetrahedron (Non-Axis-Aligned)
+================================================================================
+
+Testing 4 points...
+Node positions:
+[[0.  0.  0. ]
+ [1.  0.2 0.1]
+ [0.1 1.  0.2]
+ [0.2 0.1 1. ]]
+✅ Point 0: [0.3 0.3 0.3] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 1: [0.1 0.1 0.1] -> current=True, skala=True, axis_aligned=True, expected=True
+✅ Point 2: [0.5 0.5 0.5] -> current=False, skala=False, axis_aligned=False, expected=False
+✅ Point 3: [1. 1. 1.] -> current=False, skala=False, axis_aligned=False, expected=False
+
+================================================================================
+Agreement: ✅ PASS
+Note: axis_aligned method should fall back to Skala for non-axis-aligned tets
+
+✅ All methods agree on general tetrahedron!
+
+================================================================================
+TEST 3: Degenerate Tetrahedron (Coplanar Vertices)
+================================================================================
+
+Testing 2 points...
+Node positions (coplanar):
+[[0.   0.   0.  ]
+ [1.   0.   0.  ]
+ [0.5  0.5  0.  ]
+ [0.25 0.25 0.  ]]
+✅ Point 0: [0.5  0.25 0.  ] -> current=False, skala=False, axis_aligned=False, expected=False
+✅ Point 1: [0.5  0.25 0.1 ] -> current=False, skala=False, axis_aligned=False, expected=False
+
+✅ Degenerate tetrahedra handled correctly!
+
+================================================================================
+TEST 4: Performance Benchmark
+================================================================================
+
+Benchmarking 10000 queries on axis-aligned tetrahedron...
+  Warming up JIT compilation...
+  Benchmarking current method...
+  Benchmarking Skala method...
+  Benchmarking axis-aligned method...
+
+================================================================================
+Performance Results (10000 queries):
+================================================================================
+  current:           109.67 ms  (     91184 queries/sec)  [baseline]
+  skala:             103.02 ms  (     97067 queries/sec)  [1.06× speedup]
+  axis_aligned:       97.97 ms  (    102068 queries/sec)  [1.12× speedup]
+
+  Agreement: ✅ PASS
+
+================================================================================
+Expected vs Actual Speedup:
+================================================================================
+  Skala:         Expected ≥2.5×, Got 1.06× ⚠
+  Axis-aligned:  Expected ≥3.0×, Got 1.12× ⚠
+
+⚠  Skala speedup below target (may be GPU-dependent)
+⚠  Axis-aligned speedup below target (detection overhead?)
+
+================================================================================
+✅ ALL TESTS PASSED!
+================================================================================
+
+Next steps:
+1. Run production_tracking_fully_fused_timedep.py with config.POINT_IN_TET_METHOD='skala'
+2. Verify 100K particle tracking at ~55,000-65,000 p/s (3× speedup)
+3. Confirm 93.57% retention (same as current method)
+4. Proceed to Phase 2: axis_aligned method for 10-12× speedup

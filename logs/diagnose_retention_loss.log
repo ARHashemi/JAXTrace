@@ -1,0 +1,82 @@
+python diagnose_retention_loss_factors.py
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Retention Loss Factor Diagnostic
+================================================================================
+
+[1/5] Loading velocity sequence...
+  Base path: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Timesteps: 120-120
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 120-120 (1 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_120.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_120.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+    Loaded 1/1 timesteps
+    Memory: 8.9 MB
+
+  Loaded mesh:
+    Elements: 3,048,900
+    Nodes: 780,922
+    Load time: 4.59s
+
+[2/5] Building element neighbors...
+    Build time: 50.07s
+
+[3/5] Uploading mesh to GPU...
+  Computing element volumes...
+    Element volumes computed: 3,048,900
+    Volume range: [8.12e-14, 2.13e-08]
+    Median volume: 8.12e-14
+    Size ratio: 262146.2×
+    Computation time: 0.41s
+
+[4/5] Building Morton octree...
+    Build time: 12.46s
+    Leaves: 24,550
+    Max depth: 21
+
+[5/5] Seeding 1000 test particles...
+  Seed region: X=[-0.018000, -0.009000]
+               Y=[-0.014000, 0.014000]
+               Z=[-0.007000, 0.000000]
+
+================================================================================
+RUNNING DIAGNOSTICS
+================================================================================
+
+=== Testing Float Precision Losses ===
+  Search results: 677/1000 found (67.70%)
+
+  Analyzing 323 failed particles...
+
+  Precision losses: 0/100 sampled (0.0%)
+  Estimated total precision losses: 0/323 failed particles
+  Impact on retention: -0.00%
+
+================================================================================
+DIAGNOSTIC SUMMARY
+================================================================================
+Precision losses:  ~0 particles (~0.0%)
+
+✅ PRECISION IS NOT THE DOMINANT FACTOR
+   Recommendation: Investigate Morton locality or other factors
+
+   Next steps:
+   1. Implement enhanced Morton neighbor search (8 hours)
+   2. Test with production script
+   3. If still < 95%: Investigate time-dependent mesh issues
