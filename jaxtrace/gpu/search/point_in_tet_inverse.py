@@ -115,7 +115,7 @@ def point_in_tet_inverse(
     elem_id: jax.Array,
     M_inv_array: jax.Array,
     p0_array: jax.Array,
-    tolerance: float = 1e-10
+    tolerance: float = 1e-6
 ) -> jax.Array:
     """
     Point-in-tet test using precomputed inverse transformation matrix.
@@ -140,9 +140,10 @@ def point_in_tet_inverse(
     p0_array : jax.Array, shape (n_elements, 3), float32
         First vertex for each element (on GPU)
 
-    tolerance : float, default=1e-10
+    tolerance : float, default=1e-6
         Numerical tolerance for containment test
         (allows points slightly outside due to floating-point errors)
+        Note: 1e-6 is appropriate for float32 precision at mesh scale ~1.0
 
     Returns
     -------
@@ -202,7 +203,7 @@ def point_in_tet_inverse_batch(
     elem_ids: jax.Array,
     M_inv_array: jax.Array,
     p0_array: jax.Array,
-    tolerance: float = 1e-10
+    tolerance: float = 1e-6
 ) -> jax.Array:
     """
     Vectorized point-in-tet test for batch of positions and elements.
@@ -221,7 +222,7 @@ def point_in_tet_inverse_batch(
     p0_array : jax.Array, shape (n_elements, 3), float32
         First vertex for each element
 
-    tolerance : float, default=1e-10
+    tolerance : float, default=1e-6
         Numerical tolerance for containment test
 
     Returns
@@ -235,7 +236,7 @@ def point_in_tet_inverse_batch(
 
 
 # Integration with existing point-in-tet interface
-def create_inverse_point_in_tet_fn(M_inv_array_gpu, p0_array_gpu, tolerance=1e-10):
+def create_inverse_point_in_tet_fn(M_inv_array_gpu, p0_array_gpu, tolerance=1e-6):
     """
     Create a point-in-tet function with precomputed data baked in.
 
@@ -252,7 +253,7 @@ def create_inverse_point_in_tet_fn(M_inv_array_gpu, p0_array_gpu, tolerance=1e-1
     p0_array_gpu : jax.Array, shape (n_elements, 3)
         First vertex for each element (on GPU)
 
-    tolerance : float, default=1e-10
+    tolerance : float, default=1e-6
         Numerical tolerance for containment test
 
     Returns
