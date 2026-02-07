@@ -86,6 +86,111 @@ Recommendation: Keep False unless you've verified no OOM issues.
 """
 
 # ============================================================================
+# L2 Global Search Method Selection
+# ============================================================================
+
+L2_SEARCH_METHOD = "morton"
+"""
+L2 global search method selection.
+
+Options:
+    "morton" - Morton curve-based search (original implementation)
+               Uses space-filling curve for spatial indexing
+               Morton codes from ELEMENT CENTROIDS
+               Methods: radius, incremental, neighbors, hierarchical
+
+    "mesh_aligned_octree" - Direct mesh-aligned octree search
+                           Extracts intrinsic octree from Kuhn mesh
+                           Single-cell lookup (center cell only)
+                           ~5.9 elements per cell
+                           74.6% retention (elements span multiple cells)
+                           Requires Kuhn tetrahedral mesh structure
+
+    "mesh_aligned_neighbors" - Mesh-aligned octree with pre-computed neighbor table (Option B)
+                              Extracts intrinsic octree + builds CPU neighbor table
+                              Searches primary cell + 26 spatial neighbors at 8 levels
+                              89.74% retention, 13.9 tests/particle
+                              1,504 particles/sec (8× slower than baseline)
+                              Stable execution, no JAX memory issues
+                              Memory: 134 MB (base 83 MB + neighbor table 51 MB)
+                              Best for: Production tracking with high searchability
+                              Requires Kuhn tetrahedral mesh structure
+
+    "mesh_aligned_morton" - Hybrid: Morton radius search over mesh cells (NEW)
+                           Combines intrinsic mesh structure + proven radius search
+                           Morton codes from CELL CENTERS (not element centroids)
+                           Radius search handles elements spanning cells
+                           Expected ~98% retention
+                           Requires Kuhn tetrahedral mesh structure
+
+    "kdtree" - KD-tree node-based search (NEW)
+               Find K nearest nodes, test connected elements
+               ~95-100% retention with K=3
+               ~64 tests per particle (K=3 × ~21 elem/node)
+               ⚠️  LIMITATION: Only works for BATCH searches (initial assignment)
+               Cannot be used in vmapped RK4 tracking (KD-tree query not traceable)
+               Requires jaxkd library: pip install jaxkd
+
+Performance comparison (FLA mesh, 225K particles):
+┌──────────────────────────────┬──────────────────┬─────────────────────┬────────────────┐
+│ Method                       │ Retention        │ Tests per particle  │ Throughput     │
+├──────────────────────────────┼──────────────────┼─────────────────────┼────────────────┤
+│ morton (radius=2)            │ ~93-98%          │ ~536 (in 5 leaves)  │ 12,106 p/s     │
+│ morton (incremental)         │ ~93-98%          │ ~536 (adaptive)     │ 12,000 p/s     │
+│ mesh_aligned_octree          │ ~74.6%           │ ~5.9 (in 1 cell)    │ 12,106 p/s     │
+│ mesh_aligned_neighbors       │ ~89.74%          │ ~13.9 (27 cells)    │ 1,504 p/s      │
+│ mesh_aligned_morton (2)      │ ~98% (expected)  │ ~30 (in 5 cells)    │ TBD            │
+│ kdtree (K=3)                 │ ~95-100%         │ ~64 (batch only)    │ TBD            │
+└──────────────────────────────┴──────────────────┴─────────────────────┴────────────────┘
+
+Note: mesh_aligned_* methods only work with Kuhn meshes (axis-aligned tets).
+      Will fall back to morton if mesh structure is incompatible.
+      kdtree only works for batch searches, not vmapped RK4 tracking.
+
+Default: "morton" (production-validated, works with any mesh)
+"""
+
+# ============================================================================
+# Mesh-Aligned Octree Configuration
+# ============================================================================
+
+MESH_ALIGNED_MULTI_CELL_REGISTRATION = False
+"""
+Enable multi-cell vertex registration for mesh-aligned octree.
+
+Problem:
+    Current single-cell registration has 88.59% retention over 100 RK4 steps
+    because 100% of Kuhn elements span cell boundaries (vertices at cube corners).
+    When particle crosses to adjacent cell, element not found → particle lost.
+
+Solution:
+    Multi-cell vertex registration registers each element in ALL cells its
+    vertices touch (~4 cells per element), improving retention to ~95%+.
+
+Trade-offs:
+    Single-Cell Registration (current):
+        - Memory: 37.5 MB
+        - Elements per cell: ~5.9
+        - Cells per element: ~1.0
+        - Retention: 88.59% over 100 steps
+        - Tests per particle: ~35 (direct + neighbors)
+
+    Multi-Cell Vertex Registration (this option):
+        - Memory: 135 MB (+97.5 MB increase)
+        - Elements per cell: ~23.6
+        - Cells per element: ~4.0
+        - Expected retention: ~95%+ over 100 steps
+        - Tests per particle: ~141 (direct + neighbors)
+
+When to enable:
+    - Enable if retention is more important than memory/performance
+    - Enable for long tracking runs (>100 steps)
+    - Disable for memory-constrained scenarios or short runs
+
+Default: False (use single-cell registration)
+"""
+
+# ============================================================================
 # L1 Neighbor Search Optimization (Phase 4)
 # ============================================================================
 

@@ -90,6 +90,92 @@ from .morton_global_search import (
     upload_global_morton_to_gpu,
 )
 
+# Mesh-aligned octree (Phase 2: Cell Extraction)
+from .mesh_aligned_octree import (
+    OctreeCellData,
+    extract_octree_cells_multi_insert,
+    validate_searchability,
+    encode_morton_3d,
+    find_axis_aligned_edges,
+    infer_cell_size_from_edges,
+    find_all_overlapping_cells,
+)
+# Fast optimized version (assumes 8-cell pattern)
+from .mesh_aligned_octree_fast import (
+    extract_octree_cells_fast,
+    encode_morton_3d_vectorized,
+    compute_8cell_pattern,
+)
+
+# Mesh-aligned octree (Phase 3: GPU Structure)
+from .mesh_aligned_octree_gpu import (
+    MeshAlignedOctreeGPU,
+    upload_mesh_aligned_octree_to_gpu,
+    encode_morton_3d_jax,
+    position_to_grid_indices,
+    position_to_morton_code,
+    find_cell_by_morton,
+    find_cell_by_morton_and_level,
+    get_cell_elements,
+)
+
+# Mesh-aligned octree (Phase 4: Point Location)
+from .mesh_aligned_point_location import (
+    search_mesh_aligned_octree_single,
+    search_mesh_aligned_octree_batch,
+    search_mesh_aligned_octree_multi_local,
+    search_mesh_aligned_octree_multi_local_batch,
+    search_mesh_aligned_multi_level,
+    compute_search_statistics,
+    print_search_statistics,
+    search_mesh_aligned_octree_single_jit,
+    search_mesh_aligned_octree_batch_jit,
+    search_mesh_aligned_octree_multi_local_jit,
+    search_mesh_aligned_octree_multi_local_batch_jit,
+)
+
+# Mesh-aligned Morton (Phase 5: Hybrid Approach)
+from .mesh_aligned_morton_builder import (
+    MeshAlignedMortonStructure,
+    build_mesh_aligned_morton_structure,
+    validate_mesh_aligned_morton_structure,
+)
+from .mesh_aligned_morton_search import (
+    MeshAlignedMortonGPU,
+    upload_mesh_aligned_morton_to_gpu,
+    search_L2_mesh_aligned_morton_single,
+    search_L2_mesh_aligned_morton_incremental_single,
+    search_L2_mesh_aligned_morton_batch,
+    search_L2_mesh_aligned_grid_neighbors_single,
+    search_L2_mesh_aligned_grid_neighbors_batch,
+)
+
+# KD-tree node search (Phase 6: Simple and Direct)
+from .kdtree_node_search import (
+    NodeKDTreeStructure,
+    NodeKDTreeGPU,
+    build_kdtree_structure,
+    upload_kdtree_to_gpu,
+    search_L2_kdtree_single,
+    search_L2_kdtree_batch,
+    JAXKD_AVAILABLE,
+)
+
+# Mesh-aligned octree: Single-cell registration (Phase 2: Corrected)
+from .mesh_aligned_octree_single_cell import (
+    OctreeCellDataSingle,
+    extract_octree_cells_single,
+    encode_morton_3d_single,
+    find_axis_aligned_edges_single,
+    find_parent_cube,
+)
+
+# Mesh-aligned octree: Multi-cell vertex registration (Phase 2: Retention Fix)
+from .mesh_aligned_octree_vertex_multi import (
+    OctreeCellDataVertexMulti,
+    extract_octree_cells_vertex_multi,
+)
+
 __all__ = [
     # Block classification
     'BlockClassification',
@@ -142,4 +228,64 @@ __all__ = [
     'position_to_leaf_id_linear',
     'search_L2_global_morton_single',
     'upload_global_morton_to_gpu',
+    # Mesh-aligned octree (Phase 2)
+    'OctreeCellData',
+    'extract_octree_cells_multi_insert',
+    'validate_searchability',
+    'encode_morton_3d',
+    'find_axis_aligned_edges',
+    'infer_cell_size_from_edges',
+    'find_all_overlapping_cells',
+    # Fast optimized version
+    'extract_octree_cells_fast',
+    'encode_morton_3d_vectorized',
+    'compute_8cell_pattern',
+    # Mesh-aligned octree (Phase 3)
+    'MeshAlignedOctreeGPU',
+    'upload_mesh_aligned_octree_to_gpu',
+    'encode_morton_3d_jax',
+    'position_to_grid_indices',
+    'position_to_morton_code',
+    'find_cell_by_morton',
+    'get_cell_elements',
+    # Mesh-aligned octree (Phase 4)
+    'search_mesh_aligned_octree_single',
+    'search_mesh_aligned_octree_batch',
+    'search_mesh_aligned_octree_multi_local',
+    'search_mesh_aligned_octree_multi_local_batch',
+    'search_mesh_aligned_multi_level',
+    'compute_search_statistics',
+    'print_search_statistics',
+    'search_mesh_aligned_octree_single_jit',
+    'search_mesh_aligned_octree_batch_jit',
+    'search_mesh_aligned_octree_multi_local_jit',
+    'search_mesh_aligned_octree_multi_local_batch_jit',
+    # Mesh-aligned Morton (Phase 5 - Hybrid)
+    'MeshAlignedMortonStructure',
+    'build_mesh_aligned_morton_structure',
+    'validate_mesh_aligned_morton_structure',
+    'MeshAlignedMortonGPU',
+    'upload_mesh_aligned_morton_to_gpu',
+    'search_L2_mesh_aligned_morton_single',
+    'search_L2_mesh_aligned_morton_incremental_single',
+    'search_L2_mesh_aligned_morton_batch',
+    'search_L2_mesh_aligned_grid_neighbors_single',
+    'search_L2_mesh_aligned_grid_neighbors_batch',
+    # KD-tree node search (Phase 6)
+    'NodeKDTreeStructure',
+    'NodeKDTreeGPU',
+    'build_kdtree_structure',
+    'upload_kdtree_to_gpu',
+    'search_L2_kdtree_single',
+    'search_L2_kdtree_batch',
+    'JAXKD_AVAILABLE',
+    # Mesh-aligned octree: Single-cell (corrected)
+    'OctreeCellDataSingle',
+    'extract_octree_cells_single',
+    'encode_morton_3d_single',
+    'find_axis_aligned_edges_single',
+    'find_parent_cube',
+    # Mesh-aligned octree: Multi-cell vertex registration
+    'OctreeCellDataVertexMulti',
+    'extract_octree_cells_vertex_multi',
 ]
