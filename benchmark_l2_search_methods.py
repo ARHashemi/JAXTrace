@@ -702,35 +702,35 @@ def main():
             'expected_leaves': '~5.9 elements/cell'
         },
 
-        # Mesh-aligned Morton (HYBRID - NEW)
-        {
-            'name': 'Mesh-Aligned Morton r=2 (HYBRID - NEW)',
-            'l2_method': 'mesh_aligned_morton',
-            'l2_radius': 2,
-            'incremental_radii': None,
-            'description': 'Morton radius over cell centers (5 cells)',
-            'expected_leaves': '~30 tests (5 cells × 5.9 elem/cell)'
-        },
+        # # Mesh-aligned Morton (HYBRID - NEW)
+        # {
+        #     'name': 'Mesh-Aligned Morton r=2 (HYBRID - NEW)',
+        #     'l2_method': 'mesh_aligned_morton',
+        #     'l2_radius': 2,
+        #     'incremental_radii': None,
+        #     'description': 'Morton radius over cell centers (5 cells)',
+        #     'expected_leaves': '~30 tests (5 cells × 5.9 elem/cell)'
+        # },
 
-        # Mesh-aligned Morton incremental
-        {
-            'name': 'Mesh-Aligned Morton (2,5,10) (HYBRID - NEW)',
-            'l2_method': 'mesh_aligned_morton',
-            'l2_radius': None,
-            'incremental_radii': (2, 5, 10),
-            'description': 'Incremental radius over cell centers',
-            'expected_leaves': '~68 tests avg (11.5 cells × 5.9 elem/cell)'
-        },
+        # # Mesh-aligned Morton incremental
+        # {
+        #     'name': 'Mesh-Aligned Morton (2,5,10) (HYBRID - NEW)',
+        #     'l2_method': 'mesh_aligned_morton',
+        #     'l2_radius': None,
+        #     'incremental_radii': (2, 5, 10),
+        #     'description': 'Incremental radius over cell centers',
+        #     'expected_leaves': '~68 tests avg (11.5 cells × 5.9 elem/cell)'
+        # },
 
-        # Mesh-aligned neighbors (Option B - NEW)
-        {
-            'name': 'Mesh-Aligned Neighbors (Option B - NEW)',
-            'l2_method': 'mesh_aligned_neighbors',
-            'l2_radius': None,
-            'incremental_radii': None,
-            'description': 'Pre-computed neighbor table (27 cells @ 3 levels)',
-            'expected_leaves': '~13.9 tests/particle, 99.95% for centroids'
-        },
+        # # Mesh-aligned neighbors (Option B - NEW)
+        # {
+        #     'name': 'Mesh-Aligned Neighbors (Option B - NEW)',
+        #     'l2_method': 'mesh_aligned_neighbors',
+        #     'l2_radius': None,
+        #     'incremental_radii': None,
+        #     'description': 'Pre-computed neighbor table (27 cells @ 3 levels)',
+        #     'expected_leaves': '~13.9 tests/particle, 99.95% for centroids'
+        # },
 
         # Mesh-aligned octree MULTI-CELL vertex registration (NEW - Phase 2)
         {

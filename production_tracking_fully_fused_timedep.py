@@ -47,7 +47,11 @@ from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.hilbert_octree_builder import build_global_hilbert_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
+from jaxtrace.gpu.search.mesh_aligned_octree_single_cell import extract_octree_cells_single
+from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
+from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.tracking.rk4_fully_fused_timedep import create_rk4_fully_fused_timedep
+import jaxtrace.config as config
 from jaxtrace.gpu.tracking.initial_assignment_extended import initial_assignment_extended_batch
 from jaxtrace.gpu.tracking.initial_assignment_cascading import initial_assignment_cascading_fallback
 from jaxtrace.tracking.seeding import uniform_grid_seeds
@@ -141,13 +145,27 @@ NEIGHBOR_METHOD = 'face'       # ✅ RECOMMENDED for FLA mesh (uniformly refined
 #             - Simple, works for all meshes
 #             - May search many irrelevant leaves (not spatial neighbors)
 #             - Performance: ~30K particles/s with radius=10, 93.5% retention (with inverse point-in-tet)
-#   'incremental': Cascading radius search (NEW - RECOMMENDED)
+#   'incremental': Cascading radius search (OLD - Morton-based)
 #                  - Tier 1: radius=2 (5 leaves) - fast path
 #                  - Tier 2: radius=5 (11 leaves) - only if radius=2 fails
 #                  - Tier 3: radius=10 (21 leaves) - only if radius=5 fails
 #                  - Expected: 1.8-2.5× speedup vs 'radius' (depends on hit rate distribution)
 #                  - Performance: ~50-70K particles/s (estimated, with inverse point-in-tet)
 #                  - Same retention as 'radius' method
+#   'mesh_aligned_octree': Multi-cell vertex registration + 2×2×2 local search (NEW - RECOMMENDED)
+#                          - Registers each element in ALL cells its 4 vertices touch (~4 cells/elem)
+#                          - Searches 8-cell neighborhood (2×2×2 centered cube) at 8 levels
+#                          - Direct cell lookup (no tree traversal)
+#                          - Expected: ~80% retention (under investigation), ~1.1M particles/s
+#                          - Memory: 135 MB (vs 37.5 MB for single-cell)
+#                          - Tests/particle: ~146 (8 cells × 18.31 elem/cell)
+#                          - ⚠️ NOTE: Retention ~10% lower than Morton baseline - under investigation
+#   'mesh_aligned_morton': Hybrid mesh-aligned Morton (cell centers + radius search)
+#                          - Combines mesh-aligned cell structure with Morton radius search
+#                          - Expected: ~82% retention, moderate performance
+#   'mesh_aligned_neighbors': Pre-computed neighbor table (Option B)
+#                             - 27 cells at 3 refinement levels
+#                             - Expected: ~81% retention for tracking
 #   'neighbors': Morton neighbor arithmetic (26 spatial neighbors at single depth)
 #                - Decodes Morton prefix to find 26 spatial neighbor octants
 #                - Geometrically correct (actual spatial adjacency)
@@ -161,10 +179,19 @@ NEIGHBOR_METHOD = 'face'       # ✅ RECOMMENDED for FLA mesh (uniformly refined
 #                   - Expected: ~85-90% retention, ~18-20K particles/s
 #                   - Best for graded refinement meshes with variable leaf depths
 #                   - Requires octree prefix table (table_depth > 0)
-L2_SEARCH_METHOD = 'incremental'  # 'radius', 'incremental', 'neighbors', or 'hierarchical'
-# ✅ RECOMMENDED: 'incremental' for best performance with high retention
-# NOTE: Configure tiers with INCREMENTAL_SEARCH_RADII below
-# NOTE: 'hierarchical' with conditional execution (depth-7→depth-6) also available
+#   'kdtree': KD-tree based node search
+#                   - Finds K nearest mesh nodes, tests connected elements
+#                   - Cost: ~64 tests (K=3 nodes × ~21 elem/node)
+#                   - Expected: ~95-100% retention (very robust)
+#                   - No spatial structure needed, works with any mesh
+#                   - Requires jaxkd library: pip install jaxkd
+#                   - ⚠️  WARNING: kdtree NOT compatible with vmapped RK4 tracking!
+#                   - Use 'incremental' for RK4 tracking instead
+L2_SEARCH_METHOD = 'mesh_aligned_octree'  # 'radius', 'incremental', 'mesh_aligned_octree', 'mesh_aligned_morton', 'mesh_aligned_neighbors', 'neighbors', 'hierarchical', or 'kdtree'
+# ✅ RECOMMENDED: 'mesh_aligned_octree' for Kuhn meshes (highest performance)
+# ⚠️  'kdtree' only works for batch searches (initial assignment), NOT RK4 tracking
+# NOTE: mesh_aligned_* methods only work with Kuhn meshes (axis-aligned tets)
+# NOTE: Configure tiers with INCREMENTAL_SEARCH_RADII below (only for 'incremental' method)
 
 N_HOPS = 5                     # Number of hops for L1 neighbor search
 L2_SEARCH_RADIUS = 10          # L2 search radius (only used if L2_SEARCH_METHOD='radius')
@@ -187,6 +214,10 @@ ENABLE_L1_SEARCH = True        # Enable L1 neighbor search (set False to test L0
 #   - Aggressive (2,4,8,15,30): More tiers for highly variable flow
 #   - Conservative (5,15,50): Fewer tiers, larger jumps
 INCREMENTAL_SEARCH_RADII = (2, 4, 8, 15, 30) # 2-5 tiers supported
+
+# KD-tree L2 Configuration (only used if L2_SEARCH_METHOD='kdtree')
+KDTREE_K_NEAREST = 3           # Number of nearest nodes to search (K=3 recommended)
+KDTREE_MAX_TESTS = 256          # Maximum element tests per particle
 
 # Initial assignment search radii (curve-dependent)
 # Hilbert has ~15% more leaves (28,363 vs 24,550), so needs larger radii for same coverage
@@ -334,6 +365,7 @@ class AsyncVTKExporter:
 def main():
     # Apply point-in-tet method configuration
     config.POINT_IN_TET_METHOD = POINT_IN_TET_METHOD
+    config.L2_SEARCH_METHOD = L2_SEARCH_METHOD
 
     nx, ny, nz = PARTICLE_GRID_RESOLUTION
 
@@ -476,6 +508,152 @@ def main():
     curve_indices = getattr(octree_struct, curve_field_name)
     octree_memory_mb = (octree_struct.elem_ids_sorted.nbytes + curve_indices.nbytes) / (1024**2)
     print(f"  Memory: {octree_memory_mb:.1f} MB")
+
+    # Build mesh-aligned structures (if enabled in config)
+    mesh_aligned_octree_gpu = None
+    mesh_aligned_morton_gpu = None
+    mesh_aligned_octree_neighbors_gpu = None
+    mesh_octree_cells = None  # Cache for reuse
+    kdtree_gpu = None
+
+    if config.L2_SEARCH_METHOD == 'kdtree':
+        print(f"\n  Building KD-tree structure (L2_SEARCH_METHOD={config.L2_SEARCH_METHOD})...")
+        from jaxtrace.gpu.search.kdtree_node_search import (
+            build_kdtree_structure,
+            upload_kdtree_to_gpu,
+            JAXKD_AVAILABLE,
+        )
+
+        if not JAXKD_AVAILABLE:
+            print(f"    ❌ ERROR: jaxkd not available! Install with: pip install jaxkd")
+            sys.exit(1)
+
+        # Build KD-tree structure
+        t_kdtree = time.time()
+        kdtree_struct = build_kdtree_structure(
+            node_positions, connectivity, verbose=False
+        )
+        t_kdtree = time.time() - t_kdtree
+        print(f"    Built in {t_kdtree:.2f}s")
+        print(f"    Nodes: {kdtree_struct.n_nodes:,}, Elements per node: {kdtree_struct.elements_per_node_mean:.1f} (mean)")
+
+        # Upload to GPU
+        t_upload_kdtree = time.time()
+        kdtree_gpu = upload_kdtree_to_gpu(kdtree_struct, verbose=False)
+        t_upload_kdtree = time.time() - t_upload_kdtree
+        print(f"    GPU upload: {t_upload_kdtree:.2f}s")
+
+    elif config.L2_SEARCH_METHOD in ['mesh_aligned_octree', 'mesh_aligned_morton', 'mesh_aligned_neighbors']:
+        print(f"\n  Building mesh-aligned structures (L2_SEARCH_METHOD={config.L2_SEARCH_METHOD})...")
+
+        # Extract mesh-aligned octree cells (shared by both methods)
+        # Choose single-cell or multi-cell based on config
+        t_mesh_octree = time.time()
+        if config.MESH_ALIGNED_MULTI_CELL_REGISTRATION:
+            print(f"    Using multi-cell vertex registration (config.MESH_ALIGNED_MULTI_CELL_REGISTRATION=True)")
+            mesh_octree_cells = extract_octree_cells_vertex_multi(
+                node_positions, connectivity, tolerance=1e-6, verbose=False
+            )
+        else:
+            print(f"    Using single-cell registration (config.MESH_ALIGNED_MULTI_CELL_REGISTRATION=False)")
+            mesh_octree_cells = extract_octree_cells_single(
+                node_positions, connectivity, tolerance=1e-6, verbose=False
+            )
+        t_mesh_octree = time.time() - t_mesh_octree
+        print(f"    Extracted {mesh_octree_cells.n_cells:,} cells in {t_mesh_octree:.2f}s")
+        print(f"    Elements per cell (avg): {mesh_octree_cells.elements_per_cell_mean:.2f}")
+        print(f"    Cells per element (avg): {mesh_octree_cells.cells_per_element_mean:.2f}")
+
+        # Estimate memory
+        cells_memory_mb = (
+            mesh_octree_cells.cell_levels.nbytes +
+            mesh_octree_cells.cell_morton_codes.nbytes +
+            mesh_octree_cells.cell_grid_indices.nbytes +
+            mesh_octree_cells.cell_sizes.nbytes +
+            mesh_octree_cells.cell_to_elements_offsets.nbytes +
+            mesh_octree_cells.cell_to_elements_data.nbytes
+        ) / (1024**2)
+
+        # Add multi-cell specific memory if using multi-cell registration
+        if config.MESH_ALIGNED_MULTI_CELL_REGISTRATION:
+            cells_memory_mb += (
+                mesh_octree_cells.element_to_cells_offsets.nbytes +
+                mesh_octree_cells.element_to_cells_data.nbytes
+            ) / (1024**2)
+
+        print(f"    Memory (CPU): {cells_memory_mb:.1f} MB")
+
+        if config.L2_SEARCH_METHOD == 'mesh_aligned_octree':
+            # MULTI-CELL + 2×2×2 LOCAL SEARCH (Option A)
+            print(f"\n    Method: Multi-cell vertex registration + 2×2×2 local search (Option A)")
+            print(f"    Building multi-cell octree...")
+            t_build_multi = time.time()
+            mesh_octree_multi_cells = extract_octree_cells_vertex_multi(
+                node_positions, connectivity, verbose=False
+            )
+            t_build_multi = time.time() - t_build_multi
+            print(f"    Multi-cell octree built in {t_build_multi:.2f}s")
+            print(f"    Cells: {mesh_octree_multi_cells.n_cells:,}")
+            print(f"    Elements per cell: {mesh_octree_multi_cells.elements_per_cell_mean:.2f}")
+            print(f"    Cells per element: {mesh_octree_multi_cells.cells_per_element_mean:.2f}")
+
+            t_upload_mesh_octree = time.time()
+            mesh_aligned_octree_gpu = upload_mesh_aligned_octree_to_gpu(
+                node_positions, connectivity, mesh_octree_multi_cells, verbose=False
+            )
+            t_upload_mesh_octree = time.time() - t_upload_mesh_octree
+            print(f"    GPU upload: {t_upload_mesh_octree:.2f}s")
+
+        elif config.L2_SEARCH_METHOD == 'mesh_aligned_morton':
+            # HYBRID: Morton radius search over cell centers (expected ~98% retention)
+            print(f"\n    Method: Mesh-aligned Morton (hybrid: cell centers + radius search)")
+            from jaxtrace.gpu.search import (
+                build_mesh_aligned_morton_structure,
+                upload_mesh_aligned_morton_to_gpu,
+            )
+
+            # Build Morton structure from cell centers
+            t_morton_build = time.time()
+            mesh_aligned_morton_struct = build_mesh_aligned_morton_structure(
+                node_positions, connectivity, mesh_octree_cells=mesh_octree_cells, verbose=False
+            )
+            t_morton_build = time.time() - t_morton_build
+            print(f"    Morton structure built in {t_morton_build:.2f}s")
+            print(f"    Elements per cell: mean={mesh_aligned_morton_struct.elements_per_cell_mean:.1f}, "
+                  f"max={mesh_aligned_morton_struct.elements_per_cell_max}")
+
+            # Upload to GPU
+            t_upload_morton = time.time()
+            mesh_aligned_morton_gpu = upload_mesh_aligned_morton_to_gpu(
+                node_positions, connectivity, mesh_aligned_morton_struct, verbose=False
+            )
+            t_upload_morton = time.time() - t_upload_morton
+            print(f"    GPU upload: {t_upload_morton:.2f}s")
+
+        elif config.L2_SEARCH_METHOD == 'mesh_aligned_neighbors':
+            # OPTION B: Pre-computed neighbor table (99.95% retention for centroids)
+            print(f"\n    Method: Mesh-aligned octree with pre-computed neighbor table (Option B)")
+            from jaxtrace.gpu.search.mesh_aligned_octree_with_neighbor_table import (
+                add_neighbor_table_to_octree,
+                upload_octree_with_neighbors_to_gpu
+            )
+
+            # Build neighbor table
+            t_neighbor_build = time.time()
+            octree_with_neighbors = add_neighbor_table_to_octree(mesh_octree_cells, verbose=False)
+            t_neighbor_build = time.time() - t_neighbor_build
+            print(f"    Neighbor table built in {t_neighbor_build:.2f}s")
+            print(f"    Mean neighbors per cell: {octree_with_neighbors.neighbor_counts.mean():.1f}")
+
+            # Upload to GPU
+            t_upload_neighbors = time.time()
+            mesh_aligned_octree_neighbors_gpu = upload_octree_with_neighbors_to_gpu(
+                connectivity, node_positions, octree_with_neighbors, verbose=False
+            )
+            t_upload_neighbors = time.time() - t_upload_neighbors
+            print(f"    GPU upload: {t_upload_neighbors:.2f}s")
+    else:
+        print(f"\n  Mesh-aligned structures DISABLED (L2_SEARCH_METHOD={config.L2_SEARCH_METHOD})")
 
     # ========================================================================
     # 3. Upload to GPU
@@ -691,6 +869,8 @@ def main():
             print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} hierarchical, depth 7+6)")
         elif L2_SEARCH_METHOD == 'neighbors':
             print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} neighbors, 27 octants)")
+        elif L2_SEARCH_METHOD == 'kdtree':
+            print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 (KD-tree, K={KDTREE_K_NEAREST} nearest nodes)")
         else:
             print(f"    L0 (cached element) → L1 (adaptive {N_HOPS}-6 hops) → L2 ({CURVE_TYPE.upper()} radius, ±{L2_SEARCH_RADIUS})")
         print(f"    ✅ PHASE 1.3: L1 uses adaptive hop count (6 hops at refinement boundaries)")
@@ -699,6 +879,8 @@ def main():
             print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} hierarchical, depth 7+6)")
         elif L2_SEARCH_METHOD == 'neighbors':
             print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} neighbors, 27 octants)")
+        elif L2_SEARCH_METHOD == 'kdtree':
+            print(f"    L0 (cached element) → L2 (KD-tree, K={KDTREE_K_NEAREST} nearest nodes)")
         else:
             print(f"    L0 (cached element) → L2 ({CURVE_TYPE.upper()} radius, ±{L2_SEARCH_RADIUS})")
         print(f"    ⚠️  L1 neighbor search DISABLED")
@@ -713,18 +895,79 @@ def main():
             print(f"    ✅ Octree prefix table available (depth={mesh_gpu_octree.table_depth})")
 
     # Create fully-fused time-dependent RK4 step function
-    rk4_step = create_rk4_fully_fused_timedep(
-        mesh_gpu_connectivity=mesh_gpu.connectivity,
-        mesh_gpu_node_positions=mesh_gpu.node_positions,
-        mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
-        mesh_gpu_element_volumes=element_volumes_gpu,  # PHASE 1.3: For adaptive L1 hop count
-        mesh_gpu_global_morton=mesh_gpu_octree,  # Works for both Morton and Hilbert
-        n_hops=N_HOPS,
-        l2_search_radius=L2_SEARCH_RADIUS,
-        enable_l1_search=ENABLE_L1_SEARCH,
-        l2_search_method=L2_SEARCH_METHOD,
-        l2_incremental_radii=INCREMENTAL_SEARCH_RADII  # Configurable tiers for incremental search
-    )
+    # CRITICAL: Only pass parameters relevant to the chosen L2_SEARCH_METHOD
+    # Passing unused None parameters can cause JAX compilation issues (41 TiB memory bug)
+
+    if L2_SEARCH_METHOD == 'mesh_aligned_octree':
+        # Mesh-aligned octree: only pass octree parameter
+        rk4_step = create_rk4_fully_fused_timedep(
+            mesh_gpu_connectivity=mesh_gpu.connectivity,
+            mesh_gpu_node_positions=mesh_gpu.node_positions,
+            mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
+            mesh_gpu_element_volumes=element_volumes_gpu,
+            mesh_gpu_global_morton=mesh_gpu_octree,
+            n_hops=N_HOPS,
+            enable_l1_search=ENABLE_L1_SEARCH,
+            l2_search_method='radius',  # Fallback (won't be used)
+            mesh_aligned_octree=mesh_aligned_octree_gpu,
+            mesh_aligned_octree_use_multi_local=True
+        )
+    elif L2_SEARCH_METHOD == 'mesh_aligned_morton':
+        # Mesh-aligned Morton: only pass Morton parameter
+        rk4_step = create_rk4_fully_fused_timedep(
+            mesh_gpu_connectivity=mesh_gpu.connectivity,
+            mesh_gpu_node_positions=mesh_gpu.node_positions,
+            mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
+            mesh_gpu_element_volumes=element_volumes_gpu,
+            mesh_gpu_global_morton=mesh_gpu_octree,
+            n_hops=N_HOPS,
+            enable_l1_search=ENABLE_L1_SEARCH,
+            l2_search_method=L2_SEARCH_METHOD if L2_SEARCH_METHOD == 'incremental' else 'radius',
+            l2_incremental_radii=INCREMENTAL_SEARCH_RADII,
+            mesh_aligned_morton=mesh_aligned_morton_gpu
+        )
+    elif L2_SEARCH_METHOD == 'mesh_aligned_neighbors':
+        # Mesh-aligned neighbors: only pass neighbors parameter
+        rk4_step = create_rk4_fully_fused_timedep(
+            mesh_gpu_connectivity=mesh_gpu.connectivity,
+            mesh_gpu_node_positions=mesh_gpu.node_positions,
+            mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
+            mesh_gpu_element_volumes=element_volumes_gpu,
+            mesh_gpu_global_morton=mesh_gpu_octree,
+            n_hops=N_HOPS,
+            enable_l1_search=ENABLE_L1_SEARCH,
+            l2_search_method='radius',  # Fallback (won't be used)
+            mesh_aligned_octree_neighbors=mesh_aligned_octree_neighbors_gpu
+        )
+    elif L2_SEARCH_METHOD == 'kdtree':
+        # KD-tree: only pass kdtree parameters
+        rk4_step = create_rk4_fully_fused_timedep(
+            mesh_gpu_connectivity=mesh_gpu.connectivity,
+            mesh_gpu_node_positions=mesh_gpu.node_positions,
+            mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
+            mesh_gpu_element_volumes=element_volumes_gpu,
+            mesh_gpu_global_morton=mesh_gpu_octree,
+            n_hops=N_HOPS,
+            enable_l1_search=ENABLE_L1_SEARCH,
+            l2_search_method='radius',  # Fallback (won't be used)
+            kdtree_gpu=kdtree_gpu,
+            kdtree_k_nearest=KDTREE_K_NEAREST,
+            kdtree_max_tests=KDTREE_MAX_TESTS
+        )
+    else:
+        # Morton-based methods: radius, incremental, neighbors, hierarchical
+        rk4_step = create_rk4_fully_fused_timedep(
+            mesh_gpu_connectivity=mesh_gpu.connectivity,
+            mesh_gpu_node_positions=mesh_gpu.node_positions,
+            mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
+            mesh_gpu_element_volumes=element_volumes_gpu,
+            mesh_gpu_global_morton=mesh_gpu_octree,
+            n_hops=N_HOPS,
+            l2_search_radius=L2_SEARCH_RADIUS,
+            enable_l1_search=ENABLE_L1_SEARCH,
+            l2_search_method=L2_SEARCH_METHOD,
+            l2_incremental_radii=INCREMENTAL_SEARCH_RADII
+        )
 
     # Upload velocity sequence and particle data to GPU ONCE
     print("\n  Uploading data to GPU...")
@@ -839,6 +1082,24 @@ def main():
 
     # Run first step to trigger JIT compilation (data stays on GPU)
     print("\n  Compiling RK4 (first step)...")
+
+    # DEBUG: Print all array shapes before compilation
+    print(f"\n  DEBUG: Array shapes before compilation:")
+    print(f"    positions_gpu: {positions_gpu.shape}")
+    print(f"    element_ids_gpu: {element_ids_gpu.shape}")
+    print(f"    velocity_fields_gpu: {velocity_fields_gpu.shape}")
+    print(f"    DT: {DT}")
+    print(f"    mesh_gpu.connectivity: {mesh_gpu.connectivity.shape}")
+    print(f"    mesh_gpu.node_positions: {mesh_gpu.node_positions.shape}")
+    print(f"    mesh_gpu.element_neighbors: {mesh_gpu.element_neighbors.shape}")
+    print(f"    element_volumes_gpu: {element_volumes_gpu.shape}")
+    if mesh_aligned_octree_gpu is not None:
+        print(f"    mesh_aligned_octree_gpu.cell_to_elements_offsets: {mesh_aligned_octree_gpu.cell_to_elements_offsets.shape}")
+        print(f"    mesh_aligned_octree_gpu.cell_to_elements_data: {mesh_aligned_octree_gpu.cell_to_elements_data.shape}")
+        print(f"    mesh_aligned_octree_gpu.cell_morton_codes: {mesh_aligned_octree_gpu.cell_morton_codes.shape}")
+        print(f"    mesh_aligned_octree_gpu.n_cells: {mesh_aligned_octree_gpu.n_cells}")
+    print()
+
     t_compile = time.time()
     positions_gpu, element_ids_gpu = rk4_step(
         positions_gpu,

@@ -285,60 +285,79 @@ if VTK_IO_AVAILABLE:
                 
                 print(f"Time series written: {trajectory.T} files")  
             
-            def write_particles_at_time(self, positions, velocities=None, time=0, filename=None, format='xml'):  
-                """  
-                Write particles at a specific time to VTK file.  
-                
-                Args:  
-                    positions: Particle positions (N, 3)  
-                    velocities: Particle velocities (N, 3), optional  
-                    time: Time value  
-                    filename: Output filename  
-                    format: 'xml' or 'binary'  
-                """  
-                ugrid = vtk.vtkUnstructuredGrid()  
-                points = vtk.vtkPoints()  
-                
-                # Add points  
-                for pos in positions:  
-                    points.InsertNextPoint(pos[0], pos[1], pos[2])  
-                ugrid.SetPoints(points)  
-                
-                # Add time information  
-                time_array = vtk.vtkFloatArray()  
-                time_array.SetName("Time")  
-                time_array.InsertNextValue(time)  
-                ugrid.GetFieldData().AddArray(time_array)  
-                
-                # Add velocities if provided  
-                if velocities is not None:  
-                    velocity_array = vtk.vtkFloatArray()  
-                    velocity_array.SetNumberOfComponents(3)  
-                    velocity_array.SetName("Velocity")  
-                    
-                    for vel in velocities:  
-                        velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])  
-                    
-                    ugrid.GetPointData().SetVectors(velocity_array)  
-                
-                # Create vertex cells  
-                for i in range(len(positions)):  
-                    vertex = vtk.vtkVertex()  
-                    vertex.GetPointIds().SetId(0, i)  
-                    ugrid.InsertNextCell(vertex.GetCellType(), vertex.GetPointIds())  
-                
-                # Write file  
-                if format == 'xml':  
-                    writer = vtk.vtkXMLUnstructuredGridWriter()  
-                else:  
-                    writer = vtk.vtkUnstructuredGridWriter()  
-                
-                writer.SetFileName(filename)  
-                writer.SetInputData(ugrid)  
-                
-                if format == 'xml' and self.compression:  
-                    writer.SetCompressorTypeToZLib()  
-                
+            def write_particles_at_time(self, positions, velocities=None, time=0, filename=None, format='xml',
+                                        particle_ids=None, element_ids=None):
+                """
+                Write particles at a specific time to VTK file.
+
+                Args:
+                    positions: Particle positions (N, 3)
+                    velocities: Particle velocities (N, 3), optional
+                    time: Time value
+                    filename: Output filename
+                    format: 'xml' or 'binary'
+                    particle_ids: Original particle indices (N,), optional
+                    element_ids: Element IDs (N,), optional
+                """
+                ugrid = vtk.vtkUnstructuredGrid()
+                points = vtk.vtkPoints()
+
+                # Add points
+                for pos in positions:
+                    points.InsertNextPoint(pos[0], pos[1], pos[2])
+                ugrid.SetPoints(points)
+
+                # Add time information
+                time_array = vtk.vtkFloatArray()
+                time_array.SetName("Time")
+                time_array.InsertNextValue(time)
+                ugrid.GetFieldData().AddArray(time_array)
+
+                # Add velocities if provided
+                if velocities is not None:
+                    velocity_array = vtk.vtkFloatArray()
+                    velocity_array.SetNumberOfComponents(3)
+                    velocity_array.SetName("Velocity")
+
+                    for vel in velocities:
+                        velocity_array.InsertNextTuple3(vel[0], vel[1], vel[2])
+
+                    ugrid.GetPointData().SetVectors(velocity_array)
+
+                # Add particle IDs if provided
+                if particle_ids is not None:
+                    pid_array = vtk.vtkIntArray()
+                    pid_array.SetName("ParticleID")
+                    for pid in particle_ids:
+                        pid_array.InsertNextValue(int(pid))
+                    ugrid.GetPointData().AddArray(pid_array)
+
+                # Add element IDs if provided
+                if element_ids is not None:
+                    eid_array = vtk.vtkIntArray()
+                    eid_array.SetName("ElementID")
+                    for eid in element_ids:
+                        eid_array.InsertNextValue(int(eid))
+                    ugrid.GetPointData().AddArray(eid_array)
+
+                # Create vertex cells
+                for i in range(len(positions)):
+                    vertex = vtk.vtkVertex()
+                    vertex.GetPointIds().SetId(0, i)
+                    ugrid.InsertNextCell(vertex.GetCellType(), vertex.GetPointIds())
+
+                # Write file
+                if format == 'xml':
+                    writer = vtk.vtkXMLUnstructuredGridWriter()
+                else:
+                    writer = vtk.vtkUnstructuredGridWriter()
+
+                writer.SetFileName(filename)
+                writer.SetInputData(ugrid)
+
+                if format == 'xml' and self.compression:
+                    writer.SetCompressorTypeToZLib()
+
                 writer.Write()  
 
 

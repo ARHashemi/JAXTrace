@@ -191,6 +191,41 @@ Default: False (use single-cell registration)
 """
 
 # ============================================================================
+# Initial Assignment Method Selection
+# ============================================================================
+
+INITIAL_ASSIGNMENT_METHOD = "cascade_radius"
+"""
+Method used for initial particle-to-element assignment.
+
+Options:
+    "cascade_radius" - Progressive radius expansion using global Morton octree.
+                       Starts with a small radius and expands only for unassigned
+                       particles. Works with any mesh type.
+                       Radii: 500 → 1000 → 2000 → 5000 → 10000 → 100000
+
+    "mesh_aligned_octree_multi_local" - Direct 3×3×3 local search using the
+                       mesh-aligned multi-cell octree (same function as in RK4 L2).
+                       Searches 27 cells × 8 levels per particle.
+                       Requires Kuhn tetrahedral mesh + multi-cell octree built.
+                       Uses batched vmap to avoid GPU OOM (batch_size configurable).
+                       Faster for Kuhn meshes; may miss particles outside mesh.
+
+Default: "cascade_radius" (works with any mesh, robust fallback)
+"""
+
+INITIAL_ASSIGNMENT_BATCH_SIZE = 50000
+"""
+Batch size for 'mesh_aligned_octree_multi_local' initial assignment.
+
+The 3×3×3 search vmapped over all particles at once causes OOM for large particle
+counts. This splits the work into batches that compile and run within GPU memory.
+
+Reduce if you hit OOM during initial assignment.
+Default: 50000 (safe for most GPUs with ~25 GB VRAM)
+"""
+
+# ============================================================================
 # L1 Neighbor Search Optimization (Phase 4)
 # ============================================================================
 

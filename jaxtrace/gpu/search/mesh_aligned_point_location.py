@@ -179,30 +179,32 @@ def search_mesh_aligned_octree_single(
 def search_mesh_aligned_octree_multi_local(
     pos: jax.Array,
     octree_gpu: MeshAlignedOctreeGPU,
-    max_tests: jnp.int32 = 200
+    max_tests: jnp.int32 = 600
 ) -> Tuple[jnp.int32, jnp.int32]:
     """
-    Find containing element using 2×2×2 local neighborhood search.
+    Find containing element using 3×3×3 local neighborhood search.
 
     For multi-cell vertex registration where each element is registered in ~4 cells
     (where its vertices are located), we need to search a local neighborhood of cells
     to find the element.
 
-    This function searches 8 cells (2×2×2 cube) centered around the particle position.
-    This covers all possible cells where the element's vertices could be registered.
+    This function searches 27 cells (3×3×3 cube) centered around the particle position.
+    This covers all possible cells where the element's vertices could be registered,
+    including cases with adaptive mesh refinement (1:2 and 2:1 face neighbors).
 
     Algorithm:
         1. For each refinement level:
             a. Compute base cell indices (i, j, k) for particle position
-            b. Search 8 cells: (i+di, j+dj, k+dk) for di,dj,dk in [0,1]
+            b. Search 27 cells: (i+di, j+dj, k+dk) for di,dj,dk in [-1,0,1]
             c. Test elements in each cell
             d. Return first containing element found
-        2. Try levels from finest to coarsest
+        2. Try levels from finest to coarsest (14, 13, 12, ..., 7)
+        3. Multi-level search automatically handles adaptive refinement
 
     Args:
         pos: (3,) float32 - query position
         octree_gpu: GPU octree structure (multi-cell vertex registration)
-        max_tests: Maximum elements to test across all cells
+        max_tests: Maximum elements to test across all cells (default 600)
 
     Returns:
         (elem_id, n_tests):
@@ -211,7 +213,7 @@ def search_mesh_aligned_octree_multi_local(
     """
 
     def try_level(level_idx, carry):
-        """Try searching 2×2×2 neighborhood at one refinement level."""
+        """Try searching 3×3×3 neighborhood at one refinement level."""
         found_elem, total_tests = carry
 
         # Skip if already found
@@ -230,9 +232,9 @@ def search_mesh_aligned_octree_multi_local(
             j_base = jnp.floor(pos[1] / cell_size[1]).astype(jnp.int32)
             k_base = jnp.floor(pos[2] / cell_size[2]).astype(jnp.int32)
 
-            # Search 2×2×2 = 8 cells
+            # Search 3×3×3 = 27 cells
             def try_cell(cell_offset, inner_carry):
-                """Try searching one cell in the 2×2×2 neighborhood."""
+                """Try searching one cell in the 3×3×3 neighborhood."""
                 inner_found_elem, inner_tests = inner_carry
                 di, dj, dk = cell_offset[0], cell_offset[1], cell_offset[2]
 
@@ -325,26 +327,24 @@ def search_mesh_aligned_octree_multi_local(
                     search_cell
                 )
 
-            # Define 8 cell offsets for 2×2×2 neighborhood CENTERED on particle
-            # Since Kuhn element vertices are at cube corners, and particle can be
-            # anywhere in the containing element, we search cells in both negative
-            # and positive directions. The particle's base cell (i,j,k) is computed
-            # as floor(pos/cell_size), so we search the 2×2×2 cube centered at
-            # (i-0.5, j-0.5, k-0.5), which covers cells from (i-1,j-1,k-1) to (i,j,k).
+            # Define 27 cell offsets for 3×3×3 neighborhood CENTERED on particle
+            # Covers ±1 cell in each direction from base cell (i,j,k).
+            # This handles:
+            #   - Elements with vertices up to 2 cells away
+            #   - Adaptive refinement boundaries (1:2 and 2:1 neighbors)
+            #   - Multi-level elements (vertices at different refinement levels)
+            # The multi-level search (levels 14→7) ensures we find vertices
+            # registered at any level by searching at that level's grid resolution.
             cell_offsets = jnp.array([
-                [-1, -1, -1],
-                [-1, -1,  0],
-                [-1,  0, -1],
-                [-1,  0,  0],
-                [ 0, -1, -1],
-                [ 0, -1,  0],
-                [ 0,  0, -1],
-                [ 0,  0,  0],
+                [di, dj, dk]
+                for di in [-1, 0, 1]
+                for dj in [-1, 0, 1]
+                for dk in [-1, 0, 1]
             ], dtype=jnp.int32)
 
-            # Scan over 8 cells
+            # Scan over 27 cells
             level_found_elem, level_tests = jax.lax.fori_loop(
-                0, 8,
+                0, 27,
                 lambda i, c: try_cell(cell_offsets[i], c),
                 (found_elem, total_tests)
             )

@@ -41,7 +41,7 @@ from jaxtrace.gpu.search.mesh_aligned_morton_search import (
 import jaxtrace.config as config
 
 
-def create_rk4_fully_fused_timedep(
+def _create_rk4_fully_fused_timedep_impl(
     mesh_gpu_connectivity: jax.Array,
     mesh_gpu_node_positions: jax.Array,
     mesh_gpu_element_neighbors: jax.Array,
@@ -54,9 +54,9 @@ def create_rk4_fully_fused_timedep(
     l2_incremental_radii: tuple = (2, 5, 10),
     mesh_aligned_octree: Optional[MeshAlignedOctreeGPU] = None,
     mesh_aligned_morton: Optional[MeshAlignedMortonGPU] = None,
-    mesh_aligned_octree_neighbors = None,  # Optional[MeshAlignedOctreeGPUWithNeighbors]
-    mesh_aligned_octree_use_multi_local: bool = False,  # NEW: Use 2×2×2 local search
-    kdtree_gpu = None,  # Optional[NodeKDTreeGPU]
+    mesh_aligned_octree_neighbors = None,
+    mesh_aligned_octree_use_multi_local: bool = False,
+    kdtree_gpu = None,
     kdtree_k_nearest: int = 3,
     kdtree_max_tests: int = 256
 ):
@@ -295,14 +295,14 @@ def create_rk4_fully_fused_timedep(
             # Extracts octree structure from Kuhn tetrahedral mesh
             # Only works with axis-aligned Kuhn tets
             if mesh_aligned_octree_use_multi_local:
-                # MULTI-CELL LOCAL (2×2×2): Search 8-cell neighborhood
+                # MULTI-CELL LOCAL (3×3×3): Search 27-cell neighborhood
                 # For multi-cell vertex registration (~4 cells per element)
-                # Searches 8 cells to cover all vertex locations
-                # ~146 tests/particle (8 cells × 18.31 elem/cell)
+                # Searches 27 cells to cover all vertex locations including adaptive refinement
+                # ~494 tests/particle (27 cells × 18.31 elem/cell)
                 elem_id, _ = search_mesh_aligned_octree_multi_local(
                     pos,
                     mesh_aligned_octree,
-                    max_tests=jnp.int32(200)
+                    max_tests=jnp.int32(600)
                 )
             else:
                 # SINGLE-CELL (DIRECT): Center cell only
@@ -390,6 +390,46 @@ def create_rk4_fully_fused_timedep(
             )
 
         return elem_final
+
+    def search_l0_l1_l2_with_level(pos: jax.Array, cached_elem_id: jax.Array):
+        """
+        Full L0+L1+L2 search hierarchy, also returns which level found the element.
+
+        Returns:
+            (elem_id, hit_level) where hit_level is int8:
+                0 = L0 hit (cached element still valid)
+                1 = L1 hit (neighbor search found it)
+                2 = L2 hit (global search found it)
+               -1 = miss (not found at any level)
+        """
+        elem_l0 = search_l0_single(pos, cached_elem_id)
+        found_l0 = elem_l0 >= 0
+
+        if enable_l1_search:
+            elem_l1_raw = search_l1_single(pos, cached_elem_id)
+            elem_l1 = jnp.where(found_l0, elem_l0, elem_l1_raw)
+            found_l1 = elem_l1 >= 0
+
+            elem_l2 = search_l2_single(pos)
+            elem_final = jnp.where(found_l1, elem_l1, elem_l2)
+            found_l2 = elem_l2 >= 0
+
+            hit_level = jnp.where(
+                found_l0, jnp.int8(0),
+                jnp.where(found_l1, jnp.int8(1),
+                          jnp.where(found_l2, jnp.int8(2), jnp.int8(-1)))
+            )
+        else:
+            elem_l2 = search_l2_single(pos)
+            elem_final = jnp.where(found_l0, elem_l0, elem_l2)
+            found_l2 = elem_l2 >= 0
+
+            hit_level = jnp.where(
+                found_l0, jnp.int8(0),
+                jnp.where(found_l2, jnp.int8(2), jnp.int8(-1))
+            )
+
+        return elem_final, hit_level
 
     def interpolate_velocity_single(
         pos: jax.Array,
@@ -520,4 +560,150 @@ def create_rk4_fully_fused_timedep(
 
         return positions_final, element_ids_final
 
-    return rk4_fully_fused_step_timedep
+    # ========================================================================
+    # Stats-Enabled RK4 Step (same numerics, also returns L0/L1/L2/miss counts)
+    # ========================================================================
+
+    @jax.jit
+    def rk4_fully_fused_step_timedep_with_stats(
+        positions_gpu: jax.Array,
+        element_ids_gpu: jax.Array,
+        dt: float,
+        velocity_fields_gpu: jax.Array,
+        time_idx: int
+    ):
+        """
+        Identical numerics to rk4_fully_fused_step_timedep, but also returns
+        per-step search-level statistics aggregated across all particles and
+        all 5 RK4 sub-step searches.
+
+        Returns:
+            positions_final:   (N, 3)
+            element_ids_final: (N,)
+            stats: dict with keys:
+                'l0_hits'  - total L0 hits across all particles × 5 searches
+                'l1_hits'  - total L1 hits
+                'l2_hits'  - total L2 hits
+                'misses'   - total misses (element_id == -1 after full search)
+                (All counts are over 5 searches per particle = N×5 total queries)
+        """
+        n_timesteps = velocity_fields_gpu.shape[0]
+        vel_idx = time_idx % n_timesteps
+        velocity_field = velocity_fields_gpu[vel_idx]
+
+        def rk4_single_particle_with_stats(pos: jax.Array, elem_id: jax.Array):
+            # Stage 1
+            elem_k1, lvl_k1 = search_l0_l1_l2_with_level(pos, elem_id)
+            vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+            pos_k1 = pos + 0.5 * dt * vel_k1
+
+            # Stage 2
+            elem_k2, lvl_k2 = search_l0_l1_l2_with_level(pos_k1, elem_k1)
+            vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+            pos_k2 = pos + 0.5 * dt * vel_k2
+
+            # Stage 3
+            elem_k3, lvl_k3 = search_l0_l1_l2_with_level(pos_k2, elem_k2)
+            vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+            pos_k3 = pos + dt * vel_k3
+
+            # Stage 4
+            elem_k4, lvl_k4 = search_l0_l1_l2_with_level(pos_k3, elem_k3)
+            vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+
+            # Final
+            pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
+            elem_final, lvl_final = search_l0_l1_l2_with_level(pos_final, elem_k4)
+
+            # Pack hit levels for all 5 searches as a (5,) int8 array
+            hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
+
+            return pos_final, elem_final, hit_levels
+
+        positions_final, element_ids_final, all_hit_levels = jax.vmap(
+            rk4_single_particle_with_stats
+        )(positions_gpu, element_ids_gpu)
+        # all_hit_levels: (N, 5) int8
+
+        # Aggregate counts across all particles and all 5 sub-steps
+        l0_hits = jnp.sum(all_hit_levels == 0).astype(jnp.int32)
+        l1_hits = jnp.sum(all_hit_levels == 1).astype(jnp.int32)
+        l2_hits = jnp.sum(all_hit_levels == 2).astype(jnp.int32)
+        misses   = jnp.sum(all_hit_levels == -1).astype(jnp.int32)
+
+        return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses)
+
+    return rk4_fully_fused_step_timedep, rk4_fully_fused_step_timedep_with_stats
+
+
+def create_rk4_fully_fused_timedep(
+    mesh_gpu_connectivity,
+    mesh_gpu_node_positions,
+    mesh_gpu_element_neighbors,
+    mesh_gpu_element_volumes,
+    mesh_gpu_global_morton,
+    n_hops: int = 3,
+    l2_search_radius: int = 2,
+    enable_l1_search: bool = True,
+    l2_search_method: str = 'radius',
+    l2_incremental_radii: tuple = (2, 5, 10),
+    mesh_aligned_octree=None,
+    mesh_aligned_morton=None,
+    mesh_aligned_octree_neighbors=None,
+    mesh_aligned_octree_use_multi_local: bool = False,
+    kdtree_gpu=None,
+    kdtree_k_nearest: int = 3,
+    kdtree_max_tests: int = 256
+):
+    """
+    Create fully-fused RK4 integrator with time-dependent velocity.
+    Returns only the production step function (no stats overhead).
+    See create_rk4_fully_fused_timedep_with_stats for the stats variant.
+    """
+    step_fn, _ = _create_rk4_fully_fused_timedep_impl(
+        mesh_gpu_connectivity, mesh_gpu_node_positions,
+        mesh_gpu_element_neighbors, mesh_gpu_element_volumes,
+        mesh_gpu_global_morton, n_hops, l2_search_radius,
+        enable_l1_search, l2_search_method, l2_incremental_radii,
+        mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
+        mesh_aligned_octree_use_multi_local, kdtree_gpu, kdtree_k_nearest, kdtree_max_tests
+    )
+    return step_fn
+
+
+def create_rk4_fully_fused_timedep_with_stats(
+    mesh_gpu_connectivity,
+    mesh_gpu_node_positions,
+    mesh_gpu_element_neighbors,
+    mesh_gpu_element_volumes,
+    mesh_gpu_global_morton,
+    n_hops: int = 3,
+    l2_search_radius: int = 2,
+    enable_l1_search: bool = True,
+    l2_search_method: str = 'radius',
+    l2_incremental_radii: tuple = (2, 5, 10),
+    mesh_aligned_octree=None,
+    mesh_aligned_morton=None,
+    mesh_aligned_octree_neighbors=None,
+    mesh_aligned_octree_use_multi_local: bool = False,
+    kdtree_gpu=None,
+    kdtree_k_nearest: int = 3,
+    kdtree_max_tests: int = 256
+):
+    """
+    Create fully-fused RK4 integrator with time-dependent velocity.
+    Returns (step_fn, step_fn_with_stats) where step_fn_with_stats returns
+    (positions, element_ids, (l0_hits, l1_hits, l2_hits, misses)) per step.
+
+    Hit counts are summed across all N particles × 5 RK4 sub-step searches.
+    hit_level encoding: 0=L0, 1=L1, 2=L2, -1=miss (not found at any level).
+    """
+    step_fn, step_fn_with_stats = _create_rk4_fully_fused_timedep_impl(
+        mesh_gpu_connectivity, mesh_gpu_node_positions,
+        mesh_gpu_element_neighbors, mesh_gpu_element_volumes,
+        mesh_gpu_global_morton, n_hops, l2_search_radius,
+        enable_l1_search, l2_search_method, l2_incremental_radii,
+        mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
+        mesh_aligned_octree_use_multi_local, kdtree_gpu, kdtree_k_nearest, kdtree_max_tests
+    )
+    return step_fn, step_fn_with_stats

@@ -66,6 +66,63 @@ class OctreeCellDataVertexMulti(NamedTuple):
     elements_per_cell_mean: float         # Should be ~23-24
 
 
+def build_node_to_elements(connectivity: np.ndarray) -> dict:
+    """
+    Build a mapping from node ID to set of element IDs sharing that node.
+
+    This enables O(1) face-neighbor lookup for Non-Kuhn elements,
+    independent of element processing order.
+    """
+    node_to_elements = defaultdict(set)
+    for elem_id in range(connectivity.shape[0]):
+        for node_id in connectivity[elem_id]:
+            node_to_elements[int(node_id)].add(elem_id)
+    return node_to_elements
+
+
+def find_kuhn_face_neighbor(
+    elem_id: int,
+    connectivity: np.ndarray,
+    node_to_elements: dict,
+    kuhn_element_info: dict,
+) -> tuple:
+    """
+    Find a Kuhn face-neighbor of a Non-Kuhn element using node-to-element index.
+
+    Returns the first face neighbor (shares >= 3 nodes) that has known
+    Kuhn cell_size/level, so the Non-Kuhn element can borrow its grid parameters.
+
+    Args:
+        elem_id: Non-Kuhn element ID
+        connectivity: Mesh connectivity (n_elements, 4)
+        node_to_elements: Mapping from node_id -> set of element IDs
+        kuhn_element_info: Dict of {elem_id: (cell_size, level)} for Kuhn elements
+
+    Returns:
+        (neighbor_id, cell_size, level) or (-1, None, None) if not found
+    """
+    elem_nodes = connectivity[elem_id]
+    elem_node_set = set(int(n) for n in elem_nodes)
+
+    # Collect candidate neighbors: elements sharing at least one node
+    candidates = set()
+    for node_id in elem_nodes:
+        candidates.update(node_to_elements[int(node_id)])
+    candidates.discard(elem_id)
+
+    # Find face neighbor (shares >= 3 nodes) that is a Kuhn element
+    for neighbor_id in candidates:
+        if neighbor_id not in kuhn_element_info:
+            continue
+        neighbor_node_set = set(int(n) for n in connectivity[neighbor_id])
+        shared = elem_node_set & neighbor_node_set
+        if len(shared) >= 3:
+            cell_size, level = kuhn_element_info[neighbor_id]
+            return neighbor_id, cell_size, level
+
+    return -1, None, None
+
+
 def extract_octree_cells_vertex_multi(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
@@ -114,36 +171,39 @@ def extract_octree_cells_vertex_multi(
     # Cell metadata: cell_key -> (morton, level, grid_indices, cell_size)
     cell_metadata = {}
 
+    # --- Pass 1: Process all Kuhn elements (have axis-aligned edges) ---
     if verbose:
-        print(f"\n[1/4] Finding all cells touched by each element...")
+        print(f"\n[1/5] Pass 1: Processing Kuhn elements...")
 
-    n_skipped = 0
+    n_non_kuhn = 0
+    non_kuhn_ids = []
+    kuhn_element_info = {}  # elem_id -> (cell_size, level) for Kuhn elements
     total_vertex_cell_registrations = 0
 
     for elem_id in range(n_elements):
-        # Get vertices
         node_ids = connectivity[elem_id]
         vertices = node_positions[node_ids]
 
-        # Find axis-aligned edges and cell size
         cell_size, level = find_axis_aligned_edges_single(vertices, tolerance)
 
         if np.any(cell_size == 0):
-            # Skip non-Kuhn elements
-            n_skipped += 1
+            # Non-Kuhn: defer to pass 2
+            n_non_kuhn += 1
+            non_kuhn_ids.append(elem_id)
             continue
 
-        # NEW: Find ALL cells touched by vertices
+        # Store Kuhn info for neighbor lookup in pass 2
+        kuhn_element_info[elem_id] = (cell_size.copy(), level)
+
+        # Register in ALL cells touched by vertices
         vertex_cells = set()
         for vertex in vertices:
-            # Compute grid indices for this vertex
             i = int(np.floor(vertex[0] / cell_size[0]))
             j = int(np.floor(vertex[1] / cell_size[1]))
             k = int(np.floor(vertex[2] / cell_size[2]))
 
-            # Encode to Morton (with offset for negative coordinates)
-            offset = (1 << 19)  # 2^19
-            max_coord = (1 << 20)  # 2^20
+            offset = (1 << 19)
+            max_coord = (1 << 20)
 
             i_morton = np.clip(i + offset, 0, max_coord - 1)
             j_morton = np.clip(j + offset, 0, max_coord - 1)
@@ -151,15 +211,12 @@ def extract_octree_cells_vertex_multi(
 
             morton = encode_morton_3d_single(i_morton, j_morton, k_morton, max_depth=21)
 
-            # Cell key: (morton, level)
             cell_key = (morton, level)
             vertex_cells.add(cell_key)
 
-            # Store cell metadata (will be overwritten if already exists, but should be identical)
             if cell_key not in cell_metadata:
                 cell_metadata[cell_key] = (morton, level, (i, j, k), cell_size.copy())
 
-        # Register element in ALL touched cells
         for cell_key in vertex_cells:
             element_to_cells_dict[elem_id].add(cell_key)
             cell_to_elements_dict[cell_key].add(elem_id)
@@ -169,15 +226,73 @@ def extract_octree_cells_vertex_multi(
             print(f"    Processed {elem_id + 1:,}/{n_elements:,} elements...")
 
     if verbose:
-        print(f"  ✅ Element→cell mapping complete!")
-        print(f"    Skipped {n_skipped:,} non-Kuhn elements")
-        print(f"    Mapped {n_elements - n_skipped:,} elements to cells")
-        print(f"    Total registrations: {total_vertex_cell_registrations:,}")
-        print(f"    Cells per element (mean): {total_vertex_cell_registrations / (n_elements - n_skipped):.2f}")
+        print(f"  Kuhn elements: {n_elements - n_non_kuhn:,}")
+        print(f"  Non-Kuhn elements (deferred): {n_non_kuhn:,}")
+
+    # --- Pass 2: Process Non-Kuhn elements using Kuhn neighbor's grid ---
+    if verbose:
+        print(f"\n[2/5] Pass 2: Processing {n_non_kuhn:,} Non-Kuhn elements...")
+        print(f"  Building node-to-element index...")
+
+    node_to_elements = build_node_to_elements(connectivity)
+
+    n_neighbor_found = 0
+    n_neighbor_not_found = 0
+
+    for elem_id in non_kuhn_ids:
+        node_ids = connectivity[elem_id]
+        vertices = node_positions[node_ids]
+
+        # Find a Kuhn face neighbor to borrow its cell_size and level
+        neighbor_id, neighbor_cell_size, neighbor_level = find_kuhn_face_neighbor(
+            elem_id, connectivity, node_to_elements, kuhn_element_info
+        )
+
+        if neighbor_id >= 0:
+            n_neighbor_found += 1
+
+            # Register using the Non-Kuhn element's OWN vertex positions
+            # but with the neighbor's cell_size and level.
+            # This ensures the element is in cells the search will actually look in.
+            vertex_cells = set()
+            for vertex in vertices:
+                i = int(np.floor(vertex[0] / neighbor_cell_size[0]))
+                j = int(np.floor(vertex[1] / neighbor_cell_size[1]))
+                k = int(np.floor(vertex[2] / neighbor_cell_size[2]))
+
+                offset = (1 << 19)
+                max_coord = (1 << 20)
+
+                i_morton = np.clip(i + offset, 0, max_coord - 1)
+                j_morton = np.clip(j + offset, 0, max_coord - 1)
+                k_morton = np.clip(k + offset, 0, max_coord - 1)
+
+                morton = encode_morton_3d_single(i_morton, j_morton, k_morton, max_depth=21)
+
+                cell_key = (morton, neighbor_level)
+                vertex_cells.add(cell_key)
+
+                if cell_key not in cell_metadata:
+                    cell_metadata[cell_key] = (morton, neighbor_level, (i, j, k), neighbor_cell_size.copy())
+
+            for cell_key in vertex_cells:
+                element_to_cells_dict[elem_id].add(cell_key)
+                cell_to_elements_dict[cell_key].add(elem_id)
+                total_vertex_cell_registrations += 1
+        else:
+            n_neighbor_not_found += 1
+            if verbose:
+                print(f"    WARNING: Element {elem_id} has no Kuhn face neighbor, skipping")
+
+    if verbose:
+        print(f"  Non-Kuhn with Kuhn neighbor: {n_neighbor_found:,}")
+        print(f"  Non-Kuhn without Kuhn neighbor: {n_neighbor_not_found:,}")
+        print(f"  Total registrations: {total_vertex_cell_registrations:,}")
+        print(f"  Cells per element (mean): {total_vertex_cell_registrations / n_elements:.2f}")
 
     # Build CSR structures
     if verbose:
-        print(f"\n[2/4] Building cell→elements CSR structure...")
+        print(f"\n[3/5] Building cell→elements CSR structure...")
 
     unique_cells = sorted(cell_to_elements_dict.keys())
     n_cells = len(unique_cells)
@@ -221,7 +336,7 @@ def extract_octree_cells_vertex_multi(
 
     # Build element→cells CSR structure
     if verbose:
-        print(f"\n[3/4] Building element→cells CSR structure...")
+        print(f"\n[4/5] Building element→cells CSR structure...")
 
     element_to_cells_offsets = np.zeros(n_elements + 1, dtype=np.int32)
     element_to_cells_data = np.zeros(total_vertex_cell_registrations, dtype=np.int32)
@@ -249,7 +364,7 @@ def extract_octree_cells_vertex_multi(
 
     # Compute statistics
     if verbose:
-        print(f"\n[4/4] Computing statistics...")
+        print(f"\n[5/5] Computing statistics...")
 
     cells_per_element = np.diff(element_to_cells_offsets)
     cells_per_element = cells_per_element[cells_per_element > 0]  # Exclude skipped elements
