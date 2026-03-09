@@ -191,6 +191,52 @@ Default: False (use single-cell registration)
 """
 
 # ============================================================================
+# RK4 Sub-Step Boundary Recovery
+# ============================================================================
+
+RK4_SUBSTEP_BBOX_CLAMP = False
+"""
+Clamp RK4 sub-step positions to the mesh bounding box before searching.
+
+When enabled, intermediate RK4 positions (pos_k1, pos_k2, pos_k3) that overshoot
+the mesh boundary are clamped back to the bounding box. This ensures the search
+always has a chance of finding an element, preventing zero-velocity corruption.
+
+Requires mesh_bbox_min and mesh_bbox_max to be passed to the RK4 constructor.
+
+Default: False
+"""
+
+RK4_SUBSTEP_LAST_VALID_VEL = False
+"""
+When a sub-step search fails (element not found), reuse the previous stage's
+velocity instead of returning zero.
+
+This prevents RK4 integration corruption when intermediate positions temporarily
+exit the mesh domain. The fallback velocity is a physically reasonable approximation
+(the particle just crossed a boundary region slightly).
+
+Cascade: vel_k2 falls back to vel_k1, vel_k3 to vel_k2, vel_k4 to vel_k3.
+
+Default: False
+"""
+
+RK4_BOUNDARY_PROJECTION = False
+"""
+When the final-position search fails (particle exits mesh after RK4 integration),
+clamp pos_final to the mesh bounding box and re-search. If the re-search succeeds,
+keep the particle alive at the projected (clamped) position.
+
+This recovers particles that overshoot the mesh boundary by a small amount during
+the full RK4 step. The clamped position lies on the mesh surface, which is
+physically meaningful (the particle is projected back to the nearest boundary).
+
+Requires mesh_bbox_min and mesh_bbox_max to be passed to the RK4 constructor.
+
+Default: False
+"""
+
+# ============================================================================
 # Initial Assignment Method Selection
 # ============================================================================
 

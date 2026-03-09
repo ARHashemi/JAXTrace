@@ -1,0 +1,287 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+3x3x3 Search Failure Deep Diagnostic
+  Focus: Non-Kuhn element cell registration mismatch
+================================================================================
+
+[1/7] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 9.1s
+    Elements: 3,048,900, Nodes: 780,922
+
+[2/7] Deduplicating...
+  Removed 209,749 duplicates
+
+[2b/7] Precomputing metadata for inverse point-in-tet...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready in 64.0s
+
+[3/7] Extracting multi-cell octree...
+  Extracted in 373.0s
+    Cells: 665,824
+    Elements per cell: 18.32
+    Cells per element: 4.00
+
+[4/7] Uploading octree to GPU...
+  Uploaded in 0.2s
+
+[5/7] Scanning all elements for Non-Kuhn + analyzing cell registration...
+    Scanned 500,000/3,048,900...
+    Scanned 1,000,000/3,048,900...
+    Scanned 1,500,000/3,048,900...
+    Scanned 2,000,000/3,048,900...
+    Scanned 2,500,000/3,048,900...
+    Scanned 3,000,000/3,048,900...
+  Scanned in 67.3s
+  Non-Kuhn elements: 1,826 / 3,048,900 (0.060%)
+  Kuhn elements by level:
+    Level  8:        839
+    Level  9:      1,594
+    Level 10:      4,289
+    Level 11:     14,949
+    Level 12:     43,888
+    Level 13:    381,987
+    Level 14:  2,599,528
+
+  Non-Kuhn registration summary:
+    Registered in 0 cells: 0
+    Registered in 1 cell:  344
+    Registered in 2+ cells: 1482
+    Misregistered (unreachable by 3x3x3 from centroid): 0
+
+
+[6/7] Generating test points inside Non-Kuhn elements and running 3x3x3 search...
+  Generated 9130 verified interior points in 1826 Non-Kuhn elements
+  Of these, 0 are in misregistered elements
+    Searched 1000/9130... (25/s, ~327s remaining)
+    Searched 2000/9130... (28/s, ~255s remaining)
+    Searched 3000/9130... (30/s, ~202s remaining)
+    Searched 4000/9130... (32/s, ~159s remaining)
+    Searched 5000/9130... (34/s, ~122s remaining)
+    Searched 6000/9130... (35/s, ~88s remaining)
+    Searched 7000/9130... (36/s, ~60s remaining)
+    Searched 8000/9130... (35/s, ~32s remaining)
+    Searched 9000/9130... (36/s, ~4s remaining)
+  GPU search done in 257.5s
+
+  === 3x3x3 Results on Non-Kuhn Element Interiors ===
+  Total test points:  9130
+  Found (any elem):   9030 (98.9%)
+  Missed:             100 (1.1%)
+  Found correct elem: 9030
+  Found wrong elem:   0
+
+  Properly registered Non-Kuhn (1826 elems, 9130 points):
+    Found: 9030 (98.9%)
+    Missed: 100 (1.1%)
+
+
+[7/7] CPU replay of 3x3x3 search for 10 missed points...
+
+  --- Missed point 1 (test index 15) ---
+  Position:     (-0.0264860652, 0.0003563097, -0.0032430920)
+  True element: 39551 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0024999999)
+  Elem vertices:
+    V0: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, -0.0025555601, 0.0000000000)
+    V3: (-0.0299999993, 0.0025555601, 0.0000000000)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 27 cells, 210 elems, true_elem in cells=False
+    NOT FOUND: searched 27 cells, 210 elements total
+    ROOT CAUSE: Element 39551 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 2 (test index 16) ---
+  Position:     (-0.0252713785, -0.0006801177, -0.0023158635)
+  True element: 39551 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0024999999)
+  Elem vertices:
+    V0: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, -0.0025555601, 0.0000000000)
+    V3: (-0.0299999993, 0.0025555601, 0.0000000000)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,-1,-1)  |diff|=(0,1,0) max=1
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 27 cells, 205 elems, true_elem in cells=False
+    NOT FOUND: searched 27 cells, 205 elements total
+    ROOT CAUSE: Element 39551 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 3 (test index 17) ---
+  Position:     (-0.0268019047, 0.0022459007, -0.0029098871)
+  True element: 39551 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0024999999)
+  Elem vertices:
+    V0: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, -0.0025555601, 0.0000000000)
+    V3: (-0.0299999993, 0.0025555601, 0.0000000000)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 27 cells, 210 elems, true_elem in cells=False
+    NOT FOUND: searched 27 cells, 210 elements total
+    ROOT CAUSE: Element 39551 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 4 (test index 18) ---
+  Position:     (-0.0252605285, 0.0020913563, -0.0044535124)
+  True element: 39551 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0024999999)
+  Elem vertices:
+    V0: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, -0.0025555601, 0.0000000000)
+    V3: (-0.0299999993, 0.0025555601, 0.0000000000)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 27 cells, 210 elems, true_elem in cells=False
+    NOT FOUND: searched 27 cells, 210 elements total
+    ROOT CAUSE: Element 39551 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 5 (test index 19) ---
+  Position:     (-0.0267829970, -0.0005133083, -0.0023682939)
+  True element: 39551 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0024999999)
+  Elem vertices:
+    V0: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, -0.0025555601, 0.0000000000)
+    V3: (-0.0299999993, 0.0025555601, 0.0000000000)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,-1,-1)  |diff|=(0,1,0) max=1
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 27 cells, 205 elems, true_elem in cells=False
+    NOT FOUND: searched 27 cells, 205 elements total
+    ROOT CAUSE: Element 39551 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 6 (test index 20) ---
+  Position:     (-0.0280745048, 0.0018485405, -0.0082387505)
+  True element: 39556 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0074999998)
+  Elem vertices:
+    V0: (-0.0250000004, -0.0025555601, -0.0099999998)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V3: (-0.0299999993, 0.0025555601, -0.0099999998)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 18 cells, 162 elems, true_elem in cells=False
+    NOT FOUND: searched 18 cells, 162 elements total
+    ROOT CAUSE: Element 39556 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 7 (test index 21) ---
+  Position:     (-0.0257362574, -0.0012758161, -0.0076468172)
+  True element: 39556 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0074999998)
+  Elem vertices:
+    V0: (-0.0250000004, -0.0025555601, -0.0099999998)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V3: (-0.0299999993, 0.0025555601, -0.0099999998)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,-1,-1)  |diff|=(0,1,0) max=1
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 18 cells, 157 elems, true_elem in cells=False
+    NOT FOUND: searched 18 cells, 157 elements total
+    ROOT CAUSE: Element 39556 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 8 (test index 22) ---
+  Position:     (-0.0255071633, 0.0012208658, -0.0056867641)
+  True element: 39556 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0074999998)
+  Elem vertices:
+    V0: (-0.0250000004, -0.0025555601, -0.0099999998)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V3: (-0.0299999993, 0.0025555601, -0.0099999998)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 18 cells, 162 elems, true_elem in cells=False
+    NOT FOUND: searched 18 cells, 162 elements total
+    ROOT CAUSE: Element 39556 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 9 (test index 23) ---
+  Position:     (-0.0269420873, 0.0001614884, -0.0076945685)
+  True element: 39556 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0074999998)
+  Elem vertices:
+    V0: (-0.0250000004, -0.0025555601, -0.0099999998)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V3: (-0.0299999993, 0.0025555601, -0.0099999998)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 18 cells, 162 elems, true_elem in cells=False
+    NOT FOUND: searched 18 cells, 162 elements total
+    ROOT CAUSE: Element 39556 is NOT in any cell reachable by 3x3x3
+
+  --- Missed point 10 (test index 24) ---
+  Position:     (-0.0265050344, 0.0015202528, -0.0069434964)
+  True element: 39556 (misregistered=False)
+  Elem centroid: (-0.0262500001, 0.0000000000, -0.0074999998)
+  Elem vertices:
+    V0: (-0.0250000004, -0.0025555601, -0.0099999998)
+    V1: (-0.0250000004, -0.0025555601, -0.0049999999)
+    V2: (-0.0250000004, 0.0025555601, -0.0049999999)
+    V3: (-0.0299999993, 0.0025555601, -0.0099999998)
+  Registered in 1 cell(s):
+    Cell 405643: level=8, grid=(-1,0,-1), size=(0.04000000,0.04000000,0.04000000)
+      Particle grid at level 8: (-1,0,-1)  |diff|=(0,0,0) max=0
+
+  CPU replay of 3x3x3 search:
+    Level 8: searched 18 cells, 162 elems, true_elem in cells=False
+    NOT FOUND: searched 18 cells, 162 elements total
+    ROOT CAUSE: Element 39556 is NOT in any cell reachable by 3x3x3
+
+================================================================================
+SUMMARY
+================================================================================
+  Non-Kuhn elements:       1,826 (0.060%)
+  Misregistered (unreachable): 0
+  Test points (inside Non-Kuhn): 9130
+  3x3x3 found:            9030 (98.9%)
+  3x3x3 missed:           100 (1.1%)
+
+  ROOT CAUSE: Non-Kuhn elements are registered in their face neighbor's cells,
+  which can be spatially far from the element itself. The 3x3x3 search only
+  checks +-1 cell neighborhood, so it cannot reach these misregistered cells.
+  FIX: Register Non-Kuhn elements using their OWN vertex positions with the
+  face neighbor's cell_size, instead of copying the neighbor's cells blindly.

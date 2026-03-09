@@ -1,0 +1,216 @@
+python3 benchmark_l2_search_methods_with-export.py
+✅ Enhanced VTK I/O available
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Comprehensive L2 Search Methods Benchmark
+Fair comparison of all L2 search strategies
+================================================================================
+JAX version: 0.8.2
+JAX devices: [CudaDevice(id=0)]
+================================================================================
+
+[1/10] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 6.87s
+  Elements: 3,048,900, Nodes: 780,922, Timesteps: 2
+
+[2/10] Deduplicating...
+  Removed 209,749 duplicates
+
+[3/10] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready
+
+[4/10] Building octree...
+  Built 24,550 leaves
+
+  Building mesh-aligned octree (single-cell)...
+    Extracted 517,069 cells in 126.84s
+    Elements per cell: 5.89
+    Cells per element: 1.00
+
+  Building mesh-aligned octree (multi-cell vertex registration)...
+    Extracted 665,824 cells in 305.03s
+    Elements per cell: 18.32
+    Cells per element: 4.00
+
+  Building mesh-aligned octree with neighbor table (Option B)...
+    Neighbor table built in 169.94s
+    Mean neighbors per cell: 22.9
+
+[5/10] Uploading to GPU...
+  Uploading mesh-aligned octree (single-cell)...
+  Uploading mesh-aligned octree (multi-cell)...
+  Uploading mesh-aligned octree with neighbors (single-cell)...
+
+  NOTE: Multi-cell octree doesn't use neighbor table
+    Multi-cell registration already covers ~4 cells per element
+    Neighbor table would search ~104 cells (excessive)
+  Building mesh-aligned Morton (hybrid)...
+    Elements per cell: mean=5.9, max=8
+  Uploaded to GPU
+
+[6/10] Generating particles (uniform grid: 60×90×60 = 324,000)...
+  Particle bounds:
+    X: [-0.021000, -0.015000] (domain fraction: (0.15, 0.25))
+    Y: [-0.013800, 0.013800] (domain fraction: (0.2, 0.8))
+    Z: [-0.009900, -0.000100] (domain fraction: (0.01, 0.99))
+  Clipping particles to mesh bounds (Phase 1.1 fix)...
+  Generated 324,000 particles on uniform grid
+    Clipped to safe mesh bounds (1% margin)
+    No ground truth element IDs (particles may be outside mesh)
+
+[7/10] Defining test configurations...
+================================================================================
+1. Fixed radius=10 (baseline)
+   Fixed radius search (21 leaves)
+   Expected work: 21
+
+2. Mesh-Aligned Octree (direct)
+   Direct cell lookup (center cell only)
+   Expected work: ~5.9 elements/cell
+
+3. Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+   Multi-cell vertex registration (~4 cells per element)
+   Expected work: ~94 tests/particle (~4 cells × ~23.6 elem/cell)
+
+4. Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)
+   Multi-cell + 3×3×3 local neighborhood search (27 cells)
+   Expected work: ~494 tests/particle (27 cells × 18.31 elem/cell)
+
+
+[8/10] Running initial assignment for all configurations...
+================================================================================
+
+  Config: Fixed radius=10 (baseline)
+    Time: 355.530s
+    Assigned: 324,000/324,000 (100.00%)
+    Throughput: 911 p/s
+
+  Config: Mesh-Aligned Octree (direct)
+    Time: 351.898s
+    Assigned: 324,000/324,000 (100.00%)
+    Throughput: 921 p/s
+
+  Config: Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+    Time: 351.991s
+    Assigned: 324,000/324,000 (100.00%)
+    Throughput: 920 p/s
+
+  Config: Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)
+    Time: 352.041s
+    Assigned: 324,000/324,000 (100.00%)
+    Throughput: 920 p/s
+
+[9/10] Running RK4 tracking for all configurations...
+================================================================================
+Configuration: 2500 steps, dt=0.0025, point-in-tet=inverse
+
+
+  Config: Fixed radius=10 (baseline)
+      Compiling...
+      Compilation time: 18.54s
+      Running 2500 RK4 steps...
+      Waiting for exports...
+      Exported 251 files (mean time: 0.432s)
+    Time: 3904.991s
+    Final active: 132,733/324,000 (40.97%)
+    Throughput: 207,427 p/s
+
+  Config: Mesh-Aligned Octree (direct)
+      Compiling...
+      Compilation time: 16.03s
+      Running 2500 RK4 steps...
+      Waiting for exports...
+      Exported 251 files (mean time: 0.276s)
+    Time: 951.988s
+    Final active: 61,040/324,000 (18.84%)
+    Throughput: 850,851 p/s
+
+  Config: Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+      Compiling...
+      Compilation time: 15.94s
+      Running 2500 RK4 steps...
+      Waiting for exports...
+      Exported 251 files (mean time: 0.279s)
+    Time: 952.136s
+    Final active: 61,040/324,000 (18.84%)
+    Throughput: 850,718 p/s
+
+  Config: Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)
+      Compiling...
+      Compilation time: 15.95s
+      Running 2500 RK4 steps...
+      Waiting for exports...
+      Exported 251 files (mean time: 0.276s)
+    Time: 952.083s
+    Final active: 61,040/324,000 (18.84%)
+    Throughput: 850,766 p/s
+
+[10/10] Results Analysis
+================================================================================
+
+INITIAL ASSIGNMENT RESULTS
+================================================================================
+Configuration                             Success Rate      Throughput      Time
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                     100.00%            911 p/s  355.530s
+Mesh-Aligned Octree (direct)                   100.00%            921 p/s  351.898s
+Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)       100.00%            920 p/s  351.991s
+Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)       100.00%            920 p/s  352.041s
+
+
+RK4 TRACKING RESULTS (2500 steps)
+================================================================================
+Note: All methods start with GROUND TRUTH element IDs (fair comparison)
+Configuration                              Retention      Throughput   Speedup
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                    40.97%        207,427 p/s     1.00× ★
+Mesh-Aligned Octree (direct)                  18.84%        850,851 p/s     4.10× ★
+Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)      18.84%        850,718 p/s     4.10×
+Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)      18.84%        850,766 p/s     4.10×
+
+
+ACCURACY vs PERFORMANCE TRADE-OFF
+================================================================================
+Configuration                              Retention   Speedup      Rating
+--------------------------------------------------------------------------------
+Fixed radius=10 (baseline)                    40.97%     1.00×        POOR
+Mesh-Aligned Octree (direct)                  18.84%     4.10×        POOR
+Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)      18.84%     4.10×        POOR
+Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)      18.84%     4.10×        POOR
+
+
+RECOMMENDATIONS
+================================================================================
+
+Best Throughput: Mesh-Aligned Octree (direct)
+  Retention: 18.84%
+  Speedup: 4.10×
+  Throughput: 850,851 p/s
+
+Best Retention: Fixed radius=10 (baseline)
+  Retention: 40.97%
+  Speedup: 1.00×
+
+
+PRODUCTION RECOMMENDATION
+================================================================================
+
+================================================================================
+Benchmark complete!
+================================================================================

@@ -1,0 +1,306 @@
+python3 diagnose_mesh_octree_structure.py
+Loading mesh...
+ERROR:2026-01-22 11:42:26,332:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 158-159 (2 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_158.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 2/2 timesteps
+    Memory: 17.9 MB
+  Loaded: 3,048,900 elements, 780,922 nodes
+
+================================================================================
+Deduplicating nodes (fixing PVTU piece boundaries)
+================================================================================
+  Original nodes: 780,922
+  Detecting exact duplicates...
+  Unique nodes:   571,173
+  Duplicate nodes: 209,749 (26.9%)
+
+  Compacting node array...
+  Remapping connectivity...
+  Remapping velocity sequence...
+    Original velocity: (2, 780922, 3)
+    Remapped velocity: (2, 571173, 3)
+  Validating...
+  ✅ No degenerate elements
+
+✅ Node deduplication complete!
+  Removed 209,749 duplicate nodes
+  Mesh size: 780,922 → 571,173 nodes
+  Velocity arrays remapped: 2 timesteps
+================================================================================
+
+  After deduplication: 571,173 nodes (209,749 duplicates removed)
+================================================================================
+Diagnostic: Mesh Intrinsic Octree Structure
+================================================================================
+
+Mesh: 3,048,900 elements, 571,173 nodes
+
+[1/5] Verifying axis-aligned edges (Kuhn property)...
+  Sampling 10,000 elements...
+    Checked 2,000/10,000 elements...
+    Checked 4,000/10,000 elements...
+    Checked 6,000/10,000 elements...
+    Checked 8,000/10,000 elements...
+    Checked 10,000/10,000 elements...
+
+  Axis-aligned edges per element:
+    Mean: 3.00
+    Mode: 3
+    Distribution: {np.int64(2): np.int64(2), np.int64(3): np.int64(9998)}
+  ✅ Mesh has Kuhn structure (≥3 axis-aligned edges)
+
+[2/5] Inferring octree cell IDs from element geometry...
+  Inferring primary cell IDs for all elements (single-insert)...
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+  ✅ Inferred primary cell IDs for 3,048,900 elements
+
+[2.75/5] Computing multi-insert mapping (elements → all overlapping cells)...
+  This is the key to 100% retention in mesh-aligned octree!
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+
+  Multi-insert statistics:
+    Mean cells per element: 8.00
+    Median: 8
+    Min: 4
+    Max: 12
+    Mode: 8
+
+  Cells-per-element distribution:
+     8 cells: 3,048,763 elements (100.00%)
+     4 cells:      133 elements ( 0.00%)
+    12 cells:        4 elements ( 0.00%)
+
+  Building inverted index (cell → elements)...
+  ✅ Multi-insert mapping complete!
+
+[2.5/5] DETAILED INSPECTION: Examining sample element geometry...
+  (Understanding the true relationship between Kuhn tets and parent cubes)
+
+  Inspecting 3 sample elements:
+
+  Element 1550192 (level 14):
+    Vertices:
+      v0: (  0.00093750,  -0.00199653,  -0.00429688)
+      v1: (  0.00085937,  -0.00191667,  -0.00429688)
+      v2: (  0.00085937,  -0.00199653,  -0.00429688)
+      v3: (  0.00093750,  -0.00199653,  -0.00421875)
+    Axis-aligned edges:
+      Edge v0-v2 (X): length=0.00007812
+        From: (0.00093750, -0.00199653, -0.00429688)
+        To:   (0.00085937, -0.00199653, -0.00429688)
+      Edge v0-v3 (Z): length=0.00007812
+        From: (0.00093750, -0.00199653, -0.00429688)
+        To:   (0.00093750, -0.00199653, -0.00421875)
+      Edge v1-v2 (Y): length=0.00007986
+        From: (0.00085937, -0.00191667, -0.00429688)
+        To:   (0.00085937, -0.00199653, -0.00429688)
+    Inferred cell properties:
+      Level: 14 (for Morton encoding only)
+      Measured cell sizes: X=0.00007812, Y=0.00007986, Z=0.00007812
+      Grid indices: (11, -26, -56)
+      Cell bounds:
+        X: [0.00085937, 0.00093750]
+        Y: [-0.00207639, -0.00199653]
+        Z: [-0.00437500, -0.00429687]
+      Vertex containment check:
+        v0: ✅ CONTAINED
+        v1: ❌ OUTSIDE
+          Y too high: -0.00191667 > -0.00199653
+        v2: ✅ CONTAINED
+        v3: ❌ OUTSIDE
+          Z too high: -0.00421875 > -0.00429687
+
+  Element 1300391 (level 13):
+    Vertices:
+      v0: (  0.00718750,   0.00415278,  -0.00093750)
+      v1: (  0.00734375,   0.00399306,  -0.00093750)
+      v2: (  0.00734375,   0.00415278,  -0.00093750)
+      v3: (  0.00734375,   0.00399306,  -0.00078125)
+    Axis-aligned edges:
+      Edge v0-v2 (X): length=0.00015625
+        From: (0.00718750, 0.00415278, -0.00093750)
+        To:   (0.00734375, 0.00415278, -0.00093750)
+      Edge v1-v2 (Y): length=0.00015972
+        From: (0.00734375, 0.00399306, -0.00093750)
+        To:   (0.00734375, 0.00415278, -0.00093750)
+      Edge v1-v3 (Z): length=0.00015625
+        From: (0.00734375, 0.00399306, -0.00093750)
+        To:   (0.00734375, 0.00399306, -0.00078125)
+    Inferred cell properties:
+      Level: 13 (for Morton encoding only)
+      Measured cell sizes: X=0.00015625, Y=0.00015972, Z=0.00015625
+      Grid indices: (46, 25, -7)
+      Cell bounds:
+        X: [0.00718749, 0.00734374]
+        Y: [0.00399306, 0.00415278]
+        Z: [-0.00109375, -0.00093750]
+      Vertex containment check:
+        v0: ✅ CONTAINED
+        v1: ✅ CONTAINED
+        v2: ✅ CONTAINED
+        v3: ❌ OUTSIDE
+          Z too high: -0.00078125 > -0.00093750
+
+  Element 937021 (level 12):
+    Vertices:
+      v0: (  0.00187500,   0.00127778,  -0.00062500)
+      v1: (  0.00156250,   0.00159722,  -0.00093750)
+      v2: (  0.00187500,   0.00159722,  -0.00062500)
+      v3: (  0.00187500,   0.00159722,  -0.00093750)
+    Axis-aligned edges:
+      Edge v0-v2 (Y): length=0.00031944
+        From: (0.00187500, 0.00127778, -0.00062500)
+        To:   (0.00187500, 0.00159722, -0.00062500)
+      Edge v1-v3 (X): length=0.00031250
+        From: (0.00156250, 0.00159722, -0.00093750)
+        To:   (0.00187500, 0.00159722, -0.00093750)
+      Edge v2-v3 (Z): length=0.00031250
+        From: (0.00187500, 0.00159722, -0.00062500)
+        To:   (0.00187500, 0.00159722, -0.00093750)
+    Inferred cell properties:
+      Level: 12 (for Morton encoding only)
+      Measured cell sizes: X=0.00031250, Y=0.00031944, Z=0.00031250
+      Grid indices: (5, 4, -3)
+      Cell bounds:
+        X: [0.00156250, 0.00187500]
+        Y: [0.00127778, 0.00159722]
+        Z: [-0.00093750, -0.00062500]
+      Vertex containment check:
+        v0: ✅ CONTAINED
+        v1: ✅ CONTAINED
+        v2: ✅ CONTAINED
+        v3: ✅ CONTAINED
+
+  Detailed inspection complete.
+
+[3/5] Analyzing octree depth distribution...
+  Depth distribution:
+    Level  8:      948 elements ( 0.03%)
+    Level  9:    1,733 elements ( 0.06%)
+    Level 10:    4,421 elements ( 0.15%)
+    Level 11:   15,217 elements ( 0.50%)
+    Level 12:   45,066 elements ( 1.48%)
+    Level 13:  381,987 elements (12.53%)
+    Level 14: 2,599,528 elements (85.26%)
+
+  Depth statistics:
+    Min level: 8
+    Max level: 14
+    Mean level: 13.82
+    Median level: 14
+
+[4/5] Analyzing octree cell occupancy...
+
+  SINGLE-INSERT (one primary cell per element):
+    Unique cells: 249,263
+    Elements per cell: 12.23 ± 7.59
+    Median: 12, Range: [1, 72]
+
+  MULTI-INSERT (elements in ALL overlapping cells):
+    Unique cells: 623,579
+    Elements per cell: 39.11 ± 24.63
+    Median: 36, Range: [1, 234]
+    95th percentile: 72
+    99th percentile: 108
+
+  Multi-insert elements/cell distribution (top 10):
+    24 elements: 169,555 cells (27.19%)
+    48 elements: 119,541 cells (19.17%)
+    72 elements: 79,040 cells (12.68%)
+    36 elements: 78,748 cells (12.63%)
+    12 elements: 66,160 cells (10.61%)
+    18 elements: 18,399 cells ( 2.95%)
+    108 elements: 16,618 cells ( 2.66%)
+     6 elements: 13,893 cells ( 2.23%)
+    54 elements:  8,927 cells ( 1.43%)
+    42 elements:  3,629 cells ( 0.58%)
+  ℹ  Multi-insert mean: 39.1 elements/cell
+
+[5/5] Validating searchability - can we find ALL elements?
+  This is the critical test for mesh-aligned octree viability!
+
+  Testing searchability on 1,000 sample elements...
+    Checked 200/1,000 elements...
+    Checked 400/1,000 elements...
+    Checked 600/1,000 elements...
+    Checked 800/1,000 elements...
+    Checked 1000/1,000 elements...
+
+  Searchability: 100.00%
+  (1000/1,000 elements can be found via centroid query)
+  ✅ Excellent searchability - mesh-aligned octree is VIABLE!
+
+================================================================================
+DIAGNOSTIC RESULTS
+================================================================================
+
+✅ Mesh has Kuhn structure (axis-aligned edges: 3.0 avg)
+✅ Inferred 623,579 unique octree cells
+✅ Depth range: 8-14
+✅ Multi-insert: 8.0 cells/element, 39.1 elements/cell
+✅ Searchability: 100.0% of elements can be found
+
+================================================================================
+CONCLUSION
+================================================================================
+
+✅ MESH-ALIGNED OCTREE IS VIABLE!
+  Strategy: Multi-insert (elements in all overlapping cells)
+  - Mesh has recoverable Kuhn octree structure
+  - Each element spans ~8.0 cells on average
+  - Each cell contains ~39.1 elements on average
+  - 100.0% searchability via centroid queries
+
+  Expected performance improvement:
+    Current: ~5,376 point-in-tet tests per query (10 leaves × 536 elems)
+    Mesh-aligned: ~39 tests per query (1 cell × 39 elems)
+    Speedup: ~137× reduction in tests!
+
+✅ Ready to proceed with Phase 2: Multi-insert Cell Extraction
+================================================================================

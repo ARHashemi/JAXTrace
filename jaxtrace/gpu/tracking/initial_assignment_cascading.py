@@ -237,21 +237,23 @@ def initial_assignment_mesh_aligned_multi_local(
     Requires: Kuhn tetrahedral mesh + multi-cell vertex registration octree.
     """
     from jaxtrace.gpu.search.mesh_aligned_point_location import (
-        search_mesh_aligned_octree_multi_local,
+        search_mesh_aligned_octree_multi_local_where,
     )
 
     n_particles = positions_gpu.shape[0]
     max_tests_jax = jnp.int32(max_tests)
 
     if verbose:
-        print(f"\n  mesh_aligned_octree_multi_local initial assignment")
+        print(f"\n  mesh_aligned_octree_multi_local_where initial assignment")
         print(f"  Particles: {n_particles:,}, batch_size: {batch_size:,}")
 
     # JIT-compiled batch search function (compiled once, reused across batches)
+    # Uses the _where version (jnp.where) which is vmap-safe and avoids OOM
+    # from nested lax.cond in the original version.
     @jax.jit
     def _search_batch(positions_batch):
         def single(pos):
-            elem_id, _ = search_mesh_aligned_octree_multi_local(
+            elem_id, _ = search_mesh_aligned_octree_multi_local_where(
                 pos, mesh_aligned_octree_gpu, max_tests=max_tests_jax
             )
             return elem_id

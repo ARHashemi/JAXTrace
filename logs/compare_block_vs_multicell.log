@@ -1,0 +1,202 @@
+python3 compare_block_vs_multicell.py
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770295421.963592 1832839 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770295421.965133 1832839 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770295421.965631 1832839 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770295421.973742 1832839 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+ERROR:2026-02-05 13:43:42,879:jax._src.xla_bridge:491: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 489, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 633, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Loading mesh...
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Mesh: 3,048,900 elements, 571,173 nodes
+
+================================================================================
+Extracting Current Single-Cell Octree...
+================================================================================
+
+================================================================================
+Corrected Phase 2: Single Parent Cube per Element
+================================================================================
+  Elements: 3,048,900
+  Tolerance: 1.00e-06
+  Expected: ~1 cell per element, ~5-6 elements per cell
+
+[1/3] Finding parent cube for each element...
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+  ✅ Element->cell mapping complete!
+    Skipped 1,826 non-Kuhn elements
+    Mapped 3,047,074 elements to cells
+
+[2/3] Building inverted index (cell -> elements)...
+  ✅ CSR structure built!
+    Unique cells: 517,069
+    CSR data entries: 3,047,074
+
+[3/3] Computing statistics...
+
+  Statistics:
+    Cells per element: 1.00 (expected ~1.0)
+    Elements per cell: 5.89 (expected ~5-6)
+    Elements per cell (median): 6
+    Elements per cell (min, max): (1, 8)
+
+  Elements-per-cell distribution (top 10):
+     6 elements:  498,121 cells (96.34%)
+     3 elements:   14,422 cells ( 2.79%)
+     4 elements:    1,859 cells ( 0.36%)
+     2 elements:    1,819 cells ( 0.35%)
+     5 elements:      776 cells ( 0.15%)
+     1 elements:       64 cells ( 0.01%)
+     8 elements:        8 cells ( 0.00%)
+
+================================================================================
+Corrected Phase 2 Complete!
+================================================================================
+
+
+  Current octree:
+    Cells: 517,069
+    Elements: 3,047,074
+    Elements/cell (mean): 5.89
+
+================================================================================
+Approach A: Block-Wise Leaves Analysis
+================================================================================
+
+  Block-wise grouping results:
+    Total blocks: 85,693
+    Elements per block (mean): 35.56
+    Elements per block (median): 24
+    Elements per block (min, max): (1, 162)
+
+  Elements-per-block distribution (top 10):
+    24 elements:  25,636 blocks (29.92%)
+    48 elements:  14,029 blocks (16.37%)
+    36 elements:  12,273 blocks (14.32%)
+    12 elements:  11,084 blocks (12.93%)
+    72 elements:   9,580 blocks (11.18%)
+    18 elements:   2,702 blocks ( 3.15%)
+     6 elements:   2,076 blocks ( 2.42%)
+    108 elements:   2,034 blocks ( 2.37%)
+    54 elements:   1,133 blocks ( 1.32%)
+     9 elements:     531 blocks ( 0.62%)
+
+================================================================================
+Approach B: Multi-Cell Vertex Registration Analysis
+================================================================================
+
+  Multi-cell vertex registration estimates:
+    Cells: 517,069 (unchanged)
+    Elements: 3,047,074 (unchanged)
+    Cells per element: 4
+    Total element registrations: 12,188,296
+    Elements per cell (estimated): 23.57
+
+================================================================================
+GPU Memory Comparison
+================================================================================
+
+  Current (Single-Cell Registration):
+    Cell metadata: 23.27 MB
+    Cell→elements offsets: 2.07 MB
+    Cell→elements data: 12.19 MB
+    Total: 37.52 MB
+
+  Approach A (Block-Wise Leaves):
+    Block metadata: 3.86 MB
+    Block→elements offsets: 0.34 MB
+    Block→elements data: 12.19 MB
+    Total: 16.39 MB
+    Reduction vs current: 21.14 MB (56.3%)
+
+  Approach B (Multi-Cell Vertex Registration):
+    Cell metadata: 23.27 MB
+    Cell→elements offsets: 2.07 MB
+    Cell→elements data: 48.75 MB
+    Element→cells offsets: 12.19 MB
+    Element→cells data: 48.75 MB
+    Total: 135.03 MB
+    Increase vs current: 97.51 MB (259.8%)
+
+================================================================================
+Search Performance Implications
+================================================================================
+
+  Current (Single-Cell):
+    Tests per particle: ~5.9 (direct) + ~29.5 (neighbors)
+    Issue: Elements not found when particle crosses to adjacent cell
+
+  Approach A (Block-Wise Leaves):
+    Tests per particle: ~35.6 (direct) + ~177.8 (neighbors)
+    Pro: Coarser granularity → fewer blocks to search
+    Pro: Elements fully contained → better retention
+    Con: More tests per block (35.6 vs 5.9)
+    Con: Coarser spatial resolution → may search irrelevant blocks
+
+  Approach B (Multi-Cell Vertex Registration):
+    Tests per particle: ~23.6 (direct) + ~117.9 (neighbors)
+    Pro: Finer granularity → better spatial resolution
+    Pro: Elements in all touching cells → better retention
+    Con: More memory (135.0 MB vs 16.4 MB)
+    Con: More total tests (~141.4 vs ~213.3)
+
+================================================================================
+Recommendation
+================================================================================
+
+  Approach A (Block-Wise Leaves):
+    ✅ Memory: 56.3% REDUCTION
+    ✅ Tests per block: 35.6 (reasonable)
+    ⚠  Spatial resolution: 16.6% of current
+    ✅ Implementation: Simpler (no multi-cell tracking)
+
+  Approach B (Multi-Cell Vertex Registration):
+    ❌ Memory: 259.8% INCREASE
+    ⚠  Tests per cell: 23.6 (higher)
+    ✅ Spatial resolution: 100% (unchanged)
+    ⚠  Implementation: More complex (bidirectional mapping)
+
+  Overall Assessment:
+    ✅ RECOMMEND Approach B (Multi-Cell Vertex Registration)
+       - Better spatial resolution
+       - More precise element coverage
+       - Worth the memory cost
+
+  Suggested Next Steps:
+    1. Implement the recommended approach
+    2. Run benchmark_l2_search_methods.py to measure actual retention
+    3. If retention still insufficient, implement the other approach as backup
+
+================================================================================

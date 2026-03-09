@@ -1,0 +1,52 @@
+python3 verify_search_correctness.py
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1769443078.153832  319028 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1769443078.155870  319028 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1769443078.156424  319028 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1769443078.165056  319028 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Search Correctness Verification
+================================================================================
+
+Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded 3,048,900 elements, 571,173 nodes
+
+Extracting octree cells...
+  Unique cells: 517,069
+
+Uploading to GPU...
+  Done
+
+Generating test particles at element centroids...
+  Generated 1,000 test positions at element centroids
+
+Searching for 1,000 particles...
+  Found: 1,000 / 1,000 (100.0%)
+
+================================================================================
+RESULTS
+================================================================================
+
+Ground truth: Particles placed at element centroids (MUST be inside)
+  Total particles: 1,000
+  Found correct element: 1,000 (100.0%)
+  Found wrong element: 0 (0.0%)
+  Not found at all: 0 (0.0%)
+
+✅ PERFECT: All particles found in correct elements!
+   Current search approach is CORRECT.
+
+================================================================================

@@ -1,0 +1,432 @@
+python3 diagnose_seeding_strategies.py
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Seeding Strategy Diagnostic: mesh_aligned_octree_multi_local (3×3×3)
+================================================================================
+Strategies (perturbations along X axis only):
+  1. Exact element centroids
+  2. Centroids ± 10% element-size along X
+  3. Centroids ± 1× element-size along X
+  4. Centroids ± 2× element-size along X
+N particles per strategy: 50,000
+
+[1/6] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 9.1s
+  Elements: 3,048,900, Nodes: 780,922
+
+[2/6] Deduplicating...
+  Removed 209,749 duplicates
+  Nodes after dedup: 571,173
+
+[3/6] Precomputing metadata for inverse point-in-tet...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready in 64.2s
+
+[4/6] Building and uploading mesh-aligned octree (multi-cell)...
+  Extracted in 366.6s
+    Cells: 665,842
+    Elements per cell: 18.32
+    Cells per element: 4.00
+  Uploaded in 0.2s
+  Building CPU lookup tables for miss analysis...
+  Lookup ready: 7 levels, 665842 cells
+
+[5/6] Sampling 50,000 elements and computing geometry...
+    Computed 10,000/50,000...
+    Computed 20,000/50,000...
+    Computed 30,000/50,000...
+    Computed 40,000/50,000...
+    Computed 50,000/50,000...
+  Computed in 1.8s
+  Element edge length stats:
+    Min:    7.812493e-05
+    Max:    5.000000e-03
+    Mean:   9.887495e-05
+    Median: 7.812493e-05
+
+[6/6] Running 4 seeding strategies with 3×3×3 search...
+================================================================================
+
+  Warming up JIT...
+  JIT ready.
+
+  --- Strategy: Strategy 1: Exact centroids ---
+  Particles: 50,000
+    Searched 10,000/50,000... (145/s, ~276s remaining)
+    Searched 20,000/50,000... (145/s, ~208s remaining)
+    Searched 30,000/50,000... (144/s, ~139s remaining)
+    Searched 40,000/50,000... (144/s, ~69s remaining)
+    Searched 50,000/50,000... (145/s, ~0s remaining)
+  Searched in 343.8s (145 p/s)
+  Found:   50,000/50,000 (100.00%)
+  Missed:  0/50,000 (0.00%)
+  Correct: 50,000/50,000 (100.00%) [of those with ground truth]
+  Wrong:   0/50,000 (0.00%)
+  Mean tests/particle: 173.8
+
+  --- Strategy: Strategy 2: 10% element-size perturbed (X only) ---
+  Particles: 50,000
+    Searched 10,000/50,000... (147/s, ~272s remaining)
+    Searched 20,000/50,000... (147/s, ~204s remaining)
+    Searched 30,000/50,000... (147/s, ~136s remaining)
+    Searched 40,000/50,000... (147/s, ~68s remaining)
+    Searched 50,000/50,000... (147/s, ~0s remaining)
+  Searched in 339.5s (147 p/s)
+  Found:   50,000/50,000 (100.00%)
+  Missed:  0/50,000 (0.00%)
+  Correct: 50,000/50,000 (100.00%) [of those with ground truth]
+  Wrong:   0/50,000 (0.00%)
+  Mean tests/particle: 173.8
+
+  --- Strategy: Strategy 3: 1× element-size perturbed (X only) ---
+  Particles: 50,000
+    Searched 10,000/50,000... (143/s, ~279s remaining)
+    Searched 20,000/50,000... (143/s, ~210s remaining)
+    Searched 30,000/50,000... (143/s, ~140s remaining)
+    Searched 40,000/50,000... (142/s, ~70s remaining)
+    Searched 50,000/50,000... (142/s, ~0s remaining)
+  Searched in 351.6s (142 p/s)
+  Found:   49,997/50,000 (99.99%)
+  Missed:  3/50,000 (0.01%)
+  Correct: 0/50,000 (0.00%) [of those with ground truth]
+  Wrong:   49,997/50,000 (99.99%)
+  Mean tests/particle: 178.9
+
+================================================================================
+MISSED POSITION ANALYSIS: Strategy 3: 1× element-size perturbed (X only)
+  3 missed particle(s)
+================================================================================
+
+  ─── Missed #1 (particle index 24923) ───
+  Landed position:    (-0.0312500000, 0.0102222348, -0.0074999998)
+  Perturbation (X):   -5.000000e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 422592
+    Type:    Non-Kuhn
+    Centroid: (-0.0262500001, 0.0102222348, -0.0074999998)
+    BBox:    (-0.03000000,0.00766667,-0.01000000) → (-0.02500000,0.01277780,-0.00500000)
+    Vertices:
+      V0: (-0.0250000004, 0.0076666698, -0.0099999998)
+      V1: (-0.0250000004, 0.0076666698, -0.0049999999)
+      V2: (-0.0250000004, 0.0127777997, -0.0049999999)
+      V3: (-0.0299999993, 0.0127777997, -0.0099999998)
+    Registered in 4 octree cell(s):
+      Cell 405520: level=8, grid=(-6,1,-2), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,1,-2)  |diff|=(1,0,0) max=1  reachable=YES
+      Cell 405530: level=8, grid=(-6,1,-1), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,1,-2)  |diff|=(1,0,1) max=1  reachable=YES
+      Cell 405537: level=8, grid=(-7,2,-2), size=(4.999999e-03,5.111100e-03,5.000000e-03)
+        Particle grid at level 8: (-7,2,-2)  |diff|=(0,0,0) max=0  reachable=YES
+      Cell 405569: level=8, grid=(-6,2,-1), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,1,-2)  |diff|=(1,1,1) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 12 cells, 104 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 12 cells, 104 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #2 (particle index 38807) ───
+  Landed position:    (-0.0337499976, -0.0051111151, -0.0062499996)
+  Perturbation (X):   -4.999999e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 39640
+    Type:    Kuhn (level 8)
+    Centroid: (-0.0287499996, -0.0051111149, -0.0062499999)
+    BBox:    (-0.03000000,-0.00766667,-0.01000000) → (-0.02500000,-0.00255556,-0.00500000)
+    Vertices:
+      V0: (-0.0299999993, -0.0025555601, -0.0099999998)
+      V1: (-0.0299999993, -0.0025555601, -0.0049999999)
+      V2: (-0.0299999993, -0.0076666698, -0.0049999999)
+      V3: (-0.0250000004, -0.0076666698, -0.0049999999)
+    Registered in 4 octree cell(s):
+      Cell 147490: level=8, grid=(-7,-1,-2), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-1,-2)  |diff|=(0,0,0) max=0  reachable=YES
+      Cell 147495: level=8, grid=(-7,-2,-1), size=(4.999999e-03,5.111110e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-2,-2)  |diff|=(0,0,1) max=1  reachable=YES
+      Cell 147499: level=8, grid=(-7,-1,-1), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-1,-2)  |diff|=(0,0,1) max=1  reachable=YES
+      Cell 147516: level=8, grid=(-6,-2,-1), size=(4.999999e-03,5.111110e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-2,-2)  |diff|=(1,0,1) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 12 cells, 108 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 12 cells, 108 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #3 (particle index 40124) ───
+  Landed position:    (-0.0324999988, -0.0115000177, -0.0012500000)
+  Perturbation (X):   -4.999999e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 39586
+    Type:    Kuhn (level 8)
+    Centroid: (-0.0274999999, -0.0115000173, -0.0012500000)
+    BBox:    (-0.03000000,-0.01277780,-0.00500000) → (-0.02500000,-0.00766667,0.00000000)
+    Vertices:
+      V0: (-0.0299999993, -0.0127777997, 0.0000000000)
+      V1: (-0.0250000004, -0.0127777997, 0.0000000000)
+      V2: (-0.0250000004, -0.0127777997, -0.0049999999)
+      V3: (-0.0299999993, -0.0076666698, 0.0000000000)
+    Registered in 4 octree cell(s):
+      Cell 147475: level=8, grid=(-6,-3,-1), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-3,-1)  |diff|=(1,0,0) max=1  reachable=YES
+      Cell 632450: level=8, grid=(-7,-3,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-3,-1)  |diff|=(0,0,1) max=1  reachable=YES
+      Cell 632458: level=8, grid=(-6,-3,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-3,-1)  |diff|=(1,0,1) max=1  reachable=YES
+      Cell 632464: level=8, grid=(-7,-2,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-3,-1)  |diff|=(0,1,1) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 18 cells, 144 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 18 cells, 144 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  --- Strategy: Strategy 4: 2× element-size perturbed (X only) ---
+  Particles: 50,000
+    Searched 10,000/50,000... (140/s, ~285s remaining)
+    Searched 20,000/50,000... (140/s, ~214s remaining)
+    Searched 30,000/50,000... (141/s, ~142s remaining)
+    Searched 40,000/50,000... (140/s, ~71s remaining)
+    Searched 50,000/50,000... (140/s, ~0s remaining)
+  Searched in 356.4s (140 p/s)
+  Found:   49,995/50,000 (99.99%)
+  Missed:  5/50,000 (0.01%)
+  Correct: 0/50,000 (0.00%) [of those with ground truth]
+  Wrong:   49,995/50,000 (99.99%)
+  Mean tests/particle: 180.6
+
+================================================================================
+MISSED POSITION ANALYSIS: Strategy 4: 2× element-size perturbed (X only)
+  5 missed particle(s)
+================================================================================
+
+  ─── Missed #1 (particle index 35454) ───
+  Landed position:    (0.0362499990, -0.0051111151, -0.0024999999)
+  Perturbation (X):   +1.000000e-02  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 40151
+    Type:    Non-Kuhn
+    Centroid: (0.0262500001, -0.0051111149, -0.0024999999)
+    BBox:    (0.02500000,-0.00766667,-0.00500000) → (0.03000000,-0.00255556,0.00000000)
+    Vertices:
+      V0: (0.0250000004, -0.0076666698, 0.0000000000)
+      V1: (0.0250000004, -0.0076666698, -0.0049999999)
+      V2: (0.0250000004, -0.0025555601, -0.0049999999)
+      V3: (0.0299999993, -0.0025555601, 0.0000000000)
+    Registered in 4 octree cell(s):
+      Cell 258296: level=8, grid=(5,-2,-1), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-1)  |diff|=(2,1,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 258301: level=8, grid=(5,-1,-1), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-1)  |diff|=(2,0,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 639226: level=8, grid=(5,-2,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-1)  |diff|=(2,1,1) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 639238: level=8, grid=(6,-1,0), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-1)  |diff|=(1,0,1) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 9 cells, 72 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 9 cells, 72 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #2 (particle index 38668) ───
+  Landed position:    (-0.0324999988, -0.0191666745, -0.0087500000)
+  Perturbation (X):   -1.000000e-02  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 39686
+    Type:    Kuhn (level 8)
+    Centroid: (-0.0225000000, -0.0191666749, -0.0087499998)
+    BBox:    (-0.02500000,-0.02300000,-0.01000000) → (-0.02000000,-0.01788890,-0.00500000)
+    Vertices:
+      V0: (-0.0250000004, -0.0178888999, -0.0099999998)
+      V1: (-0.0199999996, -0.0178888999, -0.0099999998)
+      V2: (-0.0199999996, -0.0178888999, -0.0049999999)
+      V3: (-0.0250000004, -0.0230000000, -0.0099999998)
+    Registered in 4 octree cell(s):
+      Cell 147193: level=8, grid=(-5,-5,-2), size=(5.000001e-03,5.111100e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-4,-2)  |diff|=(2,1,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 147460: level=8, grid=(-5,-4,-2), size=(5.000001e-03,5.111100e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-4,-2)  |diff|=(2,0,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 147589: level=8, grid=(-4,-4,-2), size=(5.000001e-03,5.111100e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-4,-2)  |diff|=(3,0,0) max=3  reachable=NO ← OUT OF 3×3×3
+      Cell 147601: level=8, grid=(-4,-4,-1), size=(5.000001e-03,5.111100e-03,5.000000e-03)
+        Particle grid at level 8: (-7,-4,-2)  |diff|=(3,0,1) max=3  reachable=NO ← OUT OF 3×3×3
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 12 cells, 91 elems
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 12 cells, 91 elements
+    True elem NOT in any searched cell → registration/Morton code mismatch
+    ROOT CAUSE: Element not reachable by 3×3×3 from this position
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #3 (particle index 38807) ───
+  Landed position:    (-0.0387499966, -0.0051111151, -0.0062499996)
+  Perturbation (X):   -9.999998e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 39640
+    Type:    Kuhn (level 8)
+    Centroid: (-0.0287499996, -0.0051111149, -0.0062499999)
+    BBox:    (-0.03000000,-0.00766667,-0.01000000) → (-0.02500000,-0.00255556,-0.00500000)
+    Vertices:
+      V0: (-0.0299999993, -0.0025555601, -0.0099999998)
+      V1: (-0.0299999993, -0.0025555601, -0.0049999999)
+      V2: (-0.0299999993, -0.0076666698, -0.0049999999)
+      V3: (-0.0250000004, -0.0076666698, -0.0049999999)
+    Registered in 4 octree cell(s):
+      Cell 147490: level=8, grid=(-7,-1,-2), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-1,-2)  |diff|=(1,0,0) max=1  reachable=YES
+      Cell 147495: level=8, grid=(-7,-2,-1), size=(4.999999e-03,5.111110e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-2,-2)  |diff|=(1,0,1) max=1  reachable=YES
+      Cell 147499: level=8, grid=(-7,-1,-1), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-1,-2)  |diff|=(1,0,1) max=1  reachable=YES
+      Cell 147516: level=8, grid=(-6,-2,-1), size=(4.999999e-03,5.111110e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-2,-2)  |diff|=(2,0,1) max=2  reachable=NO ← OUT OF 3×3×3
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 6 cells, 48 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 6 cells, 48 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #4 (particle index 40124) ───
+  Landed position:    (-0.0374999978, -0.0115000177, -0.0012500000)
+  Perturbation (X):   -9.999998e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 39586
+    Type:    Kuhn (level 8)
+    Centroid: (-0.0274999999, -0.0115000173, -0.0012500000)
+    BBox:    (-0.03000000,-0.01277780,-0.00500000) → (-0.02500000,-0.00766667,0.00000000)
+    Vertices:
+      V0: (-0.0299999993, -0.0127777997, 0.0000000000)
+      V1: (-0.0250000004, -0.0127777997, 0.0000000000)
+      V2: (-0.0250000004, -0.0127777997, -0.0049999999)
+      V3: (-0.0299999993, -0.0076666698, 0.0000000000)
+    Registered in 4 octree cell(s):
+      Cell 147475: level=8, grid=(-6,-3,-1), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-3,-1)  |diff|=(2,0,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 632450: level=8, grid=(-7,-3,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-3,-1)  |diff|=(1,0,1) max=1  reachable=YES
+      Cell 632458: level=8, grid=(-6,-3,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-3,-1)  |diff|=(2,0,1) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 632464: level=8, grid=(-7,-2,0), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (-8,-3,-1)  |diff|=(1,1,1) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 9 cells, 64 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 9 cells, 64 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+  ─── Missed #5 (particle index 43835) ───
+  Landed position:    (0.0374999978, -0.0038333375, -0.0087500000)
+  Perturbation (X):   +9.999998e-03  (Y: +0.000000e+00, Z: +0.000000e+00)
+  In mesh bbox:       False
+  Mesh bbox:          (-0.030000,-0.023000,-0.010000) → (0.030000,0.023000,0.000000)
+
+  Source element: 40142
+    Type:    Kuhn (level 8)
+    Centroid: (0.0274999999, -0.0038333375, -0.0087499998)
+    BBox:    (0.02500000,-0.00766667,-0.01000000) → (0.03000000,-0.00255556,-0.00500000)
+    Vertices:
+      V0: (0.0299999993, -0.0076666698, -0.0099999998)
+      V1: (0.0299999993, -0.0025555601, -0.0099999998)
+      V2: (0.0250000004, -0.0025555601, -0.0099999998)
+      V3: (0.0250000004, -0.0025555601, -0.0049999999)
+    Registered in 4 octree cell(s):
+      Cell 258291: level=8, grid=(5,-1,-2), size=(4.999999e-03,5.111110e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-2)  |diff|=(2,0,0) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 258301: level=8, grid=(5,-1,-1), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-2)  |diff|=(2,0,1) max=2  reachable=NO ← OUT OF 3×3×3
+      Cell 258304: level=8, grid=(6,-2,-2), size=(4.999999e-03,5.111130e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-2)  |diff|=(1,1,0) max=1  reachable=YES
+      Cell 258310: level=8, grid=(6,-1,-2), size=(4.999999e-03,5.111120e-03,5.000000e-03)
+        Particle grid at level 8: (7,-1,-2)  |diff|=(1,0,0) max=1  reachable=YES
+
+  CPU replay of 3×3×3 search (levels 14 → 7):
+    Level 8: 6 cells, 48 elems, TRUE ELEM IN CELLS
+
+  CPU replay result:
+    NOT FOUND by CPU replay either
+    Total searched: 6 cells, 48 elements
+    True elem IS in the searched cells → point-in-tet test fails (position outside element)
+    ROOT CAUSE: Position has crossed the mesh boundary or into a void region
+    Point is NOT inside any cell-neighbor element → likely outside mesh
+
+================================================================================
+SUMMARY: 3×3×3 search results across seeding strategies
+================================================================================
+  Octree: multi-cell vertex registration (665,842 cells, 18.3 elem/cell, 4.0 cells/elem)
+  Max tests per search: 600
+
+Strategy                                       Found    Missed   Found%   Correct%   MeanTests
+----------------------------------------------------------------------------------------------
+  1. Exact centroids                          50,000         0  100.00%    100.00%       173.8
+  2. ±10% elem-size along X                   50,000         0  100.00%    100.00%       173.8
+  3. ±1× elem-size along X                    49,997         3   99.99%      0.00%       178.9
+  4. ±2× elem-size along X                    49,995         5   99.99%      0.00%       180.6
+
+Notes:
+  Found%:   fraction of queries where any element was returned
+  Correct%: fraction of found results matching the ground-truth centroid element
+            (perturbations along X only — all particles displaced in +X or -X)
+  For strategies 3 & 4, particles may have crossed an element face along X,
+  so a 'wrong' result may be a geometrically valid adjacent element.
+================================================================================

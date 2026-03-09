@@ -1,0 +1,406 @@
+python3 benchmark_femuss_comparison.py
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+FEMUSS Particle Tracking Comparison
+================================================================================
+JAX version: 0.9.0.1
+JAX devices: [CudaDevice(id=0)]
+
+Configuration:
+  FEMUSS start step:    0
+  FEMUSS end step:      2500
+  N_STEPS:              2500
+  DT:                   0.0025
+  L0: ON
+  L1: ON
+  L2 method:            mesh_aligned_octree_multi_local_where
+  Bbox clamp:           ON
+  Last-valid vel:       ON
+  Boundary projection:  ON
+================================================================================
+
+[1/7] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Elements: 3,048,900, Nodes: 780,922
+  Deduplicating...
+  Removed 209,749 duplicates -> 571,173 nodes
+  Mesh bbox: [[-0.03  -0.023 -0.01 ]] → [[0.03  0.023 0.   ]]
+
+[2/7] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Done
+
+[3/7] Building structures and uploading to GPU...
+  Multi-cell octree: 665,842 cells, 18.3 elem/cell, 4.0 cells/elem
+  Uploaded to GPU
+
+[4/7] Loading FEMUSS particles...
+  Start: data/FLA/post/1part/featurelessA_pt_0.pvtu
+    Particles: 299,200
+    Left domain: 5,714
+  End:   data/FLA/post/1part/featurelessA_pt_2500.pvtu
+    Particles: 299,200
+    Left domain: 55,201
+
+  Active at start: 293,486 / 299,200
+
+[5/7] Initial assignment...
+
+  mesh_aligned_octree_multi_local_where initial assignment
+  Particles: 293,486, batch_size: 50,000
+    Batch 1/6: 50,000 particles  (cumulative found: 50,000/50,000)
+    Batch 2/6: 50,000 particles  (cumulative found: 100,000/100,000)
+    Batch 3/6: 50,000 particles  (cumulative found: 150,000/150,000)
+    Batch 4/6: 50,000 particles  (cumulative found: 200,000/200,000)
+    Batch 5/6: 50,000 particles  (cumulative found: 250,000/250,000)
+    Batch 6/6: 43,486 particles  (cumulative found: 293,486/293,486)
+  Assigned: 293,486/293,486 (100.00%) in 4.29s
+  Assigned: 293,486/293,486 (100.00%)
+
+[6/7] Building RK4...
+  Compiling...
+/home/areza/welding/benchmark_femuss_comparison.py:346: DeprecationWarning: Bitwise inversion '~' on bool is deprecated and will be removed in Python 3.16. This returns the bitwise inversion of the underlying int object and is usually not what you expect from negating a bool. Use the 'not' operator for boolean negation or ~int(x) if you really want the bitwise inversion of the underlying int.
+  should_search = (~found) & (current_elem >= 0) & hop_enabled
+  Compilation: 21.0s
+  Exported initial state (step 0)
+
+[7/7] Running 2500 RK4 steps...
+================================================================================
+  Step    10: active=293,486 lost=0 (+0)
+  Step    20: active=293,486 lost=0 (+0)
+  Step    30: active=293,486 lost=0 (+0)
+  Step    40: active=293,486 lost=0 (+0)
+  Step    50: active=293,486 lost=0 (+0)
+  Step    60: active=293,486 lost=0 (+0)
+  Step    70: active=293,486 lost=0 (+0)
+  Step    80: active=293,486 lost=0 (+0)
+  Step    90: active=293,486 lost=0 (+0)
+  Step   100: active=293,486 lost=0 (+0)
+  Step   110: active=293,486 lost=0 (+0)
+  Step   120: active=293,486 lost=0 (+0)
+  Step   130: active=293,486 lost=0 (+0)
+  Step   140: active=293,486 lost=0 (+0)
+  Step   150: active=293,486 lost=0 (+0)
+  Step   160: active=293,486 lost=0 (+0)
+  Step   170: active=293,486 lost=0 (+0)
+  Step   180: active=293,486 lost=0 (+0)
+  Step   190: active=293,486 lost=0 (+0)
+  Step   200: active=293,486 lost=0 (+0)
+  Step   210: active=293,486 lost=0 (+0)
+  Step   220: active=293,486 lost=0 (+0)
+  Step   230: active=293,486 lost=0 (+0)
+  Step   240: active=293,486 lost=0 (+0)
+  Step   250: active=293,486 lost=0 (+0)
+  Step   260: active=293,486 lost=0 (+0)
+  Step   270: active=293,486 lost=0 (+0)
+  Step   280: active=293,486 lost=0 (+0)
+  Step   290: active=293,486 lost=0 (+0)
+  Step   300: active=293,486 lost=0 (+0)
+  Step   310: active=293,486 lost=0 (+0)
+  Step   320: active=293,486 lost=0 (+0)
+  Step   330: active=293,486 lost=0 (+0)
+  Step   340: active=293,486 lost=0 (+0)
+  Step   350: active=293,486 lost=0 (+0)
+  Step   360: active=293,486 lost=0 (+0)
+  Step   370: active=293,486 lost=0 (+0)
+  Step   380: active=293,486 lost=0 (+0)
+  Step   390: active=293,486 lost=0 (+0)
+  Step   400: active=293,486 lost=0 (+0)
+  Step   410: active=293,486 lost=0 (+0)
+  Step   420: active=293,486 lost=0 (+0)
+  Step   430: active=293,486 lost=0 (+0)
+  Step   440: active=293,486 lost=0 (+0)
+  Step   450: active=293,486 lost=0 (+0)
+  Step   460: active=293,486 lost=0 (+0)
+  Step   470: active=293,486 lost=0 (+0)
+  Step   480: active=293,486 lost=0 (+0)
+  Step   490: active=293,486 lost=0 (+0)
+  Step   500: active=293,486 lost=0 (+0)
+  Step   510: active=293,486 lost=0 (+0)
+  Step   520: active=293,486 lost=0 (+0)
+  Step   530: active=293,486 lost=0 (+0)
+  Step   540: active=293,486 lost=0 (+0)
+  Step   550: active=293,486 lost=0 (+0)
+  Step   560: active=293,486 lost=0 (+0)
+  Step   570: active=293,486 lost=0 (+0)
+  Step   580: active=293,486 lost=0 (+0)
+  Step   590: active=293,486 lost=0 (+0)
+  Step   600: active=293,486 lost=0 (+0)
+  Step   610: active=293,486 lost=0 (+0)
+  Step   620: active=293,486 lost=0 (+0)
+  Step   630: active=293,486 lost=0 (+0)
+  Step   640: active=293,486 lost=0 (+0)
+  Step   650: active=293,486 lost=0 (+0)
+  Step   660: active=293,486 lost=0 (+0)
+  Step   670: active=293,486 lost=0 (+0)
+  Step   680: active=293,486 lost=0 (+0)
+  Step   690: active=293,486 lost=0 (+0)
+  Step   700: active=293,486 lost=0 (+0)
+  Step   710: active=293,486 lost=0 (+0)
+  Step   720: active=293,486 lost=0 (+0)
+  Step   730: active=293,486 lost=0 (+0)
+  Step   740: active=293,486 lost=0 (+0)
+  Step   750: active=293,486 lost=0 (+0)
+  Step   760: active=293,486 lost=0 (+0)
+  Step   770: active=293,486 lost=0 (+0)
+  Step   780: active=293,486 lost=0 (+0)
+  Step   790: active=293,486 lost=0 (+0)
+  Step   800: active=293,486 lost=0 (+0)
+  Step   810: active=293,486 lost=0 (+0)
+  Step   820: active=293,486 lost=0 (+0)
+  Step   830: active=293,486 lost=0 (+0)
+  Step   840: active=293,486 lost=0 (+0)
+  Step   850: active=293,486 lost=0 (+0)
+  Step   860: active=293,486 lost=0 (+0)
+  Step   870: active=293,486 lost=0 (+0)
+  Step   880: active=293,486 lost=0 (+0)
+  Step   890: active=293,486 lost=0 (+0)
+  Step   900: active=293,486 lost=0 (+0)
+  Step   910: active=293,486 lost=0 (+0)
+  Step   920: active=293,486 lost=0 (+0)
+  Step   930: active=293,486 lost=0 (+0)
+  Step   940: active=293,486 lost=0 (+0)
+  Step   950: active=293,486 lost=0 (+0)
+  Step   960: active=293,486 lost=0 (+0)
+  Step   970: active=293,486 lost=0 (+0)
+  Step   980: active=293,486 lost=0 (+0)
+  Step   990: active=293,486 lost=0 (+0)
+  Step  1000: active=293,486 lost=0 (+0)
+  Step  1010: active=293,486 lost=0 (+0)
+  Step  1020: active=293,486 lost=0 (+0)
+  Step  1030: active=293,486 lost=0 (+0)
+  Step  1040: active=293,486 lost=0 (+0)
+  Step  1050: active=293,486 lost=0 (+0)
+  Step  1060: active=293,486 lost=0 (+0)
+  Step  1070: active=293,486 lost=0 (+0)
+  Step  1080: active=293,486 lost=0 (+0)
+  Step  1090: active=293,486 lost=0 (+0)
+  Step  1100: active=293,486 lost=0 (+0)
+  Step  1110: active=293,486 lost=0 (+0)
+  Step  1120: active=293,486 lost=0 (+0)
+  Step  1130: active=293,486 lost=0 (+0)
+  Step  1140: active=293,486 lost=0 (+0)
+  Step  1150: active=293,486 lost=0 (+0)
+  Step  1160: active=293,486 lost=0 (+0)
+  Step  1170: active=293,486 lost=0 (+0)
+  Step  1180: active=293,486 lost=0 (+0)
+  Step  1190: active=293,486 lost=0 (+0)
+  Step  1200: active=293,486 lost=0 (+0)
+  Step  1210: active=293,486 lost=0 (+0)
+  Step  1220: active=293,486 lost=0 (+0)
+  Step  1230: active=293,486 lost=0 (+0)
+  Step  1240: active=293,486 lost=0 (+0)
+  Step  1250: active=293,486 lost=0 (+0)
+  Step  1260: active=293,486 lost=0 (+0)
+  Step  1270: active=293,486 lost=0 (+0)
+  Step  1280: active=293,486 lost=0 (+0)
+  Step  1290: active=293,486 lost=0 (+0)
+  Step  1300: active=293,486 lost=0 (+0)
+  Step  1310: active=293,486 lost=0 (+0)
+  Step  1320: active=293,486 lost=0 (+0)
+  Step  1330: active=293,486 lost=0 (+0)
+  Step  1340: active=293,486 lost=0 (+0)
+  Step  1350: active=293,486 lost=0 (+0)
+  Step  1360: active=293,486 lost=0 (+0)
+  Step  1370: active=293,486 lost=0 (+0)
+  Step  1380: active=293,486 lost=0 (+0)
+  Step  1390: active=293,486 lost=0 (+0)
+  Step  1400: active=293,486 lost=0 (+0)
+  Step  1410: active=293,486 lost=0 (+0)
+  Step  1420: active=293,486 lost=0 (+0)
+  Step  1430: active=293,486 lost=0 (+0)
+  Step  1440: active=293,486 lost=0 (+0)
+  Step  1450: active=293,486 lost=0 (+0)
+  Step  1460: active=293,486 lost=0 (+0)
+  Step  1470: active=293,486 lost=0 (+0)
+  Step  1480: active=293,486 lost=0 (+0)
+  Step  1490: active=293,486 lost=0 (+0)
+  Step  1500: active=293,486 lost=0 (+0)
+  Step  1510: active=293,486 lost=0 (+0)
+  Step  1520: active=293,486 lost=0 (+0)
+  Step  1530: active=293,486 lost=0 (+0)
+  Step  1540: active=293,486 lost=0 (+0)
+  Step  1550: active=293,486 lost=0 (+0)
+  Step  1560: active=293,486 lost=0 (+0)
+  Step  1570: active=293,486 lost=0 (+0)
+  Step  1580: active=293,486 lost=0 (+0)
+  Step  1590: active=293,486 lost=0 (+0)
+  Step  1600: active=293,486 lost=0 (+0)
+  Step  1610: active=293,486 lost=0 (+0)
+  Step  1620: active=293,486 lost=0 (+0)
+  Step  1630: active=293,486 lost=0 (+0)
+  Step  1640: active=293,486 lost=0 (+0)
+  Step  1650: active=293,486 lost=0 (+0)
+  Step  1660: active=293,486 lost=0 (+0)
+  Step  1670: active=293,486 lost=0 (+0)
+  Step  1680: active=293,486 lost=0 (+0)
+  Step  1690: active=293,486 lost=0 (+0)
+  Step  1700: active=293,486 lost=0 (+0)
+  Step  1710: active=293,486 lost=0 (+0)
+  Step  1720: active=293,486 lost=0 (+0)
+  Step  1730: active=293,486 lost=0 (+0)
+  Step  1740: active=293,486 lost=0 (+0)
+  Step  1750: active=293,486 lost=0 (+0)
+  Step  1760: active=293,486 lost=0 (+0)
+  Step  1770: active=293,486 lost=0 (+0)
+  Step  1780: active=293,486 lost=0 (+0)
+  Step  1790: active=293,486 lost=0 (+0)
+  Step  1800: active=293,486 lost=0 (+0)
+  Step  1810: active=293,486 lost=0 (+0)
+  Step  1820: active=293,486 lost=0 (+0)
+  Step  1830: active=293,486 lost=0 (+0)
+  Step  1840: active=293,486 lost=0 (+0)
+  Step  1850: active=293,486 lost=0 (+0)
+  Step  1860: active=293,486 lost=0 (+0)
+  Step  1870: active=293,486 lost=0 (+0)
+  Step  1880: active=293,486 lost=0 (+0)
+  Step  1890: active=293,486 lost=0 (+0)
+  Step  1900: active=293,486 lost=0 (+0)
+  Step  1910: active=293,486 lost=0 (+0)
+  Step  1920: active=293,486 lost=0 (+0)
+  Step  1930: active=293,486 lost=0 (+0)
+  Step  1940: active=293,486 lost=0 (+0)
+  Step  1950: active=293,486 lost=0 (+0)
+  Step  1960: active=293,486 lost=0 (+0)
+  Step  1970: active=293,486 lost=0 (+0)
+  Step  1980: active=293,486 lost=0 (+0)
+  Step  1990: active=293,486 lost=0 (+0)
+  Step  2000: active=293,486 lost=0 (+0)
+  Step  2010: active=293,486 lost=0 (+0)
+  Step  2020: active=293,486 lost=0 (+0)
+  Step  2030: active=293,486 lost=0 (+0)
+  Step  2040: active=293,486 lost=0 (+0)
+  Step  2050: active=293,486 lost=0 (+0)
+  Step  2060: active=293,486 lost=0 (+0)
+  Step  2070: active=293,486 lost=0 (+0)
+  Step  2080: active=293,486 lost=0 (+0)
+  Step  2090: active=293,486 lost=0 (+0)
+  Step  2100: active=293,486 lost=0 (+0)
+  Step  2110: active=293,486 lost=0 (+0)
+  Step  2120: active=293,486 lost=0 (+0)
+  Step  2130: active=293,486 lost=0 (+0)
+  Step  2140: active=293,486 lost=0 (+0)
+  Step  2150: active=293,486 lost=0 (+0)
+  Step  2160: active=293,486 lost=0 (+0)
+  Step  2170: active=293,486 lost=0 (+0)
+  Step  2180: active=293,486 lost=0 (+0)
+  Step  2190: active=293,486 lost=0 (+0)
+  Step  2200: active=293,486 lost=0 (+0)
+  Step  2210: active=293,486 lost=0 (+0)
+  Step  2220: active=293,486 lost=0 (+0)
+  Step  2230: active=293,486 lost=0 (+0)
+  Step  2240: active=293,486 lost=0 (+0)
+  Step  2250: active=293,486 lost=0 (+0)
+  Step  2260: active=293,486 lost=0 (+0)
+  Step  2270: active=293,486 lost=0 (+0)
+  Step  2280: active=293,486 lost=0 (+0)
+  Step  2290: active=293,486 lost=0 (+0)
+  Step  2300: active=293,486 lost=0 (+0)
+  Step  2310: active=293,486 lost=0 (+0)
+  Step  2320: active=293,486 lost=0 (+0)
+  Step  2330: active=293,486 lost=0 (+0)
+  Step  2340: active=293,486 lost=0 (+0)
+  Step  2350: active=293,486 lost=0 (+0)
+  Step  2360: active=293,486 lost=0 (+0)
+  Step  2370: active=293,486 lost=0 (+0)
+  Step  2380: active=293,486 lost=0 (+0)
+  Step  2390: active=293,486 lost=0 (+0)
+  Step  2400: active=293,486 lost=0 (+0)
+  Step  2410: active=293,486 lost=0 (+0)
+  Step  2420: active=293,486 lost=0 (+0)
+  Step  2430: active=293,486 lost=0 (+0)
+  Step  2440: active=293,486 lost=0 (+0)
+  Step  2450: active=293,486 lost=0 (+0)
+  Step  2460: active=293,486 lost=0 (+0)
+  Step  2470: active=293,486 lost=0 (+0)
+  Step  2480: active=293,486 lost=0 (+0)
+  Step  2490: active=293,486 lost=0 (+0)
+  Step  2500: active=293,486 lost=0 (+0)
+  Exported 2501 VTU files
+
+================================================================================
+TRACKING SUMMARY
+================================================================================
+  Particles: 293,486
+  Final active: 293,486 (100.00%)
+  Final lost: 0 (0.00%)
+  Steps: 2500
+  Time: 3703.2s (198,128 p*step/s)
+  Output: output/femuss_comparison/femuss_0_to_2500
+
+================================================================================
+JAXTRACE vs FEMUSS COMPARISON
+================================================================================
+  Particles: 293,486
+
+  JAXTrace:  active=293,486 (100.00%), lost=0 (0.00%)
+  FEMUSS:    active=241,130 (82.16%), left_domain=52,356 (17.84%)
+
+  Position errors (both active, N=241,130):
+    Absolute error:
+      Mean:   3.849758e-04
+      Median: 1.381941e-04
+      Max:    3.557183e-02
+      Std:    1.500641e-03
+      P90.0:  4.622730e-04
+      P95.0:  8.358841e-04
+      P99.0:  6.941241e-03
+      P99.9:  2.232908e-02
+    Relative error (|err| / |displacement|):
+      Mean:   1.185318e-02
+      Median: 3.351536e-03
+      Max:    6.870815e+00
+    Per-axis mean absolute error:
+      X: mean=2.927452e-04, max=3.418358e-02
+      Y: mean=1.794842e-04, max=1.771485e-02
+      Z: mean=3.658399e-05, max=1.867509e-03
+
+    Error magnitude distribution:
+      < 1e-08:        0 (  0.00%)
+      < 1e-07:        0 (  0.00%)
+      < 1e-06:        1 (  0.00%)
+      < 1e-05:      169 (  0.07%)
+      < 1e-04:   77,142 ( 31.99%)
+      < 1e-03:  230,899 ( 95.76%)
+      < 1e-02:  239,722 ( 99.42%)
+
+  Retention agreement:
+    Both active:            241,130
+    Both lost/left:         0
+    JAXTrace active, FEMUSS left: 52,356
+    JAXTrace lost, FEMUSS active: 0
+
+  Top 5 worst-error particles:
+    #1: particle=1874, error=3.557183e-02, rel=3.6476e+00
+         JT:    [2.67918650e-02, 9.39177815e-03, -8.81053624e-04]
+         FEMUSS:[-6.86174105e-03, -2.12981707e-03, -6.74879493e-04]
+    #2: particle=12824, error=3.507075e-02, rel=3.5712e+00
+         JT:    [2.99999993e-02, 6.90395059e-03, -1.68942881e-03]
+         FEMUSS:[-4.18358397e-03, -9.30625446e-04, -1.93364122e-03]
+    #3: particle=1910, error=3.463437e-02, rel=3.7974e+00
+         JT:    [2.99999993e-02, 6.89809397e-03, -1.69196771e-03]
+         FEMUSS:[-3.93639898e-03, -9.78083106e-06, -2.06846530e-03]
+    #4: particle=1876, error=3.461050e-02, rel=3.6570e+00
+         JT:    [2.99999993e-02, 6.88465126e-03, -1.69405271e-03]
+         FEMUSS:[-3.88898387e-03, -1.32403338e-04, -2.12371954e-03]
+    #5: particle=18160, error=3.404595e-02, rel=3.0520e+00
+         JT:    [2.55539902e-02, 9.35644563e-03, -8.83478089e-04]
+         FEMUSS:[-6.26163725e-03, -2.76289127e-03, -7.63860065e-04]
+================================================================================
+
+  Comparison data saved to output/femuss_comparison/femuss_0_to_2500/comparison_data.npz
+
+Done.

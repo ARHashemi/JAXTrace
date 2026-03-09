@@ -1,0 +1,100 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+3x3x3 Search Failure Deep Diagnostic
+  Focus: Non-Kuhn element cell registration mismatch
+================================================================================
+
+[1/7] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 9.1s
+    Elements: 3,048,900, Nodes: 780,922
+
+[2/7] Deduplicating...
+  Removed 209,749 duplicates
+
+[2b/7] Precomputing metadata for inverse point-in-tet...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready in 67.1s
+
+[3/7] Extracting multi-cell octree...
+  Extracted in 370.5s
+    Cells: 665,842
+    Elements per cell: 18.32
+    Cells per element: 4.00
+
+[4/7] Uploading octree to GPU...
+  Uploaded in 0.2s
+
+[5/7] Scanning all elements for Non-Kuhn + analyzing cell registration...
+    Scanned 500,000/3,048,900...
+    Scanned 1,000,000/3,048,900...
+    Scanned 1,500,000/3,048,900...
+    Scanned 2,000,000/3,048,900...
+    Scanned 2,500,000/3,048,900...
+    Scanned 3,000,000/3,048,900...
+  Scanned in 67.2s
+  Non-Kuhn elements: 1,826 / 3,048,900 (0.060%)
+  Kuhn elements by level:
+    Level  8:        839
+    Level  9:      1,594
+    Level 10:      4,289
+    Level 11:     14,949
+    Level 12:     43,888
+    Level 13:    381,987
+    Level 14:  2,599,528
+
+  Non-Kuhn registration summary:
+    Registered in 0 cells: 0
+    Registered in 1 cell:  0
+    Registered in 2+ cells: 1826
+    Misregistered (unreachable by 3x3x3 from centroid): 0
+
+
+[6/7] Generating test points inside Non-Kuhn elements and running 3x3x3 search...
+  Generated 9130 verified interior points in 1826 Non-Kuhn elements
+  Of these, 0 are in misregistered elements
+    Searched 1000/9130... (27/s, ~304s remaining)
+    Searched 2000/9130... (32/s, ~222s remaining)
+    Searched 3000/9130... (36/s, ~171s remaining)
+    Searched 4000/9130... (39/s, ~131s remaining)
+    Searched 5000/9130... (42/s, ~99s remaining)
+    Searched 6000/9130... (43/s, ~72s remaining)
+    Searched 7000/9130... (45/s, ~48s remaining)
+    Searched 8000/9130... (46/s, ~25s remaining)
+    Searched 9000/9130... (45/s, ~3s remaining)
+  GPU search done in 202.5s
+
+  === 3x3x3 Results on Non-Kuhn Element Interiors ===
+  Total test points:  9130
+  Found (any elem):   9130 (100.0%)
+  Missed:             0 (0.0%)
+  Found correct elem: 9130
+  Found wrong elem:   0
+
+  Properly registered Non-Kuhn (1826 elems, 9130 points):
+    Found: 9130 (100.0%)
+    Missed: 0 (0.0%)
+
+[7/7] No missed points! All Non-Kuhn element interiors found by 3x3x3.
+
+================================================================================
+SUMMARY
+================================================================================
+  Non-Kuhn elements:       1,826 (0.060%)
+  Misregistered (unreachable): 0
+  Test points (inside Non-Kuhn): 9130
+  3x3x3 found:            9130 (100.0%)
+  3x3x3 missed:           0 (0.0%)

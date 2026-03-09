@@ -1,0 +1,177 @@
+python3 benchmark_femuss_comparison.py
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+FEMUSS Particle Tracking Comparison
+================================================================================
+JAX version: 0.9.0.1
+JAX devices: [CudaDevice(id=0)]
+
+Configuration:
+  FEMUSS start step:    0
+  FEMUSS end step:      250
+  N_STEPS:              250
+  DT:                   0.0025
+  L0: ON
+  L1: ON
+  L2 method:            mesh_aligned_octree_multi_local_where
+================================================================================
+
+[1/7] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Elements: 3,048,900, Nodes: 780,922
+  Deduplicating...
+  Removed 209,749 duplicates -> 571,173 nodes
+
+[2/7] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Done
+
+[3/7] Building structures and uploading to GPU...
+  Multi-cell octree: 665,842 cells, 18.3 elem/cell, 4.0 cells/elem
+  Uploaded to GPU
+
+[4/7] Loading FEMUSS particles...
+  Start: data/FLA/post/1part/featurelessA_pt_0.pvtu
+    Particles: 299,200
+    Left domain: 5,714
+  End:   data/FLA/post/1part/featurelessA_pt_250.pvtu
+    Particles: 299,200
+    Left domain: 577
+
+  Active at start: 293,486 / 299,200
+
+[5/7] Initial assignment...
+
+  mesh_aligned_octree_multi_local_where initial assignment
+  Particles: 293,486, batch_size: 50,000
+    Batch 1/6: 50,000 particles  (cumulative found: 50,000/50,000)
+    Batch 2/6: 50,000 particles  (cumulative found: 100,000/100,000)
+    Batch 3/6: 50,000 particles  (cumulative found: 150,000/150,000)
+    Batch 4/6: 50,000 particles  (cumulative found: 200,000/200,000)
+    Batch 5/6: 50,000 particles  (cumulative found: 250,000/250,000)
+    Batch 6/6: 43,486 particles  (cumulative found: 293,486/293,486)
+  Assigned: 293,486/293,486 (100.00%) in 4.78s
+  Assigned: 293,486/293,486 (100.00%)
+
+[6/7] Building RK4...
+  Compiling...
+/home/areza/welding/benchmark_femuss_comparison.py:336: DeprecationWarning: Bitwise inversion '~' on bool is deprecated and will be removed in Python 3.16. This returns the bitwise inversion of the underlying int object and is usually not what you expect from negating a bool. Use the 'not' operator for boolean negation or ~int(x) if you really want the bitwise inversion of the underlying int.
+  should_search = (~found) & (current_elem >= 0) & hop_enabled
+  Compilation: 16.3s
+  Exported initial state (step 0)
+
+[7/7] Running 250 RK4 steps...
+================================================================================
+  Step    10: active=293,360 lost=126 (+126)
+  Step    20: active=293,341 lost=145 (+19)
+  Step    30: active=293,326 lost=160 (+15)
+  Step    40: active=293,309 lost=177 (+17)
+  Step    50: active=293,284 lost=202 (+25)
+  Step    60: active=293,269 lost=217 (+15)
+  Step    70: active=293,247 lost=239 (+22)
+  Step    80: active=293,229 lost=257 (+18)
+  Step    90: active=293,208 lost=278 (+21)
+  Step   100: active=293,186 lost=300 (+22)
+  Step   110: active=293,166 lost=320 (+20)
+  Step   120: active=293,142 lost=344 (+24)
+  Step   130: active=293,118 lost=368 (+24)
+  Step   140: active=293,092 lost=394 (+26)
+  Step   150: active=293,069 lost=417 (+23)
+  Step   160: active=293,034 lost=452 (+35)
+  Step   170: active=293,017 lost=469 (+17)
+  Step   180: active=292,987 lost=499 (+30)
+  Step   190: active=292,957 lost=529 (+30)
+  Step   200: active=292,940 lost=546 (+17)
+  Step   210: active=292,908 lost=578 (+32)
+  Step   220: active=292,893 lost=593 (+15)
+  Step   230: active=292,865 lost=621 (+28)
+  Step   240: active=292,841 lost=645 (+24)
+  Step   250: active=292,820 lost=666 (+21)
+  Exported 251 VTU files
+
+================================================================================
+TRACKING SUMMARY
+================================================================================
+  Particles: 293,486
+  Final active: 292,820 (99.77%)
+  Final lost: 666 (0.23%)
+  Steps: 250
+  Time: 259.7s (282,555 p*step/s)
+  Output: output/femuss_comparison/femuss_0_to_250
+
+================================================================================
+JAXTRACE vs FEMUSS COMPARISON
+================================================================================
+  Particles: 293,486
+
+  JAXTrace:  active=292,820 (99.77%), lost=666 (0.23%)
+  FEMUSS:    active=293,480 (100.00%), left_domain=6 (0.00%)
+
+  Position errors (both active, N=292,820):
+    Absolute error:
+      Mean:   3.739318e-05
+      Median: 3.298003e-05
+      Max:    6.247424e-03
+      Std:    7.313549e-05
+      P90.0:  5.757623e-05
+      P95.0:  6.648586e-05
+      P99.0:  9.338640e-05
+      P99.9:  9.221501e-04
+    Relative error (|err| / |displacement|):
+      Mean:   8.513929e-03
+      Median: 7.882992e-03
+      Max:    4.240320e-01
+    Per-axis mean absolute error:
+      X: mean=2.232570e-05, max=6.162193e-03
+      Y: mean=2.503575e-05, max=4.367827e-03
+      Z: mean=3.645821e-06, max=3.793089e-05
+
+    Error magnitude distribution:
+      < 1e-08:        0 (  0.00%)
+      < 1e-07:        0 (  0.00%)
+      < 1e-06:       72 (  0.02%)
+      < 1e-05:   20,139 (  6.88%)
+      < 1e-04:  290,361 ( 99.16%)
+      < 1e-03:  292,556 ( 99.91%)
+      < 1e-02:  292,820 (100.00%)
+
+  Retention agreement:
+    Both active:            292,820
+    Both lost/left:         6
+    JAXTrace active, FEMUSS left: 0
+    JAXTrace lost, FEMUSS active: 660
+
+  Top 5 worst-error particles:
+    #1: particle=18429, error=6.247424e-03, rel=3.3773e-01
+         JT:    [-4.23750887e-03, -7.24995416e-03, -2.75189785e-04]
+         FEMUSS:[1.92468378e-03, -8.27838064e-03, -2.70164663e-04]
+    #2: particle=18463, error=4.940344e-03, rel=2.4462e-01
+         JT:    [2.61209346e-03, -7.94166699e-03, -2.93716614e-04]
+         FEMUSS:[6.69508626e-03, -5.16032136e-03, -3.10674311e-04]
+    #3: particle=7481, error=4.788960e-03, rel=2.3652e-01
+         JT:    [3.30762262e-03, -7.77494581e-03, -2.81445216e-04]
+         FEMUSS:[7.05502488e-03, -4.79320299e-03, -2.99430954e-04]
+    #4: particle=23903, error=4.679244e-03, rel=2.9727e-01
+         JT:    [-6.24449551e-03, -5.72753511e-03, -2.78345455e-04]
+         FEMUSS:[-2.27227506e-03, -8.20073579e-03, -2.70226469e-04]
+    #5: particle=23869, error=4.655023e-03, rel=4.2403e-01
+         JT:    [-8.63575470e-03, -7.28734653e-04, -2.55154999e-04]
+         FEMUSS:[-7.02602630e-03, -5.09656122e-03, -2.45005717e-04]
+================================================================================
+
+  Comparison data saved to output/femuss_comparison/femuss_0_to_250/comparison_data.npz
+
+Done.

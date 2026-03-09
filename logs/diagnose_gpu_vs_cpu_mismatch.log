@@ -1,0 +1,325 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+GPU vs CPU MISMATCH DIAGNOSTIC (single-particle, no vmap)
+================================================================================
+
+[1/5] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  571,173 nodes, 3,048,900 elements
+
+[2/5] Building search structures...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Octree: 665,842 cells, 18.32 elem/cell
+
+[3/5] Loading VTU snapshots for steps (1683, 1690)...
+  Step 1683: 162,480 active
+  Step 1684: 162,402 active
+  Step 1685: 162,325 active
+  Step 1686: 162,250 active
+  Step 1687: 162,172 active
+  Step 1688: 162,095 active
+  Step 1689: 162,012 active
+  Step 1690: 162,012 active
+  Total vanishing events: 468
+  PID 265608 found at step 1683: pos=[ 0.01302008 -0.00907837 -0.00186693], elem=2226011
+  PID 265608 found at step 1684: pos=[ 0.01303767 -0.00907758 -0.001867  ], elem=2226011
+  PID 265608 found at step 1685: pos=[ 0.01305526 -0.0090768  -0.00186707], elem=2226011
+  PID 265608 found at step 1686: pos=[ 0.01307285 -0.00907601 -0.00186714], elem=2226011
+  PID 265608 found at step 1687: pos=[ 0.01309043 -0.00907523 -0.00186721], elem=2226011
+  PID 265608 found at step 1688: pos=[ 0.01310802 -0.00907444 -0.00186728], elem=2226011
+  PID 265608 found at step 1689: pos=[ 0.01312561 -0.00907366 -0.00186735], elem=2226011
+  PID 265608 found at step 1690: pos=[ 0.01312561 -0.00907366 -0.00186735], elem=2226011
+  Added PID 265608 at step 1690 for replay (may not vanish in this range)
+  Replaying 21 particles (1 forced + 20 random)
+
+[4/5] GPU float32 RK4 replay (single-particle, no vmap)...
+  This uses the SAME GPU search functions as production,
+  but called one particle at a time (no vmap batching).
+
+  ====================================================================
+  Particle 265608 @ step 1690
+  pos  = [1.31256087e-02, -9.07366071e-03, -1.86734786e-03]
+  elem = 2226011
+  GPU PIT at start: inside=True
+       k1: cached= 2226011 →   L0 elem= 2226011  |v|=7.0422e-03  
+       k2: cached= 2226011 →   L2 elem=   39902  |v|=7.0747e-03  
+       k3: cached=   39902 →   L0 elem=   39902  |v|=7.0747e-03  
+       k4: cached=   39902 →   L0 elem=   39902  |v|=7.0747e-03  
+    final: cached=   39902 →   L0 elem=   39902  |v|=7.0747e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39902, replay final pos: [ 0.01314325 -0.00907263 -0.00186736]
+  ====================================================================
+  Particle 24306 @ step 1683
+  pos  = [6.09371765e-03, -1.14366610e-03, -8.89315084e-03]
+  elem = 41142
+  GPU PIT at start: inside=True
+       k1: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k2: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k3: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k4: cached=   41142 →   L2 elem=   40171  |v|=6.2215e-03  
+    final: cached=   40171 →   L0 elem=   40171  |v|=6.2215e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 40171, replay final pos: [ 0.00611065 -0.0011422  -0.00889315]
+  ====================================================================
+  Particle 200437 @ step 1683
+  pos  = [1.12590026e-02, -1.10764755e-02, -3.72873899e-03]
+  elem = 40847
+  GPU PIT at start: inside=True
+       k1: cached=   40847 →   L0 elem=   40847  |v|=7.0968e-03  
+       k2: cached=   40847 →   L0 elem=   40847  |v|=7.0968e-03  
+       k3: cached=   40847 →   L0 elem=   40847  |v|=7.0968e-03  
+       k4: cached=   40847 →   L2 elem=   39882  |v|=7.0760e-03  
+    final: cached=   39882 →   L0 elem=   39882  |v|=7.0760e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39882, replay final pos: [ 0.01127671 -0.01107562 -0.00372875]
+  ====================================================================
+  Particle 201466 @ step 1683
+  pos  = [1.29316784e-02, -5.82957128e-03, -2.05765874e-03]
+  elem = 2226007
+  GPU PIT at start: inside=True
+       k1: cached= 2226007 →   L0 elem= 2226007  |v|=6.9123e-03  
+       k2: cached= 2226007 →   L0 elem= 2226007  |v|=6.9123e-03  
+       k3: cached= 2226007 →   L0 elem= 2226007  |v|=6.9123e-03  
+       k4: cached= 2226007 →   L2 elem=   39894  |v|=6.8328e-03  
+    final: cached=   39894 →   L0 elem=   39894  |v|=6.8328e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39894, replay final pos: [ 0.01294889 -0.00582856 -0.0020577 ]
+  ====================================================================
+  Particle 280965 @ step 1683
+  pos  = [1.25578921e-02, -1.34982001e-02, -2.42869835e-03]
+  elem = 309312
+  GPU PIT at start: inside=True
+       k1: cached=  309312 →   L0 elem=  309312  |v|=7.0698e-03  
+       k2: cached=  309312 →   L0 elem=  309312  |v|=7.0698e-03  
+       k3: cached=  309312 →   L0 elem=  309312  |v|=7.0698e-03  
+       k4: cached=  309312 →   L2 elem=   39880  |v|=7.1184e-03  
+    final: cached=   39880 →   L0 elem=   39880  |v|=7.1184e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39880, replay final pos: [ 0.01257558 -0.01349781 -0.00242877]
+  ====================================================================
+  Particle 290916 @ step 1684
+  pos  = [7.85355922e-03, 9.85180959e-03, -3.75887449e-03]
+  elem = 42549
+  GPU PIT at start: inside=True
+       k1: cached=   42549 →   L0 elem=   42549  |v|=5.9784e-03  
+       k2: cached=   42549 →   L0 elem=   42549  |v|=5.9784e-03  
+       k3: cached=   42549 →   L0 elem=   42549  |v|=5.9784e-03  
+       k4: cached=   42549 →   L2 elem=   41025  |v|=6.0594e-03  
+    final: cached=   41025 →   L0 elem=   41025  |v|=6.0594e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 41025, replay final pos: [ 0.00786852  0.00985247 -0.0037588 ]
+  ====================================================================
+  Particle 82762 @ step 1685
+  pos  = [8.88544973e-03, -5.53410966e-03, -6.10067369e-03]
+  elem = 40768
+  GPU PIT at start: inside=True
+       k1: cached=   40768 →   L0 elem=   40768  |v|=7.1909e-03  
+       k2: cached=   40768 →   L0 elem=   40768  |v|=7.1909e-03  
+       k3: cached=   40768 →   L0 elem=   40768  |v|=7.1909e-03  
+       k4: cached=   40768 →   L2 elem=   39720  |v|=7.0157e-03  
+    final: cached=   39720 →   L0 elem=   39720  |v|=7.0157e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39720, replay final pos: [ 0.00890327 -0.00553237 -0.00610059]
+  ====================================================================
+  Particle 2763 @ step 1685
+  pos  = [5.59991505e-03, -8.46891839e-04, -9.39582009e-03]
+  elem = 41142
+  GPU PIT at start: inside=True
+       k1: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k2: cached=   41142 →   L2 elem=   40171  |v|=6.2206e-03  
+       k3: cached=   40171 →   L0 elem=   40171  |v|=6.2206e-03  
+       k4: cached=   40171 →   L0 elem=   40171  |v|=6.2206e-03  
+    final: cached=   40171 →   L0 elem=   40171  |v|=6.2206e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 40171, replay final pos: [ 0.0056157  -0.00084556 -0.00939582]
+  ====================================================================
+  Particle 30811 @ step 1685
+  pos  = [2.49731238e-03, 3.83119262e-03, -4.70872689e-03]
+  elem = 51281
+  GPU PIT at start: inside=True
+       k1: cached=   51281 →   L0 elem=   51281  |v|=5.2047e-03  
+       k2: cached=   51281 →   L2 elem=   44781  |v|=5.2047e-03  
+       k3: cached=   44781 →   L0 elem=   44781  |v|=5.2047e-03  
+       k4: cached=   44781 →   L0 elem=   44781  |v|=5.2047e-03  
+    final: cached=   44781 →   L0 elem=   44781  |v|=5.2047e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 44781, replay final pos: [ 0.00251024  0.00383262 -0.00470863]
+  ====================================================================
+  Particle 12352 @ step 1686
+  pos  = [1.13610579e-02, -6.49567973e-03, -1.13569968e-03]
+  elem = 2226137
+  GPU PIT at start: inside=True
+       k1: cached= 2226137 →   L0 elem= 2226137  |v|=7.0044e-03  
+       k2: cached= 2226137 →   L2 elem= 2225999  |v|=6.8695e-03  
+       k3: cached= 2225999 →   L0 elem= 2225999  |v|=6.8695e-03  
+       k4: cached= 2225999 →   L0 elem= 2225999  |v|=6.8695e-03  
+    final: cached= 2225999 →   L0 elem= 2225999  |v|=6.8695e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 2225999, replay final pos: [ 0.01137824 -0.0064944  -0.00113571]
+  ====================================================================
+  Particle 8282 @ step 1686
+  pos  = [5.42224199e-03, -2.64446251e-04, -9.56775900e-03]
+  elem = 41142
+  GPU PIT at start: inside=True
+       k1: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k2: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k3: cached=   41142 →   L0 elem=   41142  |v|=6.9154e-03  
+       k4: cached=   41142 →   L2 elem=   40171  |v|=6.2192e-03  
+    final: cached=   40171 →   L0 elem=   40171  |v|=6.2192e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 40171, replay final pos: [ 0.00543918 -0.00026298 -0.00956776]
+  ====================================================================
+  Particle 88462 @ step 1686
+  pos  = [8.87972582e-03, -4.21915902e-03, -6.11834042e-03]
+  elem = 40765
+  GPU PIT at start: inside=True
+       k1: cached=   40765 →   L0 elem=   40765  |v|=6.8320e-03  
+       k2: cached=   40765 →   L2 elem=   39720  |v|=7.0146e-03  
+       k3: cached=   39720 →   L0 elem=   39720  |v|=7.0146e-03  
+       k4: cached=   39720 →   L0 elem=   39720  |v|=7.0146e-03  
+    final: cached=   39720 →   L0 elem=   39720  |v|=7.0146e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39720, replay final pos: [ 0.00889715 -0.00421809 -0.00611833]
+  ====================================================================
+  Particle 56384 @ step 1687
+  pos  = [1.27146170e-02, -1.88658782e-03, -2.27251905e-03]
+  elem = 2607057
+  GPU PIT at start: inside=True
+       k1: cached= 2607057 →   L0 elem= 2607057  |v|=6.6893e-03  
+       k2: cached= 2607057 →   L0 elem= 2607057  |v|=6.6893e-03  
+       k3: cached= 2607057 →   L0 elem= 2607057  |v|=6.6893e-03  
+       k4: cached= 2607057 →   L2 elem=   39897  |v|=6.3365e-03  
+    final: cached=   39897 →   L0 elem=   39897  |v|=6.3365e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39897, replay final pos: [ 0.01273114 -0.00188529 -0.00227253]
+  ====================================================================
+  Particle 286366 @ step 1687
+  pos  = [1.27343955e-02, -1.34909833e-02, -2.26410734e-03]
+  elem = 309312
+  GPU PIT at start: inside=True
+       k1: cached=  309312 →   L0 elem=  309312  |v|=7.0698e-03  
+       k2: cached=  309312 →   L2 elem=   39880  |v|=7.1183e-03  
+       k3: cached=   39880 →   L0 elem=   39880  |v|=7.1183e-03  
+       k4: cached=   39880 →   L0 elem=   39880  |v|=7.1183e-03  
+    final: cached=   39880 →   L0 elem=   39880  |v|=7.1183e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39880, replay final pos: [ 0.01275216 -0.01349048 -0.00226415]
+  ====================================================================
+  Particle 201404 @ step 1687
+  pos  = [1.25828497e-02, -5.96771203e-03, -2.41367775e-03]
+  elem = 2226007
+  GPU PIT at start: inside=True
+       k1: cached= 2226007 →   L0 elem= 2226007  |v|=6.9123e-03  
+       k2: cached= 2226007 →   L2 elem=   39894  |v|=6.8331e-03  
+       k3: cached=   39894 →   L0 elem=   39894  |v|=6.8331e-03  
+       k4: cached=   39894 →   L0 elem=   39894  |v|=6.8331e-03  
+    final: cached=   39894 →   L0 elem=   39894  |v|=6.8331e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39894, replay final pos: [ 0.01259988 -0.00596609 -0.00241363]
+  ====================================================================
+  Particle 158506 @ step 1687
+  pos  = [1.29802953e-02, -4.44203988e-03, -2.01517041e-03]
+  elem = 2226005
+  GPU PIT at start: inside=True
+       k1: cached= 2226005 →   L0 elem= 2226005  |v|=6.8974e-03  
+       k2: cached= 2226005 →   L2 elem=   39895  |v|=6.8318e-03  
+       k3: cached=   39895 →   L0 elem=   39895  |v|=6.8318e-03  
+       k4: cached=   39895 →   L0 elem=   39895  |v|=6.8318e-03  
+    final: cached=   39895 →   L0 elem=   39895  |v|=6.8318e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39895, replay final pos: [ 0.01299731 -0.00444032 -0.00201512]
+  ====================================================================
+  Particle 69444 @ step 1687
+  pos  = [4.15215222e-03, 9.36249178e-03, -5.84268291e-03]
+  elem = 41002
+  GPU PIT at start: inside=True
+       k1: cached=   41002 →   L0 elem=   41002  |v|=5.7560e-03  
+       k2: cached=   41002 →   L2 elem=   41005  |v|=5.8532e-03  
+       k3: cached=   41005 →   L0 elem=   41005  |v|=5.8532e-03  
+       k4: cached=   41005 →   L0 elem=   41005  |v|=5.8532e-03  
+    final: cached=   41005 →   L0 elem=   41005  |v|=5.8532e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 41005, replay final pos: [ 0.00416674  0.009363   -0.00584261]
+  ====================================================================
+  Particle 131965 @ step 1687
+  pos  = [9.35389474e-03, -2.66476138e-03, -5.64534962e-03]
+  elem = 40756
+  GPU PIT at start: inside=True
+       k1: cached=   40756 →   L0 elem=   40756  |v|=6.8320e-03  
+       k2: cached=   40756 →   L2 elem=   39718  |v|=6.9144e-03  
+       k3: cached=   39718 →   L0 elem=   39718  |v|=6.9144e-03  
+       k4: cached=   39718 →   L0 elem=   39718  |v|=6.9144e-03  
+    final: cached=   39718 →   L0 elem=   39718  |v|=6.9144e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39718, replay final pos: [ 0.00937108 -0.00266321 -0.00564534]
+  ====================================================================
+  Particle 88104 @ step 1688
+  pos  = [9.24522802e-03, -5.73950587e-03, -5.75474557e-03]
+  elem = 40768
+  GPU PIT at start: inside=True
+       k1: cached=   40768 →   L0 elem=   40768  |v|=7.1909e-03  
+       k2: cached=   40768 →   L2 elem=   39720  |v|=7.0156e-03  
+       k3: cached=   39720 →   L0 elem=   39720  |v|=7.0156e-03  
+       k4: cached=   39720 →   L0 elem=   39720  |v|=7.0156e-03  
+    final: cached=   39720 →   L0 elem=   39720  |v|=7.0156e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 39720, replay final pos: [ 0.0092628  -0.00573842 -0.00575473]
+  ====================================================================
+  Particle 316465 @ step 1688
+  pos  = [9.33403522e-03, 2.14492087e-03, -5.66211203e-03]
+  elem = 40967
+  GPU PIT at start: inside=True
+       k1: cached=   40967 →   L0 elem=   40967  |v|=6.3307e-03  
+       k2: cached=   40967 →   L2 elem=   40171  |v|=6.2153e-03  
+       k3: cached=   40171 →   L0 elem=   40171  |v|=6.2153e-03  
+       k4: cached=   40171 →   L0 elem=   40171  |v|=6.2153e-03  
+    final: cached=   40171 →   L0 elem=   40171  |v|=6.2153e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 40171, replay final pos: [ 0.00934956  0.0021463  -0.0056621 ]
+  ====================================================================
+  Particle 284004 @ step 1688
+  pos  = [9.13955271e-03, 1.88039907e-03, -5.84887946e-03]
+  elem = 40967
+  GPU PIT at start: inside=True
+       k1: cached=   40967 →   L0 elem=   40967  |v|=6.3307e-03  
+       k2: cached=   40967 →   L0 elem=   40967  |v|=6.3307e-03  
+       k3: cached=   40967 →   L0 elem=   40967  |v|=6.3307e-03  
+       k4: cached=   40967 →   L2 elem=   40171  |v|=6.2158e-03  
+    final: cached=   40171 →   L0 elem=   40171  |v|=6.2158e-03  
+    ──── VTU says: VANISHED  |  GPU replay: replay_OK  |  *** MISMATCH ***
+    replay final elem: 40171, replay final pos: [ 0.00915524  0.0018821  -0.0058488 ]
+
+
+================================================================================
+SUMMARY
+================================================================================
+
+  Particles replayed: 21
+  VTU vanished: 21  |  VTU survived: 0
+  Replay FAIL: 0  |  Replay OK: 21
+  Match (VTU agrees with replay): 0
+  Mismatch: 21
+
+  *** KEY FINDING: GPU single-particle replay SUCCEEDS for particles
+      that VANISH in production vmapped RK4! ***
+  This proves the issue is vmap-specific:
+    - lax.cond under vmap evaluates BOTH branches (SELECT)
+    - fori_loop bounds may differ across particles
+    - The search function may produce wrong results under vmap
+
+================================================================================
+DONE
+================================================================================

@@ -1,0 +1,103 @@
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+VTK Mesh Merging and Deduplication Diagnostic
+================================================================================
+
+[1/6] Analyzing VTK part structure...
+  Parsing PVTU structure: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Found 64 VTK parts in PVTU file
+  ⚠️  Could not parse VTK part structure: load_mesh_from_pvtu() got an unexpected keyword argument 'verbose'
+  Continuing with merged mesh analysis...
+  Analyzed in 0.0s
+
+[2/6] Loading merged mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 7.0s
+    Elements: 3,048,900, Nodes: 780,922
+
+[3/6] Deduplicating with node mapping tracking...
+
+================================================================================
+Deduplicating nodes (fixing PVTU piece boundaries)
+================================================================================
+  Original nodes: 780,922
+  Detecting exact duplicates...
+  Unique nodes:   571,173
+  Duplicate nodes: 209,749 (26.9%)
+
+  Compacting node array...
+  Remapping connectivity...
+  Remapping velocity sequence...
+    Original velocity: (2, 780922, 3)
+    Remapped velocity: (2, 571173, 3)
+  Validating...
+  ✅ No degenerate elements
+
+✅ Node deduplication complete!
+  Removed 209,749 duplicate nodes
+  Mesh size: 780,922 → 571,173 nodes
+  Velocity arrays remapped: 2 timesteps
+================================================================================
+
+  Deduplicated in 4.9s
+    Removed 209,749 duplicates (26.86%)
+    Final nodes: 571,173
+
+[4/6] Analyzing deduplication impact...
+  Elements with duplicate nodes after deduplication: 0
+  ✅ No degenerate elements created by deduplication
+
+[5/6] Extracting octree to find problematic elements...
+  Extracted in 306.6s
+  Fallback elements (1 cell): 344
+    Processed 500,000/3,048,900...
+    Processed 1,000,000/3,048,900...
+    Processed 1,500,000/3,048,900...
+    Processed 2,000,000/3,048,900...
+    Processed 2,500,000/3,048,900...
+    Processed 3,000,000/3,048,900...
+  Non-Kuhn elements: 1826
+
+[6/6] Spatial analysis of problematic elements...
+
+  Fallback element spatial distribution:
+    X: min=-0.026250, max=0.026250, range=0.052500
+    Y: min=-0.015333, max=0.021722, range=0.037056
+    Z: min=-0.008750, max=-0.002500, range=0.006250
+
+  Spatial concentration:
+    Fallback elements occupy 112.98% of mesh volume
+
+================================================================================
+VTK Merging Diagnostic Complete
+================================================================================
+
+Key Findings:
+
+1. Deduplication:
+   - Original nodes: 780,922
+   - Duplicates removed: 209,749 (26.86%)
+   - Final nodes: 571,173
+   - Degenerate elements created: 0
+
+2. Problematic Elements:
+   - Fallback (1 cell): 344 (0.011%)
+   - Non-Kuhn: 1826 (0.060%)
+
+3. Spatial Distribution:
+   - Fallback elements concentrated: False
+
+Recommendations:
+  ⚠️  High duplicate rate (26.9%)
+     → Suggests multiple VTK parts with shared boundaries
+     → Verify deduplication doesn't create connectivity mismatches

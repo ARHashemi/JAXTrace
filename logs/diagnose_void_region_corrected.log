@@ -1,0 +1,99 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Void Region Diagnostic - Testing Cell Registration Mismatch Hypothesis
+================================================================================
+
+Void region:
+  X: [-0.017400, -0.015000]
+  Y: [-0.020000, 0.020000] (approximate)
+  Z: [-0.002600, 0.000000]
+
+[1/7] Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 9.2s
+    Elements: 3,048,900, Nodes: 780,922, Timesteps: 2
+
+[2/7] Deduplicating...
+  Removed 209,749 duplicates
+
+[2b/7] Precomputing metadata for inverse point-in-tet...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready in 61.9s
+
+[3/7] Finding elements in void region...
+    Checked 500,000/3,048,900...
+    Checked 1,000,000/3,048,900...
+    Checked 1,500,000/3,048,900...
+    Checked 2,000,000/3,048,900...
+    Checked 2,500,000/3,048,900...
+    Checked 3,000,000/3,048,900...
+  Found in 9.7s
+    Elements in void region: 54
+
+  Void element properties:
+    Non-Kuhn: 2/54 (3.7%)
+    Refinement levels:
+      Level  8:   52 elements
+    Volume: min=2.130e-08, max=2.130e-08, mean=2.130e-08
+
+[4/7] Extracting multi-cell octree...
+  Extracted in 365.3s
+    Cells: 665,824
+    Elements per cell: 18.32
+    Cells per element: 4.00
+
+[5/7] Uploading octree to GPU...
+  Uploaded in 0.2s
+
+[6/7] Building Morton structure for comparison...
+  Built in 12.9s
+
+[7/7] Testing searches for sample positions in void region...
+
+  Testing 3×3×3 search [skala] on 10000 sample positions...
+    Found: 10000/10000 (100.0%)
+    Mean tests: 262.7
+    Time: 420.5s
+
+  Testing 3×3×3 search [inverse] on 10000 sample positions...
+    Found: 10000/10000 (100.0%)
+    Mean tests: 262.7
+    Time: 418.5s
+
+  --- Skala vs Inverse comparison ---
+    Found by skala but NOT inverse: 0
+    Found by inverse but NOT skala: 0
+
+  Testing radius=15 search on 10000 sample positions...
+    Radius=15 search: 4184/10000 found (41.8%)
+
+  Comparison:
+    Found by radius but NOT by 3×3×3: 0/10000 (0.0%)
+================================================================================
+Void Region Diagnostic Complete
+================================================================================
+
+Summary:
+  Elements in void region: 54
+    Non-Kuhn: 2 (3.7%)
+
+  Search performance in void region (10000 samples):
+    3×3×3 [skala]:   10000/10000 (100.0%)
+    3×3×3 [inverse]: 10000/10000 (100.0%)
+    Radius=15:       4184/10000 (41.8%)
+    Found by skala but NOT inverse: 0
+    Found by inverse but NOT skala: 0
+    Found by radius but NOT 3×3×3 (skala): 0

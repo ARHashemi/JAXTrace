@@ -1,0 +1,161 @@
+python3 test_mesh_aligned_octree_gpu_v3.py
+Importing JAX and modules...
+ERROR:2026-01-26 09:44:07,601:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda12.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda12/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Phase 3+4 Test: Mesh-Aligned Octree GPU v3
+================================================================================
+
+================================================================================
+Phase 2: Extracting octree cells v3 (CPU)
+================================================================================
+
+Loading mesh...
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded 3,048,900 elements, 571,173 nodes
+  Removed 209,749 duplicate nodes
+
+Extracting octree cells...
+  Extraction time: 145.66s
+  Unique cells: 265,598
+  Cells per element: 1.00
+  Elements per cell: 11.47
+
+================================================================================
+Phase 3: Uploading octree to GPU
+================================================================================
+Uploading mesh-aligned octree to GPU...
+Uploading mesh-aligned octree to GPU...
+  GPU memory: 74.1 MB
+  Cells: 265,598
+  Elements: 3,047,074
+  Mean elements/cell: 11.5
+  CSR data entries: 3,047,074
+  GPU memory: 74.1 MB
+  Cells: 265,598
+  Elements: 3,048,900
+  Mean elements/cell: 11.5
+  CSR data entries: 3,047,074
+  Upload time: 0.18s
+
+  GPU array shapes:
+    connectivity: (3048900, 4)
+    node_positions: (571173, 3)
+    cell_morton_codes: (265598,)
+    cell_levels: (265598,)
+    cell_to_elements_offsets: (265599,)
+    cell_to_elements_data: (3047074,)
+
+================================================================================
+Phase 4: Point Location Test
+================================================================================
+
+Generating 10,000 random test particles...
+  Bbox: [-0.030000, 0.030000] × [-0.023000, 0.023000] × [-0.010000, 0.000000]
+  Generated 10,000 random positions
+
+Uploading test positions to GPU...
+
+Warming up JIT compilation...
+  JIT compilation complete
+
+Searching for 10,000 particles...
+  Search time: 0.766s
+  Throughput: 13,059 particles/sec
+
+Mesh-Aligned Octree v3 Search Statistics:
+============================================================
+  Particles searched: 10,000
+  Found: 277 (2.77%)
+  Point-in-tet tests:
+    Mean: 2.5
+    Median: 0
+    Max: 60
+============================================================
+
+================================================================================
+Validation
+================================================================================
+
+  Expected results:
+    Searchability: ~100%
+    Mean tests per particle: ~11-12
+
+  Actual results:
+    Searchability: 2.8%
+    Mean tests per particle: 2.5
+
+  ❌ Searchability too low: 2.8% < 95%
+  ✅ Excellent efficiency: 2.5 tests <= 15
+
+  Performance analysis:
+    Phase 2 extraction: 145.66s
+    Phase 3 GPU upload: 0.18s
+    Phase 4 search (10,000 particles): 0.766s
+    Search throughput: 13,059 particles/sec
+
+  Comparison to previous versions:
+    v1 (bbox overlap):
+      Cells: ~652k, Elements/cell: 37.4, Searchability: 2.4%
+    v3 (morton + level):
+      Cells: 265,598, Elements/cell: 11.5, Searchability: 2.8%
+    Improvement:
+      Tests: 37.4 → 2.5 (14.9× reduction)
+      Searchability: 2.4% → 2.8% (1.2× improvement)
+
+================================================================================
+❌ PHASE 3+4 TEST FAILED!
+   Searchability too low: 2.8% < 95%
+================================================================================
+
+
+================================================================================
+DEBUG: Searchability Analysis
+================================================================================
+
+Refinement levels present in mesh: [np.uint8(8), np.uint8(9), np.uint8(10), np.uint8(11), np.uint8(12), np.uint8(13), np.uint8(14)]
+
+Level distribution:
+  Level  8:      151 cells ( 0.06%)
+  Level  9:      292 cells ( 0.11%)
+  Level 10:      637 cells ( 0.24%)
+  Level 11:    1,938 cells ( 0.73%)
+  Level 12:    5,239 cells ( 1.97%)
+  Level 13:   38,738 cells (14.59%)
+  Level 14:  218,603 cells (82.31%)
+
+Phase 4 searches levels: 14, 13, 12, 11, 10, 9, 8, 7
+Missing levels in search: set()
+
+Sample unfound particle positions (first 5):
+  [-0.00752759, 0.02073286, -0.00268006]
+  [0.00591951, -0.01582314, -0.00844005]
+  [-0.02651498, 0.01684410, -0.00398885]
+  [0.01248435, -0.02205311, -0.00030090]
+  [0.01994656, -0.01323240, -0.00818175]
+
+================================================================================

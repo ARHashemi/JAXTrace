@@ -1,0 +1,4 @@
+  File "/home/arhashemi/Workspace/welding/JAXTrace/diagnose_void_region_simple.py", line 201
+    print(f"\n    Element {elem_id} ({'Non-Kuhn' if is_non_kuhn else f'Level {elem_info[\"level\"]}'})")
+                                                                                         ^
+SyntaxError: unexpected character after line continuation character

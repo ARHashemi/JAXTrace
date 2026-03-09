@@ -1,0 +1,157 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+DEFINITIVE DIAGNOSTIC: vmapped vs single-particle L2 search
+================================================================================
+
+[1/8] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  571,173 nodes, 3,048,900 elements
+
+[2/8] Building search structures...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Octree: 665,842 cells, 18.32 elem/cell
+  Velocity fields shape: (2, 571173, 3)
+
+[3/8] Loading VTU snapshots for steps (1683, 1690)...
+  Found 2500 VTU files in output/benchmark_with_export/Mesh-Aligned_Multi-Cell_+_3×3×3_Local_(Option_A_-_Phase_2)
+  Loaded steps: [1683, 1684, 1685, 1686, 1687, 1688, 1689, 1690]
+  Total vanishing particles in range: 468
+    Focus PID=265608 at step 1683: pos=(0.013020, -0.009078, -0.001867), elem=2226011
+    Added 50 random vanishing particles
+
+  Total test positions: 51
+
+[4/8] Individual (non-vmapped) L2 search...
+  Individual search: 51/51 found (100.0%)
+  Time: 1.48s
+  Mean tests: 105.6
+    [PID=265608_step=1683] elem=2226011, tests=127
+    [vanishing_PID=110422_step=1683] elem=40756, tests=106
+    [vanishing_PID=66462_step=1683] elem=309628, tests=134
+    [vanishing_PID=307908_step=1683] elem=309312, tests=68
+    [vanishing_PID=88484_step=1686] elem=2226005, tests=69
+    [vanishing_PID=311242_step=1683] elem=40981, tests=161
+    [vanishing_PID=211964_step=1685] elem=2226007, tests=116
+    [vanishing_PID=88282_step=1685] elem=40768, tests=169
+    [vanishing_PID=291379_step=1683] elem=41064, tests=128
+    [vanishing_PID=53514_step=1688] elem=518372, tests=153
+
+[5/8] Vmapped (batch) L2 search...
+
+  Testing batch_size=1...
+    Time: 1.81s
+    Matches: 1/1, Mismatches: 0/1
+
+  Testing batch_size=2...
+    Time: 1.97s
+    Matches: 2/2, Mismatches: 0/2
+
+  Testing batch_size=4...
+    Time: 1.92s
+    Matches: 4/4, Mismatches: 0/4
+
+  Testing batch_size=8...
+    Time: 1.96s
+    Matches: 8/8, Mismatches: 0/8
+
+  Testing batch_size=16...
+    Time: 2.15s
+    Matches: 16/16, Mismatches: 0/16
+
+  Testing batch_size=32...
+    Time: 2.11s
+    Matches: 32/32, Mismatches: 0/32
+
+[6/8] Full comparison at batch_size=32
+  Results for 32 particles:
+    Both found same element: 32
+    Both found but DIFFERENT element: 0
+    Individual found, vmap LOST: 0 *** THIS IS THE BUG ***
+    Vmap found, individual lost: 0
+    Both lost: 0
+
+[7/8] Test full L0+L1+L2 hierarchy under vmap (L1 on vs off)...
+  (This tests whether L1→L2 fallback is corrupted by vmap)
+[1/5] Computing element centroids...
+  Bounding box: min=[-0.03000006 -0.02300005 -0.01000001], max=[3.0000059e-02 2.3000047e-02 9.9999999e-09]
+[2/5] Computing Morton codes for 3,048,900 elements...
+[3/5] Sorting elements by Morton code...
+[4/5] Building adaptive octree (capacity=256)...
+  Built 24,550 octree leaves
+  Depth distribution:
+    Depth 2: 52 leaves
+    Depth 3: 57 leaves
+    Depth 4: 154 leaves
+    Depth 5: 556 leaves
+    Depth 6: 2,995 leaves
+    Depth 7: 20,736 leaves
+[5/5] Building prefix table...
+  Prefix table: 2,097,152 entries (depth=7)
+  Memory: 16.0 MB (start + length arrays)
+  Prefix sharing: 0 prefixes map to multiple leaves (max: 1)
+  Testing with 51 particles found by individual L2
+
+  RK4 step with L1 ENABLED:
+    Lost after 1 step: 50/51
+    L0=97, L1=0, L2=24, miss=134
+
+  RK4 step with L1 DISABLED (L0 → L2 only):
+    Lost after 1 step: 50/51
+    L0=97, L1=0, L2=24, miss=134
+
+  *** COMPARISON (1 step) ***
+    L1 enabled:  50 particles lost, 134 misses
+    L1 disabled: 50 particles lost, 134 misses
+    → Same particle loss (issue not in L1)
+
+  Multi-step cascade test (10 steps):
+    L1 ENABLED:
+      Step 0: lost=50/51, L0=97, L1=0, L2=24, miss=134
+      Step 1: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 2: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 3: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 4: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 5: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 6: lost=51/51, L0=1, L1=0, L2=1, miss=253
+      Step 7: lost=51/51, L0=0, L1=0, L2=0, miss=255
+      Step 8: lost=51/51, L0=0, L1=0, L2=0, miss=255
+      Step 9: lost=51/51, L0=0, L1=0, L2=0, miss=255
+
+    L1 DISABLED:
+      Step 0: lost=50/51, L0=97, L1=0, L2=24, miss=134
+      Step 1: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 2: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 3: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 4: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 5: lost=50/51, L0=5, L1=0, L2=0, miss=250
+      Step 6: lost=51/51, L0=1, L1=0, L2=1, miss=253
+      Step 7: lost=51/51, L0=0, L1=0, L2=0, miss=255
+      Step 8: lost=51/51, L0=0, L1=0, L2=0, miss=255
+      Step 9: lost=51/51, L0=0, L1=0, L2=0, miss=255
+
+================================================================================
+SUMMARY
+================================================================================
+  Test positions: 51
+  Individual L2 search found: 51/51
+  Max vmap batch tested: 32
+  Vmapped L2 search found: 32/32
+  Exact matches: 32/32
+
+  L2 search matches individually ← vmap issue may be in RK4 cascade
+  Check Section 7 for L1 vs no-L1 comparison
+
+Done.

@@ -1,0 +1,172 @@
+ERROR:2026-01-23 14:11:40,633:jax._src.xla_bridge:475: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 473, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 609, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+
+================================================================================
+Analyzing Timestep 0
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_0.pvtu
+  Nodes: 2,301
+  Elements: 1,296
+  Loaded field 'Displacement': (2301, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_1.pvtu
+  Nodes: 8,281
+  Elements: 10,368
+  Loaded field 'Displacement': (8281, 3)
+
+Failed to analyze timestep 0: Velocity field shape mismatch at timestep 1: expected (2301, 3), got (8281, 3)
+
+================================================================================
+Analyzing Timestep 1
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_1.pvtu
+  Nodes: 8,281
+  Elements: 10,368
+  Loaded field 'Displacement': (8281, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_2.pvtu
+  Nodes: 29,505
+  Elements: 56,323
+  Loaded field 'Displacement': (29505, 3)
+
+Failed to analyze timestep 1: Velocity field shape mismatch at timestep 2: expected (8281, 3), got (29505, 3)
+
+================================================================================
+Analyzing Timestep 2
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_2.pvtu
+  Nodes: 29,505
+  Elements: 56,323
+  Loaded field 'Displacement': (29505, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_3.pvtu
+  Nodes: 67,038
+  Elements: 158,054
+  Loaded field 'Displacement': (67038, 3)
+
+Failed to analyze timestep 2: Velocity field shape mismatch at timestep 3: expected (29505, 3), got (67038, 3)
+
+================================================================================
+Analyzing Timestep 5
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_5.pvtu
+  Nodes: 340,503
+  Elements: 1,116,410
+  Loaded field 'Displacement': (340503, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_6.pvtu
+  Nodes: 844,185
+  Elements: 3,293,725
+  Loaded field 'Displacement': (844185, 3)
+
+Failed to analyze timestep 5: Velocity field shape mismatch at timestep 6: expected (340503, 3), got (844185, 3)
+
+================================================================================
+Analyzing Timestep 10
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_10.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_11.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+
+Mesh info:
+  Nodes: 571,173
+  Elements: 3,048,900
+
+Bounding box:
+  Min: (-0.030000, -0.023000, -0.010000)
+  Max: (0.030000, 0.023000, 0.000000)
+  Size: (0.060000, 0.046000, 0.010000)
+
+Analyzing coordinate structure...
+
+  X-axis:
+    Unique values: 262
+    Min spacing: 0.0000781249
+    Max spacing: 0.0050000008
+    Unique spacings: 13
+
+  Y-axis:
+    Unique values: 257
+    Min spacing: 0.0000798609
+    Max spacing: 0.0051111002
+    Unique spacings: 13
+
+  Z-axis:
+    Unique values: 67
+    Min spacing: 0.0000781249
+    Max spacing: 0.0024999999
+    Unique spacings: 10
+    All spacings:
+      0.0000781249 (    38 occurrences) → 2^(13.64)
+      0.0000781250 (    49 occurrences) → 2^(13.64)
+      0.0000781252 (     8 occurrences) → 2^(13.64)
+      0.0000781254 (     1 occurrences) → 2^(13.64)
+      0.0001562499 (     2 occurrences) → 2^(12.64)
+      0.0001562503 (     1 occurrences) → 2^(12.64)
+      0.0003125002 (     2 occurrences) → 2^(11.64)
+      0.0006249999 (     1 occurrences) → 2^(10.64)
+      0.0012499997 (     1 occurrences) → 2^(9.64)
+      0.0024999999 (     1 occurrences) → 2^(8.64)
+
+Analyzing element sizes...
+  Axis-aligned edges (sample of 1000 elements):
+    X-aligned: 1,000
+    Y-aligned: 1,000
+    Z-aligned: 1,000
+
+  Unique axis-aligned edge lengths:
+    0.0006249994 (     9 edges) → level 10.64
+    0.0006249999 ( 1,373 edges) → level 10.64
+    0.0006250000 ( 1,069 edges) → level 10.64
+    0.0006250001 (   141 edges) → level 10.64
+    0.0006250003 (    57 edges) → level 10.64
+    0.0006388887 (   411 edges) → level 10.61
+    0.0006388910 (   217 edges) → level 10.61
+    0.0006388919 (   162 edges) → level 10.61
+    0.0012499997 (    99 edges) → level 9.64
+    0.0012500000 (   175 edges) → level 9.64
+    0.0012500002 (    31 edges) → level 9.64
+    0.0012500007 (    45 edges) → level 9.64
+    0.0012777774 (    45 edges) → level 9.61
+    0.0012777776 (     6 edges) → level 9.61
+    0.0012777820 (    48 edges) → level 9.61
+    0.0012777830 (    76 edges) → level 9.61
+    0.0024999995 (    21 edges) → level 8.64
+    0.0024999999 (    27 edges) → level 8.64
+    0.0025000004 (     6 edges) → level 8.64
+    0.0025555547 (     6 edges) → level 8.61
+
+Analyzing element volumes...
+  Volume statistics (sample):
+    Min: 4.16e-11
+    Max: 2.13e-08
+    Mean: 3.33e-10
+    Median: 4.16e-11
+    Std: 1.93e-09
+  Volume ratios (relative to minimum):
+    1.00× min volume: 790 elements
+    8.00× min volume: 175 elements
+    64.00× min volume: 27 elements
+    512.00× min volume: 8 elements
+
+================================================================================
+Analysis complete
+================================================================================

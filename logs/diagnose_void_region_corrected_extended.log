@@ -1,0 +1,159 @@
+python3 diagnose_void_region_corrected.py
+✅ Enhanced VTK I/O available
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Void Region Diagnostic - Testing Cell Registration Mismatch Hypothesis
+================================================================================
+
+Void region:
+  X: [-0.021000, -0.014000]
+  Y: [-0.014000, 0.014000] (approximate)
+  Z: [-0.002700, 0.000000]
+
+[1/7] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 7.2s
+    Elements: 3,048,900, Nodes: 780,922, Timesteps: 2
+
+[2/7] Deduplicating...
+  Removed 209,749 duplicates
+
+[2b/7] Precomputing metadata for inverse point-in-tet...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready in 54.3s
+
+[3/7] Finding elements in void region...
+    Checked 500,000/3,048,900...
+    Checked 1,000,000/3,048,900...
+    Checked 1,500,000/3,048,900...
+    Checked 2,000,000/3,048,900...
+    Checked 2,500,000/3,048,900...
+    Checked 3,000,000/3,048,900...
+  Found in 8.7s
+    Elements in void region: 207
+
+  Void element properties:
+    Non-Kuhn: 0/207 (0.0%)
+    Refinement levels:
+      Level  8:   93 elements
+      Level  9:  114 elements
+    Volume: min=2.662e-09, max=2.130e-08, mean=1.103e-08
+
+[4/7] Extracting multi-cell octree...
+  Extracted in 306.5s
+    Cells: 665,824
+    Elements per cell: 18.32
+    Cells per element: 4.00
+
+[5/7] Uploading octree to GPU...
+  Uploaded in 0.1s
+
+[6/7] Building Morton structure for comparison...
+  Built in 11.3s
+
+[6b/7] Finding neighbor elements just outside void (low-X side, approach direction)...
+    Found 174 neighbor elements approaching void from low-X
+
+[7/7] Testing searches for sample positions in void region...
+  Sample zones:
+    interior     (2000): X in [-0.02080, -0.01400]
+    just_inside  (2000): X = -0.020950
+    just_outside (2000): X = -0.021050
+    approach     (2000): X in [-0.02600, -0.021050]
+
+  Running searches on 8000 total positions across 4 zones...
+  All searches done in 828.6s
+
+============================================================
+
+  ZONE: interior (2000 samples)
+    3×3×3 [skala]:   2000/2000 (100.0%)
+    3×3×3 [inverse]: 2000/2000 (100.0%)
+    radius=15:       957/2000 (47.9%)
+    skala found, inverse missed: 0
+    inverse found, skala missed: 0
+    radius found, 3×3×3 missed:  0  ← KEY for particle entry failure
+    3×3×3 found, radius missed:  1043
+
+  ZONE: just_inside (2000 samples)
+    3×3×3 [skala]:   2000/2000 (100.0%)
+    3×3×3 [inverse]: 2000/2000 (100.0%)
+    radius=15:       652/2000 (32.6%)
+    skala found, inverse missed: 0
+    inverse found, skala missed: 0
+    radius found, 3×3×3 missed:  0  ← KEY for particle entry failure
+    3×3×3 found, radius missed:  1348
+
+  ZONE: just_outside (2000 samples)
+    3×3×3 [skala]:   2000/2000 (100.0%)
+    3×3×3 [inverse]: 2000/2000 (100.0%)
+    radius=15:       716/2000 (35.8%)
+    skala found, inverse missed: 0
+    inverse found, skala missed: 0
+    radius found, 3×3×3 missed:  0  ← KEY for particle entry failure
+    3×3×3 found, radius missed:  1284
+
+  ZONE: approach (2000 samples)
+    3×3×3 [skala]:   1981/2000 (99.0%)
+    3×3×3 [inverse]: 1981/2000 (99.0%)
+    radius=15:       1235/2000 (61.8%)
+    skala found, inverse missed: 0
+    inverse found, skala missed: 0
+    radius found, 3×3×3 missed:  2  ← KEY for particle entry failure
+    3×3×3 found, radius missed:  748
+
+============================================================
+
+  Overall: radius found but 3×3×3 missed: 2/8000
+  (breakdown by zone printed above)
+
+  🔍 TESTING CELL REGISTRATION MISMATCH HYPOTHESIS...
+     User's Point 4: Are elements hashed to cells that don't match particle's cell?
+
+    Position [6316]: (-0.025374, -0.001968, -0.002550)
+      Radius found: element 39551
+      Element centroid: (-0.026250, 0.000000, -0.002500)
+      Element level: 14
+      Element Non-Kuhn: True
+      Registered in 1 cells
+      ⚠  WARNING: Element registered in <4 cells (should be ~4)
+
+    Position [7316]: (-0.025893, -0.000039, -0.002685)
+      Radius found: element 39551
+      Element centroid: (-0.026250, 0.000000, -0.002500)
+      Element level: 14
+      Element Non-Kuhn: True
+      Registered in 1 cells
+      ⚠  WARNING: Element registered in <4 cells (should be ~4)
+
+================================================================================
+Void Region Diagnostic Complete
+================================================================================
+
+Summary:
+  Elements in void region: 207
+    Non-Kuhn: 0 (0.0%)
+
+  Search performance across all zones (8000 total samples):
+    3×3×3 [skala]:   7981/8000 (99.8%)
+    3×3×3 [inverse]: 7981/8000 (99.8%)
+    Radius=15:       3560/8000 (44.5%)
+    Found by skala but NOT inverse: 0
+    Found by inverse but NOT skala: 0
+    Found by radius but NOT 3×3×3 (skala): 2  ← entry failure indicator
+
+  🔍 Check analysis above for cell registration mismatch evidence

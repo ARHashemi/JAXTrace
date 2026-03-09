@@ -1,0 +1,264 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+DIAGNOSTIC: Particle Loss at Refinement Boundaries
+================================================================================
+
+[1/7] Loading mesh...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 158-159 (2 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_158.pvtu
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 2/2 timesteps
+    Memory: 17.9 MB
+  571,173 nodes, 3,048,900 elements
+
+  Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Extracting octree (multi-cell vertex registration)...
+
+================================================================================
+Multi-Cell Vertex Registration
+================================================================================
+  Elements: 3,048,900
+  Tolerance: 1.00e-06
+  Expected: ~4 cells per element, ~24 elements per cell
+
+[1/5] Pass 1: Processing Kuhn elements...
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+  Kuhn elements: 3,047,074
+  Non-Kuhn elements (deferred): 1,826
+
+[2/5] Pass 2: Processing 1,826 Non-Kuhn elements...
+  Building node-to-element index...
+  Non-Kuhn with Kuhn neighbor: 1,826
+  Non-Kuhn without Kuhn neighbor: 0
+  Total registrations: 12,195,600
+  Cells per element (mean): 4.00
+
+[3/5] Building cell→elements CSR structure...
+  ✅ CSR structure built!
+    Unique cells: 665,842
+    CSR data entries: 12,195,600
+
+[4/5] Building element→cells CSR structure...
+  ✅ Element→cells CSR structure built!
+    CSR data entries: 12,195,600
+
+[5/5] Computing statistics...
+
+  Statistics:
+    Cells per element: 4.00 (expected ~4.0)
+    Elements per cell: 18.32 (expected ~23-24)
+    Elements per cell (median): 16
+    Elements per cell (min, max): (1, 90)
+
+  Elements-per-cell distribution (top 10):
+     16 elements: 104,747 cells (15.73%)
+      8 elements: 103,797 cells (15.59%)
+     24 elements:  94,144 cells (14.14%)
+     12 elements:  88,498 cells (13.29%)
+      4 elements:  52,297 cells ( 7.85%)
+     32 elements:  43,572 cells ( 6.54%)
+     20 elements:  35,967 cells ( 5.40%)
+     36 elements:  27,558 cells ( 4.14%)
+     40 elements:  24,310 cells ( 3.65%)
+      6 elements:  14,066 cells ( 2.11%)
+
+================================================================================
+Multi-Cell Vertex Registration Complete!
+================================================================================
+
+  Uploading to GPU...
+
+[2/7] Identifying refinement boundary elements...
+  Classifying elements by refinement level...
+    500,000/3,048,900...
+    1,000,000/3,048,900...
+    1,500,000/3,048,900...
+    2,000,000/3,048,900...
+    2,500,000/3,048,900...
+    3,000,000/3,048,900...
+  Level distribution:
+    Level  8:        839 elements (0.03%)
+    Level  9:      1,594 elements (0.05%)
+    Level 10:      4,289 elements (0.14%)
+    Level 11:     14,949 elements (0.49%)
+    Level 12:     43,888 elements (1.44%)
+    Level 13:    381,987 elements (12.53%)
+    Level 14:  2,599,528 elements (85.26%)
+
+  Finding refinement boundary elements...
+  Found 500 boundary elements
+  Boundary types:
+    L10↔L11: 102
+    L10↔L9: 41
+    L11↔L10: 38
+    L11↔L12: 284
+    L8↔L9: 8
+    L9↔L10: 20
+    L9↔L8: 7
+
+[3/7] Float32 vs Float64 grid index comparison...
+
+  Cell sizes per level:
+    Level  8: X=4.9999998882e-03, Y=5.1111096982e-03, Z=4.9999998882e-03
+    Level  9: X=2.5000004098e-03, Y=2.5555649772e-03, Z=2.4999999441e-03
+    Level 10: X=1.2499997392e-03, Y=1.2777829543e-03, Z=1.2499999721e-03
+    Level 11: X=6.2499998603e-04, Y=6.3888868317e-04, Z=6.2499998603e-04
+    Level 12: X=3.1249999302e-04, Y=3.1944410875e-04, Z=3.1249999302e-04
+    Level 13: X=1.5625031665e-04, Y=1.5972228721e-04, Z=1.5624996740e-04
+    Level 14: X=7.8125391155e-05, Y=7.9860910773e-05, Z=7.8124998254e-05
+
+  Generating boundary test positions...
+  Generated 500 test positions
+
+  Grid index mismatch results (f32 vs f64):
+   Level     Tests  Mismatches      Rate      X      Y      Z
+  -------------------------------------------------------
+       8        75           0     0.00%      0      0      0
+       9       250           0     0.00%      0      0      0
+      10       425           0     0.00%      0      0      0
+      11       250          10     4.00%     10      0      0
+
+  Total mismatches: 10 across 500 positions × levels
+
+  Example mismatches (first 10):
+    Level 11, centroid of elem 37
+      pos = (-6.8749999627e-03, 1.0541680502e-02, -9.3749997905e-04)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-12, 16, -2)
+      f32 indices: (-11, 16, -2)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 40
+      pos = (-8.1249999348e-03, 1.0541680502e-02, -9.3749997905e-04)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 16, -2)
+      f32 indices: (-13, 16, -2)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 44
+      pos = (-8.1249999348e-03, 9.9027892575e-03, -3.1249999302e-04)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 15, -1)
+      f32 indices: (-13, 15, -1)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 48
+      pos = (-8.1249999348e-03, 9.2638982460e-03, -9.3749997905e-04)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 14, -2)
+      f32 indices: (-13, 14, -2)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 51
+      pos = (-6.8749999627e-03, 1.1180571979e-02, -1.5624999651e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-12, 17, -3)
+      f32 indices: (-11, 17, -3)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 52
+      pos = (-8.1249999348e-03, 1.1180571979e-02, -1.5624999651e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 17, -3)
+      f32 indices: (-13, 17, -3)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 68
+      pos = (-1.0625000112e-02, 8.6250070017e-03, -1.5624999651e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-18, 13, -3)
+      f32 indices: (-17, 13, -3)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 90
+      pos = (-8.1249999348e-03, 1.0541680502e-02, -2.1874999511e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 16, -4)
+      f32 indices: (-13, 16, -4)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 100
+      pos = (-8.1249999348e-03, 9.9027892575e-03, -1.5624999651e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-14, 15, -3)
+      f32 indices: (-13, 15, -3)
+      delta (f32-f64): (1, 0, 0)
+    Level 11, centroid of elem 102
+      pos = (-6.8749999627e-03, 1.0541680502e-02, -2.1874999511e-03)
+      cell_size = (6.2499998603e-04, 6.3888868317e-04, 6.2499998603e-04)
+      f64 indices: (-12, 16, -4)
+      f32 indices: (-11, 16, -4)
+      delta (f32-f64): (1, 0, 0)
+
+[4/7] Systematic float32 boundary sweep...
+  Testing positions at exact cell boundaries along each axis.
+    Level  8:   2518/  6015 mismatches (41.86%)
+    Level  9:   2420/  6015 mismatches (40.23%)
+    Level 10:   2392/  6015 mismatches (39.77%)
+    Level 11:   2424/  6015 mismatches (40.30%)
+    Level 12:   2403/  6015 mismatches (39.95%)
+    Level 13:   2296/  6015 mismatches (38.17%)
+    Level 14:   2374/  6015 mismatches (39.47%)
+
+  Total boundary sweep: 16,827/42,105 mismatches (39.96%)
+
+[5/7] Cross-level element reachability test...
+  For each boundary element, test whether L2 search finds the correct element
+  using both float32 and float64 grid indices.
+  Testing 200 boundary element centroids...
+
+  GPU L2 search at boundary centroids:
+    Found (correct element): 200
+    Found (different element): 0
+    NOT FOUND: 0 *** THIS IS THE BUG ***
+
+[6/7] Testing positions BETWEEN boundary element pairs...
+  Generate positions that cross from fine to coarse elements.
+
+  Cross-boundary sweep:
+    Tests: 528
+    Misses: 0 (0.00%)
+  *** No misses in cross-boundary sweep! ***
+
+[7/7] Float64 grid index L2 search test...
+  Manually performing L2 search with float64 grid indices
+  to check if precision difference causes the failure.
+  No missed positions to test (L2 search succeeded everywhere).
+  The boundary centroids and cross-boundary positions are all findable.
+  The loss may only occur at specific RK4 intermediate positions.
+
+================================================================================
+SUMMARY
+================================================================================
+  Boundary elements found: 500
+  Float32 vs float64 grid index mismatches at boundary positions: 10
+  Float32 boundary sweep mismatches: 16827/42105
+  GPU L2 missed boundary centroids: 0/200
+  Cross-boundary sweep misses: 0/528
+
+  Conclusions:
+    ⚠️  Float32 precision causes grid index mismatches at 10 boundary positions
+    ✅ GPU L2 search finds all boundary centroids
+    ✅ L2 search finds all cross-boundary positions
+
+Done.

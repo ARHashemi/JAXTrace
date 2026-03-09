@@ -410,7 +410,8 @@ def run_initial_assignment(positions_gpu, mesh_gpu_octree, l2_method, l2_radius=
 
     elif l2_method in ['radius', 'incremental', 'neighbors', 'hierarchical',
                        'mesh_aligned_octree', 'mesh_aligned_octree_multi',
-                       'mesh_aligned_octree_multi_local', 'mesh_aligned_morton']:
+                       'mesh_aligned_octree_multi_local', 'mesh_aligned_octree_multi_local_where',
+                       'mesh_aligned_morton']:
         # Default: cascade radius fallback (works for all mesh types)
         initial_radius = 500
         fallback_radii = [1000, 2000, 5000, 10000, 100000]
@@ -511,6 +512,20 @@ def _build_rk4_functions(l2_method, mesh_gpu, mesh_gpu_octree, element_volumes_g
             l2_search_radius=l2_radius if l2_radius is not None else 10,
             mesh_aligned_octree=mesh_aligned_octree_multi_gpu,
             mesh_aligned_octree_use_multi_local=True,
+        )
+        config.L2_SEARCH_METHOD = original
+        return fns
+
+    elif l2_method == 'mesh_aligned_octree_multi_local_where':
+        original = config.L2_SEARCH_METHOD
+        config.L2_SEARCH_METHOD = 'mesh_aligned_octree'
+        fns = create_rk4_fully_fused_timedep_with_stats(
+            **common,
+            l2_search_method='radius',
+            l2_search_radius=l2_radius if l2_radius is not None else 10,
+            mesh_aligned_octree=mesh_aligned_octree_multi_gpu,
+            mesh_aligned_octree_use_multi_local=True,
+            mesh_aligned_octree_use_where=True,
         )
         config.L2_SEARCH_METHOD = original
         return fns
@@ -1084,13 +1099,23 @@ def main():
         #     'expected_leaves': '~94 tests/particle (~4 cells × ~23.6 elem/cell)'
         # },
 
-        # Mesh-aligned octree MULTI-CELL with 3×3×3 local search (Option A)
+        # Mesh-aligned octree MULTI-CELL with 3×3×3 local search (Option A) - lax.cond version
         {
-            'name': 'Mesh-Aligned Multi-Cell + 3×3×3 Local (Option A - Phase 2)',
+            'name': 'Mesh-Aligned Multi-Cell + 3×3×3 Local (lax.cond)',
             'l2_method': 'mesh_aligned_octree_multi_local',
             'l2_radius': None,
             'incremental_radii': None,
-            'description': 'Multi-cell + 3×3×3 local neighborhood search (27 cells)',
+            'description': 'Multi-cell + 3×3×3 local search with lax.cond (original)',
+            'expected_leaves': '~494 tests/particle (27 cells × 18.31 elem/cell)'
+        },
+
+        # Mesh-aligned octree MULTI-CELL with 3×3×3 local search - jnp.where version
+        {
+            'name': 'Mesh-Aligned Multi-Cell + 3×3×3 Local (jnp.where)',
+            'l2_method': 'mesh_aligned_octree_multi_local_where',
+            'l2_radius': None,
+            'incremental_radii': None,
+            'description': 'Multi-cell + 3×3×3 local search with jnp.where (vmap fix)',
             'expected_leaves': '~494 tests/particle (27 cells × 18.31 elem/cell)'
         },
     ]
@@ -1154,9 +1179,13 @@ def main():
         name = cfg['name']
         print(f"\n  Config: {name}")
 
-        # Use GROUND TRUTH element IDs (not initial assignment results)
-        # This ensures fair comparison - all methods start with correct element assignments
-        element_ids_initial = ground_truth_element_ids_gpu
+        # Use initial assignment results for uniform_grid seeding (particles start
+        # outside elements, so we need L2 to find them first).
+        # For centroid seeding, ground truth element IDs are available directly.
+        if PARTICLE_SEEDING == 'uniform_grid':
+            element_ids_initial = initial_results[name]['element_ids']
+        else:
+            element_ids_initial = ground_truth_element_ids_gpu
 
         positions_final, element_ids_final, n_active_final, retention, t_elapsed, throughput = run_rk4_tracking(
             positions_gpu,
@@ -1211,7 +1240,7 @@ def main():
     # RK4 Tracking Summary
     print("\n\nRK4 TRACKING RESULTS ({} steps)".format(N_STEPS))
     print("=" * 80)
-    print("Note: All methods start with GROUND TRUTH element IDs (fair comparison)")
+    print("Note: All methods start with initial assignment element IDs (per-method)")
     print(f"{'Configuration':<40s}  {'Retention':>10s}  {'Throughput':>14s}  {'Speedup':>8s}")
     print("-" * 80)
 

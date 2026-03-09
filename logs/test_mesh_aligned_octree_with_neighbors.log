@@ -1,0 +1,150 @@
+ERROR:2026-01-30 11:20:43,312:jax._src.xla_bridge:491: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda13.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 489, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda13/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 633, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+W0130 11:23:59.296923 2484641 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.52GiB (2705023250 bytes) by rematerialization; only reduced to 631.67GiB (678251690272 bytes), down from 631.67GiB (678251850248 bytes) originally
+W0130 11:24:11.520745 2484641 bfc_allocator.cc:502] Allocator (GPU_0_bfc) ran out of memory trying to allocate 631.67GiB (rounded to 678251943680)requested by op 
+If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
+Current allocation summary follows.
+Current allocation summary follows.
+W0130 11:24:11.520987 2484641 bfc_allocator.cc:513] ****________________________________________________________________________________________________
+E0130 11:24:11.521010 2484641 pjrt_stream_executor_client.cc:2111] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 631.67GiB. [tf-allocator-allocation-error='']
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+Importing JAX and modules...
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Phase 2 Test: Mesh-Aligned Octree WITH 26-Neighbor Search
+================================================================================
+
+================================================================================
+Phase 2: Extracting octree cells (CPU)
+================================================================================
+
+Loading mesh...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 158-159 (2 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_158.pvtu
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 2/2 timesteps
+    Memory: 17.9 MB
+
+================================================================================
+Deduplicating nodes (fixing PVTU piece boundaries)
+================================================================================
+  Original nodes: 780,922
+  Detecting exact duplicates...
+  Unique nodes:   571,173
+  Duplicate nodes: 209,749 (26.9%)
+
+  Compacting node array...
+  Remapping connectivity...
+  Remapping velocity sequence...
+    Original velocity: (2, 780922, 3)
+    Remapped velocity: (2, 571173, 3)
+  Validating...
+  ✅ No degenerate elements
+
+✅ Node deduplication complete!
+  Removed 209,749 duplicate nodes
+  Mesh size: 780,922 → 571,173 nodes
+  Velocity arrays remapped: 2 timesteps
+================================================================================
+
+
+Extracting octree cells...
+  Extraction time: 157.00s
+  Unique cells: 517,069
+  Cells per element: 1.00
+  Elements per cell: 5.89
+
+================================================================================
+Phase 3: Uploading octree to GPU
+================================================================================
+Uploading mesh-aligned octree to GPU...
+  GPU memory: 82.9 MB
+  Cells: 517,069
+  Elements: 3,047,074
+  Mean elements/cell: 5.9
+  CSR data entries: 3,047,074
+  Upload time: 0.21s
+
+  GPU array shapes:
+    connectivity: (3048900, 4)
+    node_positions: (571173, 3)
+    cell_morton_codes: (517069,)
+    cell_levels: (517069,)
+    cell_to_elements_offsets: (517070,)
+    cell_to_elements_data: (3047074,)
+
+================================================================================
+Phase 4: Point Location Test WITH 26-NEIGHBOR SEARCH
+================================================================================
+
+Generating 10,000 random test particles...
+  Bbox: [-0.030000, 0.030000] × [-0.023000, 0.023000] × [-0.010000, 0.000000]
+  Generated 10,000 random positions
+
+Uploading test positions to GPU...
+
+Warming up JIT compilation...
+  JIT compilation complete
+
+Searching for 10,000 particles WITH NEIGHBORS...
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/test_mesh_aligned_octree_with_neighbors.py", line 154, in <module>
+    found_elements, n_tests = search_mesh_aligned_octree_with_neighbors_batch(
+                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        test_positions_gpu, octree_gpu, max_tests=200
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/mesh_aligned_point_location_with_neighbors.py", line 337, in search_mesh_aligned_octree_with_neighbors_batch
+    elem_ids, n_tests = jax.vmap(
+                        ~~~~~~~~~
+        lambda pos: search_mesh_aligned_octree_with_neighbors_single(pos, octree_gpu, max_tests),
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        in_axes=0
+        ~~~~~~~~~
+    )(positions)
+    ~^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/mesh_aligned_point_location_with_neighbors.py", line 338, in <lambda>
+    lambda pos: search_mesh_aligned_octree_with_neighbors_single(pos, octree_gpu, max_tests),
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/search/mesh_aligned_point_location_with_neighbors.py", line 307, in search_mesh_aligned_octree_with_neighbors_single
+    final_elem_id, final_n_tests = lax.fori_loop(
+                                   ~~~~~~~~~~~~~^
+        0, n_levels_to_try, try_level_with_neighbors, init_state
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 631.67GiB.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

@@ -1,0 +1,286 @@
+python3 test_octree_retention_diagnostics.py
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770134671.281919  880279 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770134671.283749  880279 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770134671.284400  880279 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1770134671.291301  880279 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+ERROR:2026-02-03 17:04:32,302:jax._src.xla_bridge:491: Jax plugin configuration error: Exception when calling jax_plugins.xla_cuda12.initialize()
+Traceback (most recent call last):
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 489, in discover_pjrt_plugins
+    plugin_module.initialize()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax_plugins/xla_cuda12/__init__.py", line 334, in initialize
+    c_api = xb.register_plugin(
+        'cuda', priority=500, library_path=str(path), options=options
+    )
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jax/_src/xla_bridge.py", line 633, in register_plugin
+    c_api = xla_client.load_pjrt_plugin_dynamically(plugin_name, library_path)
+  File "/home/arhashemi/Workspace/welding/JAXTrace/.venv/lib/python3.13/site-packages/jaxlib/xla_client.py", line 117, in load_pjrt_plugin_dynamically
+    return _xla.load_pjrt_plugin(plugin_name, library_path, c_api=None)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+jax.errors.JaxRuntimeError: ALREADY_EXISTS: PJRT_Api already exists for device type cuda
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+Loading mesh...
+================================================================================
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: /home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Mesh: 3,048,900 elements, 571,173 nodes
+
+================================================================================
+Extracting octree...
+================================================================================
+
+================================================================================
+Corrected Phase 2: Single Parent Cube per Element
+================================================================================
+  Elements: 3,048,900
+  Tolerance: 1.00e-06
+  Expected: ~1 cell per element, ~5-6 elements per cell
+
+[1/3] Finding parent cube for each element...
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+  ✅ Element->cell mapping complete!
+    Skipped 1,826 non-Kuhn elements
+    Mapped 3,047,074 elements to cells
+
+[2/3] Building inverted index (cell -> elements)...
+  ✅ CSR structure built!
+    Unique cells: 517,069
+    CSR data entries: 3,047,074
+
+[3/3] Computing statistics...
+
+  Statistics:
+    Cells per element: 1.00 (expected ~1.0)
+    Elements per cell: 5.89 (expected ~5-6)
+    Elements per cell (median): 6
+    Elements per cell (min, max): (1, 8)
+
+  Elements-per-cell distribution (top 10):
+     6 elements:  498,121 cells (96.34%)
+     3 elements:   14,422 cells ( 2.79%)
+     4 elements:    1,859 cells ( 0.36%)
+     2 elements:    1,819 cells ( 0.35%)
+     5 elements:      776 cells ( 0.15%)
+     1 elements:       64 cells ( 0.01%)
+     8 elements:        8 cells ( 0.00%)
+
+================================================================================
+Corrected Phase 2 Complete!
+================================================================================
+
+
+  Octree extracted in 154.9s
+    Cells: 517,069
+    Elements/cell: 5.89
+
+================================================================================
+OCTREE RETENTION LOSS DIAGNOSTICS
+================================================================================
+Mesh: 3,048,900 elements, 571,173 nodes
+Octree: 517,069 cells
+
+
+================================================================================
+Test 1: Element Boundary Spanning Analysis
+================================================================================
+    Processed 500,000/3,048,900...
+    Processed 1,000,000/3,048,900...
+    Processed 1,500,000/3,048,900...
+    Processed 2,000,000/3,048,900...
+    Processed 2,500,000/3,048,900...
+    Processed 3,000,000/3,048,900...
+
+  Results:
+    Elements checked: 3,047,074
+    Skipped (non-Kuhn): 1,826
+    Single-cell elements: 0 (0.00%)
+    Boundary-spanning elements: 3,047,074 (100.00%)
+
+  Sample boundary-spanning elements:
+    Element 0: level=8, centroid_grid=(np.int32(-4), np.int32(1), np.int32(-1)), vertices span 4 cells: [(-4, 1, 0), (-3, 1, 0), (-4, 1, -1), (-3, 0, 0)]
+    Element 1: level=8, centroid_grid=(np.int32(-4), np.int32(1), np.int32(-1)), vertices span 4 cells: [(-3, 0, 0), (-3, 1, 0), (-4, 1, -1), (-3, 1, -1)]
+    Element 2: level=8, centroid_grid=(np.int32(-4), np.int32(1), np.int32(-1)), vertices span 4 cells: [(-4, 2, -1), (-3, 1, 0), (-3, 2, -1), (-3, 1, -1)]
+    Element 3: level=8, centroid_grid=(np.int32(-4), np.int32(1), np.int32(-1)), vertices span 4 cells: [(-4, 2, -1), (-3, 1, 0), (-4, 1, -1), (-3, 1, -1)]
+    Element 4: level=8, centroid_grid=(np.int32(-4), np.int32(1), np.int32(-1)), vertices span 4 cells: [(-4, 2, -1), (-4, 1, 0), (-3, 1, 0), (-4, 2, 0)]
+
+  >>> THIS IS THE KEY METRIC <<<
+  100.00% of elements span cell boundaries
+  When a particle crosses into the vertex-only region of a spanning element,
+  the mesh-aligned search will NOT find it (element registered at centroid cell only)
+
+================================================================================
+Test 2: Vertex-to-Cell Distribution for Spanning Elements
+================================================================================
+    Processed 500,000/3,048,900...
+    Processed 1,000,000/3,048,900...
+    Processed 1,500,000/3,048,900...
+    Processed 2,000,000/3,048,900...
+    Processed 2,500,000/3,048,900...
+    Processed 3,000,000/3,048,900...
+
+  Spanning elements analyzed: 3,047,074
+  Vertex-neighbor cells that EXIST in octree: 8,976,739
+  Vertex-neighbor cells that DON'T exist: 1,686,618
+
+  >>> IMPLICATION <<<
+  The element IS in the neighbor cell's spatial region but is NOT registered there.
+  Searching neighbor cells only finds elements registered there (by centroid),
+  NOT elements whose vertices happen to be in the neighbor cell.
+
+================================================================================
+Test 3: Non-Standard Cells Detailed Analysis
+================================================================================
+
+  Non-standard cells: 18,948 / 517,069 (3.66%)
+
+  1 elements/cell: 64 cells
+    Level distribution: {8: 1, 9: 7, 10: 15, 11: 24, 12: 17}
+    At refinement boundary: 64/64 (100.0%)
+
+  2 elements/cell: 1,819 cells
+    Level distribution: {8: 21, 9: 37, 10: 63, 11: 122, 12: 233, 13: 559, 14: 784}
+    At refinement boundary: 1000/1000 (100.0%)
+
+  3 elements/cell: 14,422 cells
+    Level distribution: {8: 14, 9: 84, 10: 194, 11: 492, 12: 1403, 13: 4381, 14: 7854}
+    At refinement boundary: 1000/1000 (100.0%)
+
+  4 elements/cell: 1,859 cells
+    Level distribution: {8: 77, 9: 35, 10: 63, 11: 139, 12: 513, 13: 574, 14: 458}
+    At refinement boundary: 1000/1000 (100.0%)
+
+  5 elements/cell: 776 cells
+    Level distribution: {8: 44, 9: 61, 10: 40, 11: 95, 12: 536}
+    At refinement boundary: 776/776 (100.0%)
+
+  8 elements/cell: 8 cells
+    Level distribution: {8: 8}
+    At refinement boundary: 8/8 (100.0%)
+
+  Total elements in non-standard cells: 58,348 (1.91% of mesh)
+
+================================================================================
+Test 4: Simulated Displacement Search Test
+================================================================================
+  Sample elements: 50,000
+  Perturbations per element: 10
+  Displacement scales (fraction of cell size): [0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
+  Reference cell size (level 14): [7.81253912e-05 7.98618421e-05 7.81249983e-05]
+
+  Scale=0.01 (displacement=7.870408e-07):
+    Total queries: 500,000
+    Found in primary cell: 499,962 (99.99%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 38 (0.01%)
+    Total searchable: 99.99%
+
+  Scale=0.05 (displacement=3.935204e-06):
+    Total queries: 500,000
+    Found in primary cell: 499,969 (99.99%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 31 (0.01%)
+    Total searchable: 99.99%
+
+  Scale=0.10 (displacement=7.870408e-06):
+    Total queries: 500,000
+    Found in primary cell: 499,968 (99.99%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 32 (0.01%)
+    Total searchable: 99.99%
+
+  Scale=0.20 (displacement=1.574082e-05):
+    Total queries: 500,000
+    Found in primary cell: 499,971 (99.99%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 29 (0.01%)
+    Total searchable: 99.99%
+
+  Scale=0.50 (displacement=3.935204e-05):
+    Total queries: 500,000
+    Found in primary cell: 302,913 (60.58%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 197,087 (39.42%)
+    Total searchable: 60.58%
+
+  Scale=1.00 (displacement=7.870408e-05):
+    Total queries: 500,000
+    Found in primary cell: 52,949 (10.59%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 447,051 (89.41%)
+    Total searchable: 10.59%
+
+  Scale=2.00 (displacement=1.574082e-04):
+    Total queries: 500,000
+    Found in primary cell: 8,873 (1.77%)
+    Found in neighbor cell: 0 (0.00%)
+    NOT found anywhere: 491,127 (98.23%)
+    Total searchable: 1.77%
+
+================================================================================
+Test 5: Uncovered Elements Analysis
+================================================================================
+  Uncovered elements: 1,826 (0.0599%)
+  Sample analyzed: 500
+    Share nodes with covered elements: 500 (100.0%)
+    Isolated: 0 (0.0%)
+
+  Why are they non-Kuhn? Analyzing edge structure...
+  Detailed analysis of 100 uncovered elements:
+    Degenerate (zero volume): 0
+    No axis-aligned edges: 100
+    Other: 0
+
+================================================================================
+Test 6: Cross-Cell Face-Sharing Element Pairs
+================================================================================
+  Building face-to-element map...
+    Processed 500,000/3,048,900...
+    Processed 1,000,000/3,048,900...
+    Processed 1,500,000/3,048,900...
+    Processed 2,000,000/3,048,900...
+    Processed 2,500,000/3,048,900...
+    Processed 3,000,000/3,048,900...
+  Face map built in 13.2s
+
+  Results:
+    Total interior faces: 5,917,485
+    Same cell: 3,026,070 (51.14%)
+    Different cell: 2,884,819 (48.75%)
+      Of which, different level: 0
+    One element uncovered: 6,586 (0.1113%)
+    Both elements uncovered: 10
+
+  >>> KEY INSIGHT <<<
+  2,884,819 interior faces connect elements in DIFFERENT cells.
+  When a particle crosses any of these faces, the NEW element is NOT in the current cell.
+  The L2 search must find it in a neighbor cell.
+  If the new element's CENTROID is not in an adjacent cell (at same level),
+  the neighbor search will fail.
+
+  Sample cross-cell face pairs:
+    Elements (2, 7): cells (338167, 338179), levels (8, 8), grids ((np.int32(-4), np.int32(1), np.int32(-1)), (np.int32(-4), np.int32(2), np.int32(-1)))
+    Elements (3, 422456): cells (338167, 338164), levels (8, 8), grids ((np.int32(-4), np.int32(1), np.int32(-1)), (np.int32(-4), np.int32(1), np.int32(-2)))
+    Elements (4, 422465): cells (338167, 338117), levels (8, 8), grids ((np.int32(-4), np.int32(1), np.int32(-1)), (np.int32(-5), np.int32(2), np.int32(-1)))
+    Elements (4, 6): cells (338167, 338179), levels (8, 8), grids ((np.int32(-4), np.int32(1), np.int32(-1)), (np.int32(-4), np.int32(2), np.int32(-1)))
+    Elements (5, 422464): cells (338167, 338101), levels (8, 8), grids ((np.int32(-4), np.int32(1), np.int32(-1)), (np.int32(-5), np.int32(1), np.int32(-1)))
+
+================================================================================
+DIAGNOSTICS COMPLETE
+================================================================================

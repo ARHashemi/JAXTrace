@@ -31,7 +31,8 @@ from jaxtrace.gpu.search.morton_global_search import (
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import MeshAlignedOctreeGPU
 from jaxtrace.gpu.search.mesh_aligned_point_location import (
     search_mesh_aligned_octree_single,
-    search_mesh_aligned_octree_multi_local
+    search_mesh_aligned_octree_multi_local,
+    search_mesh_aligned_octree_multi_local_where
 )
 from jaxtrace.gpu.search.mesh_aligned_morton_search import (
     MeshAlignedMortonGPU,
@@ -56,9 +57,12 @@ def _create_rk4_fully_fused_timedep_impl(
     mesh_aligned_morton: Optional[MeshAlignedMortonGPU] = None,
     mesh_aligned_octree_neighbors = None,
     mesh_aligned_octree_use_multi_local: bool = False,
+    mesh_aligned_octree_use_where: bool = False,
     kdtree_gpu = None,
     kdtree_k_nearest: int = 3,
-    kdtree_max_tests: int = 256
+    kdtree_max_tests: int = 256,
+    mesh_bbox_min: Optional[jax.Array] = None,
+    mesh_bbox_max: Optional[jax.Array] = None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -99,7 +103,7 @@ def _create_rk4_fully_fused_timedep_impl(
         Ignored if l2_search_method != 'incremental'.
     mesh_aligned_octree : Optional[MeshAlignedOctreeGPU], default=None
         GPU-resident mesh-aligned octree structure for L2 search.
-        If provided and config.L2_SEARCH_METHOD == 'mesh_aligned_octree',
+        If provided and L2_SEARCH_METHOD == 'mesh_aligned_octree' at creation time,
         uses mesh-aligned octree instead of Morton curve search.
         Only works with Kuhn tetrahedral meshes (axis-aligned tets).
         Provides ~100% searchability with ~5.9 elements per cell.
@@ -116,6 +120,16 @@ def _create_rk4_fully_fused_timedep_impl(
     connectivity = mesh_gpu_connectivity
     node_positions = mesh_gpu_node_positions
     element_neighbors = mesh_gpu_element_neighbors
+
+    # Capture L2 search method at creation time (NOT at JIT trace time).
+    # This avoids a race condition where config.L2_SEARCH_METHOD is temporarily
+    # set by the caller but restored before the first JIT call triggers tracing.
+    l2_search_method_config = config.L2_SEARCH_METHOD
+
+    # Capture RK4 sub-step recovery config at creation time.
+    use_bbox_clamp = config.RK4_SUBSTEP_BBOX_CLAMP and mesh_bbox_min is not None
+    use_last_valid_vel = config.RK4_SUBSTEP_LAST_VALID_VEL
+    use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
 
     # ============================================================================
     # Single-Particle Helper Functions (Time-Dependent)
@@ -248,22 +262,22 @@ def _create_rk4_fully_fused_timedep_impl(
         return jnp.where(found, current_elem, jnp.int32(-1))
 
     def search_l2_single(pos: jax.Array) -> jax.Array:
-        """L2: Global search (single particle) - method selected by config."""
+        """L2: Global search (single particle) - method selected at creation time."""
         # Check if mesh-aligned Morton should be used (HYBRID APPROACH - NEW)
         use_mesh_aligned_morton = (
-            config.L2_SEARCH_METHOD == 'mesh_aligned_morton' and
+            l2_search_method_config == 'mesh_aligned_morton' and
             mesh_aligned_morton is not None
         )
 
         # Check if direct mesh-aligned octree should be used
         use_mesh_aligned_octree = (
-            config.L2_SEARCH_METHOD == 'mesh_aligned_octree' and
+            l2_search_method_config == 'mesh_aligned_octree' and
             mesh_aligned_octree is not None
         )
 
         # Check if mesh-aligned octree with neighbors should be used (Option B - NEW)
         use_mesh_aligned_neighbors = (
-            config.L2_SEARCH_METHOD == 'mesh_aligned_neighbors' and
+            l2_search_method_config == 'mesh_aligned_neighbors' and
             mesh_aligned_octree_neighbors is not None
         )
 
@@ -294,7 +308,14 @@ def _create_rk4_fully_fused_timedep_impl(
             # MESH-ALIGNED OCTREE: Single-cell or multi-cell local search
             # Extracts octree structure from Kuhn tetrahedral mesh
             # Only works with axis-aligned Kuhn tets
-            if mesh_aligned_octree_use_multi_local:
+            if mesh_aligned_octree_use_multi_local and mesh_aligned_octree_use_where:
+                # MULTI-CELL LOCAL (3×3×3) with jnp.where: avoids lax.cond vmap artifacts
+                elem_id, _ = search_mesh_aligned_octree_multi_local_where(
+                    pos,
+                    mesh_aligned_octree,
+                    max_tests=jnp.int32(600)
+                )
+            elif mesh_aligned_octree_use_multi_local:
                 # MULTI-CELL LOCAL (3×3×3): Search 27-cell neighborhood
                 # For multi-cell vertex registration (~4 cells per element)
                 # Searches 27 cells to cover all vertex locations including adaptive refinement
@@ -532,24 +553,44 @@ def _create_rk4_fully_fused_timedep_impl(
             pos_k1 = pos + 0.5 * dt * vel_k1
 
             # Stage 2: k2 = f(t + dt/2, y + dt/2 * k1)
+            if use_bbox_clamp:
+                pos_k1 = jnp.clip(pos_k1, mesh_bbox_min, mesh_bbox_max)
             elem_k2 = search_l0_l1_l2_single(pos_k1, elem_k1)
             vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+            if use_last_valid_vel:
+                vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
             pos_k2 = pos + 0.5 * dt * vel_k2
 
             # Stage 3: k3 = f(t + dt/2, y + dt/2 * k2)
+            if use_bbox_clamp:
+                pos_k2 = jnp.clip(pos_k2, mesh_bbox_min, mesh_bbox_max)
             elem_k3 = search_l0_l1_l2_single(pos_k2, elem_k2)
             vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+            if use_last_valid_vel:
+                vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
             pos_k3 = pos + dt * vel_k3
 
             # Stage 4: k4 = f(t + dt, y + dt * k3)
+            if use_bbox_clamp:
+                pos_k3 = jnp.clip(pos_k3, mesh_bbox_min, mesh_bbox_max)
             elem_k4 = search_l0_l1_l2_single(pos_k3, elem_k3)
             vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+            if use_last_valid_vel:
+                vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
 
             # Final position: y_n+1 = y_n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
             pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
 
             # Final element search
             elem_final = search_l0_l1_l2_single(pos_final, elem_k4)
+
+            # Boundary projection: clamp to bbox and re-search if lost
+            if use_boundary_projection:
+                pos_clamped = jnp.clip(pos_final, mesh_bbox_min, mesh_bbox_max)
+                elem_clamped = search_l0_l1_l2_single(pos_clamped, elem_k4)
+                lost = elem_final < 0
+                pos_final = jnp.where(lost, pos_clamped, pos_final)
+                elem_final = jnp.where(lost, elem_clamped, elem_final)
 
             return pos_final, elem_final
 
@@ -598,22 +639,43 @@ def _create_rk4_fully_fused_timedep_impl(
             pos_k1 = pos + 0.5 * dt * vel_k1
 
             # Stage 2
+            if use_bbox_clamp:
+                pos_k1 = jnp.clip(pos_k1, mesh_bbox_min, mesh_bbox_max)
             elem_k2, lvl_k2 = search_l0_l1_l2_with_level(pos_k1, elem_k1)
             vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+            if use_last_valid_vel:
+                vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
             pos_k2 = pos + 0.5 * dt * vel_k2
 
             # Stage 3
+            if use_bbox_clamp:
+                pos_k2 = jnp.clip(pos_k2, mesh_bbox_min, mesh_bbox_max)
             elem_k3, lvl_k3 = search_l0_l1_l2_with_level(pos_k2, elem_k2)
             vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+            if use_last_valid_vel:
+                vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
             pos_k3 = pos + dt * vel_k3
 
             # Stage 4
+            if use_bbox_clamp:
+                pos_k3 = jnp.clip(pos_k3, mesh_bbox_min, mesh_bbox_max)
             elem_k4, lvl_k4 = search_l0_l1_l2_with_level(pos_k3, elem_k3)
             vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+            if use_last_valid_vel:
+                vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
 
             # Final
             pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
             elem_final, lvl_final = search_l0_l1_l2_with_level(pos_final, elem_k4)
+
+            # Boundary projection: clamp to bbox and re-search if lost
+            if use_boundary_projection:
+                pos_clamped = jnp.clip(pos_final, mesh_bbox_min, mesh_bbox_max)
+                elem_clamped, lvl_clamped = search_l0_l1_l2_with_level(pos_clamped, elem_k4)
+                lost = elem_final < 0
+                pos_final = jnp.where(lost, pos_clamped, pos_final)
+                elem_final = jnp.where(lost, elem_clamped, elem_final)
+                lvl_final = jnp.where(lost, lvl_clamped, lvl_final)
 
             # Pack hit levels for all 5 searches as a (5,) int8 array
             hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
@@ -651,9 +713,12 @@ def create_rk4_fully_fused_timedep(
     mesh_aligned_morton=None,
     mesh_aligned_octree_neighbors=None,
     mesh_aligned_octree_use_multi_local: bool = False,
+    mesh_aligned_octree_use_where: bool = False,
     kdtree_gpu=None,
     kdtree_k_nearest: int = 3,
-    kdtree_max_tests: int = 256
+    kdtree_max_tests: int = 256,
+    mesh_bbox_min=None,
+    mesh_bbox_max=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -666,7 +731,9 @@ def create_rk4_fully_fused_timedep(
         mesh_gpu_global_morton, n_hops, l2_search_radius,
         enable_l1_search, l2_search_method, l2_incremental_radii,
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
-        mesh_aligned_octree_use_multi_local, kdtree_gpu, kdtree_k_nearest, kdtree_max_tests
+        mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
+        kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
+        mesh_bbox_min, mesh_bbox_max,
     )
     return step_fn
 
@@ -686,9 +753,12 @@ def create_rk4_fully_fused_timedep_with_stats(
     mesh_aligned_morton=None,
     mesh_aligned_octree_neighbors=None,
     mesh_aligned_octree_use_multi_local: bool = False,
+    mesh_aligned_octree_use_where: bool = False,
     kdtree_gpu=None,
     kdtree_k_nearest: int = 3,
-    kdtree_max_tests: int = 256
+    kdtree_max_tests: int = 256,
+    mesh_bbox_min=None,
+    mesh_bbox_max=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -704,6 +774,8 @@ def create_rk4_fully_fused_timedep_with_stats(
         mesh_gpu_global_morton, n_hops, l2_search_radius,
         enable_l1_search, l2_search_method, l2_incremental_radii,
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
-        mesh_aligned_octree_use_multi_local, kdtree_gpu, kdtree_k_nearest, kdtree_max_tests
+        mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
+        kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
+        mesh_bbox_min, mesh_bbox_max,
     )
     return step_fn, step_fn_with_stats

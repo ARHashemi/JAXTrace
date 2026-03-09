@@ -1,0 +1,168 @@
+python3 benchmark_l2_search_methods_with-export.py
+✅ Enhanced VTK I/O available
+/home/areza/areza/welding/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
+  from .hdf5_io import H5Series
+✅ HDF5 I/O available
+================================================================================
+Comprehensive L2 Search Methods Benchmark
+Fair comparison of all L2 search strategies
+================================================================================
+JAX version: 0.8.2
+JAX devices: [CudaDevice(id=0)]
+================================================================================
+
+[1/10] Loading mesh...
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+  Loaded in 7.83s
+  Elements: 3,048,900, Nodes: 780,922, Timesteps: 2
+
+[2/10] Deduplicating...
+  Removed 209,749 duplicates
+
+[3/10] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Metadata ready
+
+[4/10] Building octree...
+  Built 24,550 leaves
+
+  Building mesh-aligned octree (single-cell)...
+    Extracted 517,069 cells in 147.09s
+    Elements per cell: 5.89
+    Cells per element: 1.00
+
+  Building mesh-aligned octree (multi-cell vertex registration)...
+    Extracted 665,820 cells in 328.75s
+    Elements per cell: 18.31
+    Cells per element: 4.00
+
+  Building mesh-aligned octree with neighbor table (Option B)...
+    Neighbor table built in 183.13s
+    Mean neighbors per cell: 22.9
+
+[5/10] Uploading to GPU...
+  Uploading mesh-aligned octree (single-cell)...
+  Uploading mesh-aligned octree (multi-cell)...
+  Uploading mesh-aligned octree with neighbors (single-cell)...
+
+  NOTE: Multi-cell octree doesn't use neighbor table
+    Multi-cell registration already covers ~4 cells per element
+    Neighbor table would search ~104 cells (excessive)
+  Building mesh-aligned Morton (hybrid)...
+    Elements per cell: mean=5.9, max=8
+  Uploaded to GPU
+
+[6/10] Generating particles (perturbed element centroids)...
+  Filtering elements: middle 40% of x-axis
+    X range: [-0.012000, 0.012000]
+    Valid elements: 3,047,777 / 3,048,900 (100.0%)
+  Generated 324,000 particles from perturbed centroids
+    Perturbation scale: 7.812493e-06 (10.0% of min element)
+    Mean perturbation: 1.247692e-05
+    Ground truth element IDs stored for RK4 tracking
+
+[7/10] Defining test configurations...
+================================================================================
+1. Mesh-Aligned Octree (direct)
+   Direct cell lookup (center cell only)
+   Expected work: ~5.9 elements/cell
+
+2. Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+   Multi-cell vertex registration (~4 cells per element)
+   Expected work: ~94 tests/particle (~4 cells × ~23.6 elem/cell)
+
+3. Mesh-Aligned Multi-Cell + 2×2×2 Local (Option A - NEW)
+   Multi-cell + 2×2×2 local neighborhood search (8 cells)
+   Expected work: ~146 tests/particle (8 cells × 18.31 elem/cell)
+
+
+[8/10] Running initial assignment for all configurations...
+================================================================================
+
+  Config: Mesh-Aligned Octree (direct)
+    Time: 294.640s
+    Assigned: 323,950/324,000 (99.98%)
+    Throughput: 1,100 p/s
+
+  Config: Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+    Time: 281.614s
+    Assigned: 323,950/324,000 (99.98%)
+    Throughput: 1,151 p/s
+
+  Config: Mesh-Aligned Multi-Cell + 2×2×2 Local (Option A - NEW)
+    Time: 281.307s
+    Assigned: 323,950/324,000 (99.98%)
+    Throughput: 1,152 p/s
+
+[9/10] Running RK4 tracking for all configurations...
+================================================================================
+Configuration: 100 steps, dt=0.0025, point-in-tet=inverse
+
+
+  Config: Mesh-Aligned Octree (direct)
+      Compiling...
+      Compilation time: 24.39s
+      Running 100 RK4 steps...
+      Waiting for exports...
+      Exported 2 files (mean time: 0.761s)
+    Time: 29.011s
+    Final active: 259,934/324,000 (80.23%)
+    Throughput: 1,116,799 p/s
+
+  Config: Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)
+      Compiling...
+      Compilation time: 21.11s
+      Running 100 RK4 steps...
+      Waiting for exports...
+      Exported 2 files (mean time: 0.779s)
+    Time: 29.016s
+    Final active: 259,934/324,000 (80.23%)
+    Throughput: 1,116,614 p/s
+
+  Config: Mesh-Aligned Multi-Cell + 2×2×2 Local (Option A - NEW)
+      Compiling...
+      Compilation time: 22.31s
+      Running 100 RK4 steps...
+      Waiting for exports...
+      Exported 2 files (mean time: 0.781s)
+    Time: 29.030s
+    Final active: 259,934/324,000 (80.23%)
+    Throughput: 1,116,074 p/s
+
+[10/10] Results Analysis
+================================================================================
+
+INITIAL ASSIGNMENT RESULTS
+================================================================================
+Configuration                             Success Rate      Throughput      Time
+--------------------------------------------------------------------------------
+Mesh-Aligned Octree (direct)                    99.98%          1,100 p/s  294.640s
+Mesh-Aligned Octree Multi-Cell (Phase 2 - NEW)        99.98%          1,151 p/s  281.614s
+Mesh-Aligned Multi-Cell + 2×2×2 Local (Option A - NEW)        99.98%          1,152 p/s  281.307s
+
+
+RK4 TRACKING RESULTS (100 steps)
+================================================================================
+Note: All methods start with GROUND TRUTH element IDs (fair comparison)
+Configuration                              Retention      Throughput   Speedup
+--------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/areza/areza/welding/benchmark_l2_search_methods_with-export.py", line 1217, in <module>
+    main()
+    ~~~~^^
+  File "/home/areza/areza/welding/benchmark_l2_search_methods_with-export.py", line 1120, in main
+    baseline_time = tracking_results[baseline_name]['time']
+                    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+KeyError: 'Fixed radius=10 (baseline)'

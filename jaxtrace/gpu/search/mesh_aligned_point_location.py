@@ -401,6 +401,152 @@ def search_mesh_aligned_octree_batch(
     return elem_ids, n_tests
 
 
+def search_mesh_aligned_octree_multi_local_where(
+    pos: jax.Array,
+    octree_gpu: MeshAlignedOctreeGPU,
+    max_tests: jnp.int32 = 600
+) -> Tuple[jnp.int32, jnp.int32]:
+    """
+    Find containing element using 3×3×3 local neighborhood search.
+
+    IDENTICAL to search_mesh_aligned_octree_multi_local but uses jnp.where
+    instead of lax.cond throughout. This avoids potential vmap compilation
+    artifacts where deeply nested lax.cond (lowered to SELECT) may produce
+    incorrect results in the full RK4 graph under jax.vmap.
+
+    Both branches are always evaluated (standard jnp.where semantics),
+    but guarded by masking so the results are correct.
+
+    Args:
+        pos: (3,) float32 - query position
+        octree_gpu: GPU octree structure (multi-cell vertex registration)
+        max_tests: Maximum elements to test across all cells (default 600)
+
+    Returns:
+        (elem_id, n_tests):
+            elem_id: Element ID (-1 if not found)
+            n_tests: Total number of point-in-tet tests
+    """
+
+    def try_level(level_idx, carry):
+        """Try searching 3×3×3 neighborhood at one refinement level."""
+        found_elem, total_tests = carry
+
+        # Level to try (14, 13, 12, 11, 10, 9, 8, 7)
+        level = 14 - level_idx
+
+        # CRITICAL: Use EXACT cell sizes from mesh for each level
+        cell_size = octree_gpu.level_cell_sizes[level]
+
+        # Compute base cell indices (floor division)
+        i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
+        j_base = jnp.floor(pos[1] / cell_size[1]).astype(jnp.int32)
+        k_base = jnp.floor(pos[2] / cell_size[2]).astype(jnp.int32)
+
+        # Search 3×3×3 = 27 cells
+        def try_cell(cell_offset, inner_carry):
+            """Try searching one cell in the 3×3×3 neighborhood."""
+            inner_found_elem, inner_tests = inner_carry
+            di, dj, dk = cell_offset[0], cell_offset[1], cell_offset[2]
+
+            # Compute cell indices
+            i = i_base + di
+            j = j_base + dj
+            k = k_base + dk
+
+            # Apply offset for negative coordinates
+            i_offset = jnp.clip(i + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            j_offset = jnp.clip(j + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            k_offset = jnp.clip(k + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+
+            # Encode to Morton code
+            morton_code = encode_morton_3d_jax(i_offset, j_offset, k_offset)
+
+            # Binary search for cell with BOTH morton and level
+            cell_idx = find_cell_by_morton_and_level(
+                morton_code,
+                jnp.uint8(level),
+                octree_gpu.cell_morton_codes,
+                octree_gpu.cell_levels
+            )
+
+            # Get elements in this cell (safe even if cell_idx < 0: offsets[0]=0)
+            safe_cell_idx = jnp.maximum(cell_idx, 0)
+            elem_start_idx = octree_gpu.cell_to_elements_offsets[safe_cell_idx]
+            elem_end_idx = octree_gpu.cell_to_elements_offsets[safe_cell_idx + 1]
+            n_elems_in_cell = elem_end_idx - elem_start_idx
+
+            # Only search if: not already found AND cell exists
+            should_search = jnp.logical_and(inner_found_elem < 0, cell_idx >= 0)
+            n_to_test = jnp.where(should_search, n_elems_in_cell, jnp.int32(0))
+
+            # Test each element
+            def test_element(elem_offset, test_carry):
+                test_found_elem, test_n_tests = test_carry
+
+                elem_idx_in_data = elem_start_idx + elem_offset
+                elem_id = octree_gpu.cell_to_elements_data[elem_idx_in_data]
+
+                # Point-in-tet test (uses config-based dispatcher)
+                is_inside = point_in_tet_dispatcher(
+                    pos,
+                    elem_id,
+                    octree_gpu.connectivity,
+                    octree_gpu.node_positions,
+                    config.POINT_IN_TET_METHOD
+                )
+
+                # Update: only accept if not already found
+                new_found = jnp.where(
+                    jnp.logical_and(test_found_elem < 0, is_inside),
+                    elem_id,
+                    test_found_elem
+                )
+                new_tests = test_n_tests + 1
+
+                return new_found, new_tests
+
+            # Scan over elements in cell
+            cell_found_elem, cell_tests = jax.lax.fori_loop(
+                0, n_to_test,
+                test_element,
+                (inner_found_elem, inner_tests)
+            )
+
+            return cell_found_elem, cell_tests
+
+        # Define 27 cell offsets for 3×3×3 neighborhood
+        cell_offsets = jnp.array([
+            [di, dj, dk]
+            for di in [-1, 0, 1]
+            for dj in [-1, 0, 1]
+            for dk in [-1, 0, 1]
+        ], dtype=jnp.int32)
+
+        # Scan over 27 cells
+        level_found_elem, level_tests = jax.lax.fori_loop(
+            0, 27,
+            lambda i, c: try_cell(cell_offsets[i], c),
+            (found_elem, total_tests)
+        )
+
+        # jnp.where instead of lax.cond: if already found, keep old state
+        out_elem = jnp.where(found_elem >= 0, found_elem, level_found_elem)
+        out_tests = jnp.where(found_elem >= 0, total_tests, level_tests)
+
+        return out_elem, out_tests
+
+    # Try refinement levels 14, 13, 12, 11, 10, 9, 8, 7 (8 levels total)
+    n_levels = 8
+    final_elem_id, final_n_tests = jax.lax.fori_loop(
+        0, n_levels,
+        try_level,
+        (jnp.int32(-1), jnp.int32(0))
+    )
+
+    return final_elem_id, final_n_tests
+
+
 def search_mesh_aligned_octree_multi_local_batch(
     positions: jax.Array,
     octree_gpu: MeshAlignedOctreeGPU,
@@ -535,5 +681,10 @@ search_mesh_aligned_octree_multi_local_jit = jax.jit(
 
 search_mesh_aligned_octree_multi_local_batch_jit = jax.jit(
     search_mesh_aligned_octree_multi_local_batch,
+    static_argnames=('max_tests',)
+)
+
+search_mesh_aligned_octree_multi_local_where_jit = jax.jit(
+    search_mesh_aligned_octree_multi_local_where,
     static_argnames=('max_tests',)
 )

@@ -1,0 +1,196 @@
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+DIAGNOSTIC: Root Cause Analysis of L2 Search Failures
+================================================================================
+
+[1/6] Loading mesh and building structures...
+
+Loading velocity sequence:
+  Pattern: featurelessAvtk_{timestep}.pvtu
+  Range: 158-159 (2 timesteps)
+  Field: 'Displacement'
+
+  Loading mesh topology from: featurelessAvtk_158.pvtu
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_158.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Nodes: 780,922
+    Elements: 3,048,900
+
+  Loading velocity fields:
+Loading mesh: data/FLA/post/0eule/featurelessAvtk_159.pvtu
+  Nodes: 780,922
+  Elements: 3,048,900
+  Loaded field 'Displacement': (780922, 3)
+    Loaded 2/2 timesteps
+    Memory: 17.9 MB
+  571,173 nodes, 3,048,900 elements
+
+  Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,048,900
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 146,347,200 bytes (139.6 MB)
+  Extracting octree (multi-cell vertex registration)...
+
+================================================================================
+Multi-Cell Vertex Registration
+================================================================================
+  Elements: 3,048,900
+  Tolerance: 1.00e-06
+  Expected: ~4 cells per element, ~24 elements per cell
+
+[1/5] Pass 1: Processing Kuhn elements...
+    Processed 500,000/3,048,900 elements...
+    Processed 1,000,000/3,048,900 elements...
+    Processed 1,500,000/3,048,900 elements...
+    Processed 2,000,000/3,048,900 elements...
+    Processed 2,500,000/3,048,900 elements...
+    Processed 3,000,000/3,048,900 elements...
+  Kuhn elements: 3,047,074
+  Non-Kuhn elements (deferred): 1,826
+
+[2/5] Pass 2: Processing 1,826 Non-Kuhn elements...
+  Building node-to-element index...
+  Non-Kuhn with Kuhn neighbor: 1,826
+  Non-Kuhn without Kuhn neighbor: 0
+  Total registrations: 12,195,600
+  Cells per element (mean): 4.00
+
+[3/5] Building cell→elements CSR structure...
+  ✅ CSR structure built!
+    Unique cells: 665,842
+    CSR data entries: 12,195,600
+
+[4/5] Building element→cells CSR structure...
+  ✅ Element→cells CSR structure built!
+    CSR data entries: 12,195,600
+
+[5/5] Computing statistics...
+
+  Statistics:
+    Cells per element: 4.00 (expected ~4.0)
+    Elements per cell: 18.32 (expected ~23-24)
+    Elements per cell (median): 16
+    Elements per cell (min, max): (1, 90)
+
+  Elements-per-cell distribution (top 10):
+     16 elements: 104,747 cells (15.73%)
+      8 elements: 103,797 cells (15.59%)
+     24 elements:  94,144 cells (14.14%)
+     12 elements:  88,498 cells (13.29%)
+      4 elements:  52,297 cells ( 7.85%)
+     32 elements:  43,572 cells ( 6.54%)
+     20 elements:  35,967 cells ( 5.40%)
+     36 elements:  27,558 cells ( 4.14%)
+     40 elements:  24,310 cells ( 3.65%)
+      6 elements:  14,066 cells ( 2.11%)
+
+================================================================================
+Multi-Cell Vertex Registration Complete!
+================================================================================
+
+  Uploading to GPU...
+  Classifying elements by refinement level...
+    500,000/3,048,900...
+    1,000,000/3,048,900...
+    1,500,000/3,048,900...
+    2,000,000/3,048,900...
+    2,500,000/3,048,900...
+    3,000,000/3,048,900...
+  Kuhn elements: 3,047,074
+  Non-Kuhn elements: 1,826
+  Level distribution:
+    Level  8:        839 elements (0.03%)
+    Level  9:      1,594 elements (0.05%)
+    Level 10:      4,289 elements (0.14%)
+    Level 11:     14,949 elements (0.49%)
+    Level 12:     43,888 elements (1.44%)
+    Level 13:    381,987 elements (12.53%)
+    Level 14:  2,599,528 elements (85.26%)
+
+================================================================================
+[2/6] Initial Assignment L2 Failure Analysis
+================================================================================
+  Generating EXACT same particle positions as benchmark...
+  Particles: 324,000
+  Bounds: X=[-0.022800, -0.016800]
+          Y=[-0.013800, 0.013800]
+          Z=[-0.009900, 0.000000]
+
+  Running L2 search on all 324,000 particles...
+    Batch 0-50,000: found so far 50,000/50,000 (100.00%)
+    Batch 100,000-150,000: found so far 150,000/150,000 (100.00%)
+    Batch 200,000-250,000: found so far 250,000/250,000 (100.00%)
+    Batch 300,000-324,000: found so far 324,000/324,000 (100.00%)
+
+  L2 search results:
+    Found: 324,000/324,000 (100.00%)
+    Missed: 0/324,000 (0.00%)
+    Time: 4.00s
+    Tests: mean=157.7, max=463
+
+  *** All particles found! L2 search works at seeding positions. ***
+  The 19% loss must occur DURING RK4 sub-steps, not at initial seeding.
+
+================================================================================
+[3/6] Spatial Analysis of Missed Particles
+================================================================================
+  No missed particles to analyze.
+
+================================================================================
+[4/6] Non-Kuhn Element Reachability Test
+================================================================================
+  Testing L2 search at centroids of 1,826 non-Kuhn elements...
+
+  Non-Kuhn centroid L2 search results (500 tested):
+    Found (exact match): 500
+    Found (different element): 0
+    Missed: 0 (0.00%)
+
+  Testing edge positions of non-Kuhn elements...
+    Edge tests: 1200
+    Edge misses: 0 (0.00%)
+
+================================================================================
+[5/6] Element Edge/Corner Position Test at Refinement Boundaries
+================================================================================
+  Finding refinement boundary elements...
+  Found 1000 boundary elements
+
+  Testing edge/vertex positions of boundary elements...
+
+  Edge/vertex/face position results:
+    Tests: 7,000
+    Misses: 0 (0.000%)
+
+  *** No misses at edge/vertex/face positions! ***
+
+================================================================================
+[6/6] SUMMARY AND CONCLUSIONS
+================================================================================
+
+  Section 2 - Initial Assignment L2:
+    Particles: 324,000
+    Found by L2: 324,000 (100.00%)
+    Missed by L2: 0 (0.00%)
+
+  Section 4 - Non-Kuhn Elements:
+    Centroid misses: 0/500
+    Edge misses: 0/1200
+
+  Section 5 - Edge/Vertex Positions at Boundaries:
+    Tests: 7,000
+    Misses: 0 (0.000%)
+
+  Conclusions:
+    ✅ L2 search finds ALL particles at seeding positions
+       → The 19% loss occurs during RK4 sub-steps, not initial assignment
+    ✅ L2 finds all tested edge/vertex/face positions at boundaries
+    ✅ Non-Kuhn element centroids all found by L2
+
+Done.
