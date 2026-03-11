@@ -10,6 +10,71 @@ Usage:
     config.USE_AABB_FILTER = True         # Enable AABB pre-filter
 """
 
+import jax
+
+# ============================================================================
+# Floating-Point Precision
+# ============================================================================
+
+USE_FLOAT64 = True
+"""
+Use float64 (double precision) for all floating-point computations.
+
+When True:
+    - Enables JAX 64-bit mode (jax_enable_x64)
+    - All mesh coordinates, velocities, particle positions use float64
+    - GPU memory roughly doubles (~465 MB → ~930 MB for FLA mesh)
+    - Better numerical accuracy for small domains and long tracking runs
+
+When False:
+    - JAX default float32 precision
+    - Lower GPU memory usage
+    - Sufficient for short runs or large-scale domains
+
+Default: True (recommended for welding simulations with mm-scale domains)
+"""
+
+if USE_FLOAT64:
+    jax.config.update("jax_enable_x64", True)
+
+# The numpy/jnp dtype to use throughout JAXTrace
+import numpy as np
+import jax.numpy as jnp
+
+FLOAT_DTYPE_NP = np.float64 if USE_FLOAT64 else np.float32
+FLOAT_DTYPE_JNP = jnp.float64 if USE_FLOAT64 else jnp.float32
+
+# Numerical tolerances — tighter with float64 for better accuracy
+POINT_IN_TET_TOLERANCE = 1e-10 if USE_FLOAT64 else 1e-6
+"""
+Tolerance for point-in-tetrahedron containment test.
+Barycentric coordinates must be >= -tolerance to be considered inside.
+
+float32: 1e-6 (safe for ~7 significant digits)
+float64: 1e-10 (safe for ~15 significant digits, tighter containment)
+
+Tighter tolerance reduces false-positive containment at element boundaries,
+improving velocity interpolation accuracy for particles near element faces.
+"""
+
+DEGENERATE_ELEMENT_THRESHOLD = 1e-14 if USE_FLOAT64 else 1e-12
+"""
+Threshold for detecting degenerate tetrahedra (near-zero volume).
+Elements with |det(M)| < threshold are treated as degenerate.
+
+float32: 1e-12
+float64: 1e-14 (tighter, detects fewer false degenerates)
+"""
+
+INTERPOLATION_DET_MIN = 1e-14 if USE_FLOAT64 else 1e-12
+"""
+Minimum determinant for Cramer's rule in barycentric velocity interpolation.
+If |det| < threshold, det is clamped to avoid division by zero.
+
+float32: 1e-12
+float64: 1e-14
+"""
+
 # ============================================================================
 # Point-in-Tetrahedron Method Selection
 # ============================================================================
@@ -224,16 +289,27 @@ Default: False
 RK4_BOUNDARY_PROJECTION = False
 """
 When the final-position search fails (particle exits mesh after RK4 integration),
-clamp pos_final to the mesh bounding box and re-search. If the re-search succeeds,
-keep the particle alive at the projected (clamped) position.
+clamp pos_final to the mesh bounding box (inset by RK4_BOUNDARY_PROJECTION_TOL) and
+re-search. If the re-search succeeds, keep the particle alive at the projected position.
 
 This recovers particles that overshoot the mesh boundary by a small amount during
-the full RK4 step. The clamped position lies on the mesh surface, which is
+the full RK4 step. The clamped position lies just inside the mesh surface, which is
 physically meaningful (the particle is projected back to the nearest boundary).
 
 Requires mesh_bbox_min and mesh_bbox_max to be passed to the RK4 constructor.
 
 Default: False
+"""
+
+RK4_BOUNDARY_PROJECTION_TOL = 1e-6
+"""
+Inward tolerance for boundary projection clamping.
+
+When clamping to the bounding box, the position is pushed inward by this tolerance
+to avoid landing exactly on the boundary face where point-in-tet tests may be
+ambiguous. Matches FEMUSS behaviour (MeshRange ± tol).
+
+Default: 1e-6
 """
 
 # ============================================================================

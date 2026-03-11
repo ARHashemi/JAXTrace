@@ -130,6 +130,7 @@ def _create_rk4_fully_fused_timedep_impl(
     use_bbox_clamp = config.RK4_SUBSTEP_BBOX_CLAMP and mesh_bbox_min is not None
     use_last_valid_vel = config.RK4_SUBSTEP_LAST_VALID_VEL
     use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
+    boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
 
     # ============================================================================
     # Single-Particle Helper Functions (Time-Dependent)
@@ -174,7 +175,7 @@ def _create_rk4_fully_fused_timedep_impl(
         start_volume = jnp.where(
             start_elem_valid,
             mesh_gpu_element_volumes[start_elem_id],
-            jnp.float32(1.0)  # Default to avoid division issues
+            config.FLOAT_DTYPE_JNP(1.0)  # Default to avoid division issues
         )
 
         # Get neighbor volumes
@@ -494,7 +495,7 @@ def _create_rk4_fully_fused_timedep_impl(
 
         # Solve 3x3 system for barycentric coords
         det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < 1e-12, 1e-12, det)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
         b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
         b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
@@ -504,7 +505,7 @@ def _create_rk4_fully_fused_timedep_impl(
         # Interpolate velocity
         vel = b0 * node_vels[0] + b1 * node_vels[1] + b2 * node_vels[2] + b3 * node_vels[3]
 
-        return jnp.where(valid, vel, jnp.zeros(3, dtype=jnp.float32))
+        return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ============================================================================
     # Fully-Fused RK4 Step (Time-Dependent)
@@ -586,7 +587,7 @@ def _create_rk4_fully_fused_timedep_impl(
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min, mesh_bbox_max)
+                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
                 elem_clamped = search_l0_l1_l2_single(pos_clamped, elem_k4)
                 lost = elem_final < 0
                 pos_final = jnp.where(lost, pos_clamped, pos_final)
@@ -670,7 +671,7 @@ def _create_rk4_fully_fused_timedep_impl(
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min, mesh_bbox_max)
+                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
                 elem_clamped, lvl_clamped = search_l0_l1_l2_with_level(pos_clamped, elem_k4)
                 lost = elem_final < 0
                 pos_final = jnp.where(lost, pos_clamped, pos_final)

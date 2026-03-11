@@ -17,6 +17,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from dataclasses import dataclass
+import jaxtrace.config as config
 from typing import Tuple, Optional
 
 
@@ -112,7 +113,7 @@ def detect_aa_tetrahedron_component_based(
             unique_axes = set(aligned_axes)
             # Must be X, Y, Z (all different) → trirectangular tetrahedron
             if len(unique_axes) == 3:
-                return vertex_idx, np.array(aligned_axes, dtype=np.int8), np.array(edge_lengths, dtype=np.float32)
+                return vertex_idx, np.array(aligned_axes, dtype=np.int8), np.array(edge_lengths, dtype=config.FLOAT_DTYPE_NP)
 
     # Not an axis-aligned tetrahedron
     return -1, None, None
@@ -192,8 +193,8 @@ def precompute_aa_metadata(
     # ========================================================================
 
     base_vertex_indices = np.full(n_elements, -1, dtype=np.int8)
-    base_vertices = np.zeros((n_elements, 3), dtype=np.float32)
-    inv_edge_lengths = np.zeros((n_elements, 3), dtype=np.float32)
+    base_vertices = np.zeros((n_elements, 3), dtype=config.FLOAT_DTYPE_NP)
+    inv_edge_lengths = np.zeros((n_elements, 3), dtype=config.FLOAT_DTYPE_NP)
     axis_indices = np.zeros((n_elements, 3), dtype=np.int8)
     is_axis_aligned = np.zeros(n_elements, dtype=bool)
 
@@ -293,7 +294,7 @@ def precompute_element_vertices(
         print(f"\nPrecomputing element vertices for memory optimization...")
         print(f"  Elements: {n_elements:,}")
 
-    element_vertices = np.zeros((n_elements, 4, 3), dtype=np.float32)
+    element_vertices = np.zeros((n_elements, 4, 3), dtype=config.FLOAT_DTYPE_NP)
 
     if verbose:
         progress_interval = max(n_elements // 20, 1)
@@ -376,7 +377,7 @@ def point_in_tet_pure_aa(
     is_degenerate = volume < 1e-18
 
     # Containment test
-    tol = -1e-6
+    tol = -config.POINT_IN_TET_TOLERANCE
     inside = (b0 >= tol) & (b1 >= tol) & (b2 >= tol) & (b3 >= tol) & (~is_degenerate)
 
     return inside
@@ -420,7 +421,7 @@ def point_in_tet_skala_memory_opt(
     V0_abs = jnp.abs(V0)
     edge_length_sq = jnp.sum(v1 * v1)
     expected_vol = edge_length_sq ** 1.5
-    is_degenerate = V0_abs < 1e-12 * jnp.maximum(expected_vol, 1e-15)
+    is_degenerate = V0_abs < config.DEGENERATE_ELEMENT_THRESHOLD * jnp.maximum(expected_vol, 1e-15)
     V0_safe = jnp.where(is_degenerate, 1.0, V0)
 
     # Barycentric coordinates
@@ -438,7 +439,7 @@ def point_in_tet_skala_memory_opt(
     lambda0 = 1.0 - lambda1 - lambda2 - lambda3
 
     # Containment test
-    tol = -1e-6
+    tol = -config.POINT_IN_TET_TOLERANCE
     inside = (lambda0 >= tol) & (lambda1 >= tol) & (lambda2 >= tol) & (lambda3 >= tol) & (~is_degenerate)
 
     return inside
@@ -534,7 +535,7 @@ def point_in_tet_pure_aa_arrays(
     is_degenerate = volume < 1e-18
 
     # Containment test
-    tol = -1e-6
+    tol = -config.POINT_IN_TET_TOLERANCE
     inside = (b0 >= tol) & (b1 >= tol) & (b2 >= tol) & (b3 >= tol) & (~is_degenerate)
 
     return inside

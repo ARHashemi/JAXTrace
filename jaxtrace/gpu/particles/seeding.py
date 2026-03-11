@@ -13,6 +13,7 @@ Provides comprehensive control over:
 import numpy as np
 from typing import Tuple, Optional, Union
 from dataclasses import dataclass
+import jaxtrace.config as config
 
 
 @dataclass
@@ -289,13 +290,13 @@ def seed_particles_uniform(
     
     xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
     
-    positions = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=1).astype(np.float32)
+    positions = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=1).astype(config.FLOAT_DTYPE_NP)
     
     # Apply jitter if requested
     if jitter > 0:
         perturbation = np.random.uniform(
             -jitter, jitter, size=positions.shape
-        ).astype(np.float32)
+        ).astype(config.FLOAT_DTYPE_NP)
         
         # Scale perturbation by grid spacing
         perturbation[:, 0] *= hx
@@ -350,7 +351,7 @@ def seed_particles_random(
         low=[bbox[0], bbox[2], bbox[4]],
         high=[bbox[1], bbox[3], bbox[5]],
         size=(n_particles, 3)
-    ).astype(np.float32)
+    ).astype(config.FLOAT_DTYPE_NP)
     
     return positions
 
@@ -422,7 +423,7 @@ def seed_particles_stratified(
         [-hx/2, -hy/2, -hz/2],
         [hx/2, hy/2, hz/2],
         size=positions.shape
-    ).astype(np.float32)
+    ).astype(config.FLOAT_DTYPE_NP)
     
     positions += perturbation
     

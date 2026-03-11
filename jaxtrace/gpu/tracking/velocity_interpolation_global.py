@@ -22,6 +22,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from typing import Callable
+import jaxtrace.config as config
 
 from jaxtrace.gpu.particles import ParticleData
 from jaxtrace.gpu.batching.block_grouping import group_particles_by_block
@@ -64,7 +65,7 @@ def create_global_interpolator_phase1(
         Returns: velocities array, shape (n_particles, 3)
     """
     # Upload velocity field to GPU once (not per-block!)
-    velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+    velocity_field_gpu = jax.device_put(velocity_field.astype(config.FLOAT_DTYPE_NP))
 
     def interpolator(pdata: ParticleData, t: float) -> np.ndarray:
         """
@@ -84,7 +85,7 @@ def create_global_interpolator_phase1(
         99% of the baseline bottleneck (4.9 GB → 0.005 GB per step).
         """
         n = len(pdata.positions)
-        velocities = np.zeros((n, 3), dtype=np.float32)
+        velocities = np.zeros((n, 3), dtype=config.FLOAT_DTYPE_NP)
 
         # Group particles by block
         grouping = group_particles_by_block(
@@ -156,7 +157,7 @@ def create_global_interpolator_phase2(
         Returns: velocities array, shape (n_particles, 3)
     """
     # Upload velocity field to GPU once
-    velocity_field_gpu = jax.device_put(velocity_field.astype(np.float32))
+    velocity_field_gpu = jax.device_put(velocity_field.astype(config.FLOAT_DTYPE_NP))
 
     # Define single-particle interpolation function
     @jax.jit

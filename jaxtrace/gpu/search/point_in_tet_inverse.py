@@ -13,6 +13,7 @@ Memory cost: 60 bytes per element (12 floats for M_inv + 3 floats for p0)
 import numpy as np
 import jax
 import jax.numpy as jnp
+import jaxtrace.config as config
 
 
 def precompute_inverse_matrices(
@@ -57,8 +58,8 @@ def precompute_inverse_matrices(
     - GPU memory cost: 60 bytes per element = 210 MB for 3.5M elements
     """
     n_elements = connectivity.shape[0]
-    M_inv_array = np.zeros((n_elements, 3, 3), dtype=np.float32)
-    p0_array = np.zeros((n_elements, 3), dtype=np.float32)
+    M_inv_array = np.zeros((n_elements, 3, 3), dtype=config.FLOAT_DTYPE_NP)
+    p0_array = np.zeros((n_elements, 3), dtype=config.FLOAT_DTYPE_NP)
 
     n_degenerate = 0
     det_min = float('inf')
@@ -88,15 +89,15 @@ def precompute_inverse_matrices(
         if abs(det) < 1e-15:
             # Degenerate tetrahedron (zero volume, coplanar vertices)
             # Assign zero inverse → point-in-tet will always return False
-            M_inv_array[elem_id] = np.zeros((3, 3), dtype=np.float32)
+            M_inv_array[elem_id] = np.zeros((3, 3), dtype=config.FLOAT_DTYPE_NP)
             n_degenerate += 1
         else:
             # Invert matrix
-            M_inv = np.linalg.inv(M).astype(np.float32)
+            M_inv = np.linalg.inv(M).astype(config.FLOAT_DTYPE_NP)
             M_inv_array[elem_id] = M_inv
 
         # Store first vertex
-        p0_array[elem_id] = p0.astype(np.float32)
+        p0_array[elem_id] = p0.astype(config.FLOAT_DTYPE_NP)
 
     # Report statistics
     print(f"\nPrecomputed inverse matrices:")
@@ -115,7 +116,7 @@ def point_in_tet_inverse(
     elem_id: jax.Array,
     M_inv_array: jax.Array,
     p0_array: jax.Array,
-    tolerance: float = 1e-6
+    tolerance: float = config.POINT_IN_TET_TOLERANCE
 ) -> jax.Array:
     """
     Point-in-tet test using precomputed inverse transformation matrix.
@@ -203,7 +204,7 @@ def point_in_tet_inverse_batch(
     elem_ids: jax.Array,
     M_inv_array: jax.Array,
     p0_array: jax.Array,
-    tolerance: float = 1e-6
+    tolerance: float = config.POINT_IN_TET_TOLERANCE
 ) -> jax.Array:
     """
     Vectorized point-in-tet test for batch of positions and elements.
@@ -236,7 +237,7 @@ def point_in_tet_inverse_batch(
 
 
 # Integration with existing point-in-tet interface
-def create_inverse_point_in_tet_fn(M_inv_array_gpu, p0_array_gpu, tolerance=1e-6):
+def create_inverse_point_in_tet_fn(M_inv_array_gpu, p0_array_gpu, tolerance=config.POINT_IN_TET_TOLERANCE):
     """
     Create a point-in-tet function with precomputed data baked in.
 

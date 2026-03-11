@@ -21,6 +21,7 @@ from jax import lax
 from dataclasses import dataclass
 from typing import Tuple
 import numpy as np
+import jaxtrace.config as config
 
 
 # ============================================================================
@@ -406,12 +407,12 @@ def upload_mesh_aligned_octree_to_gpu(
 
     # Upload mesh data
     connectivity_gpu = jnp.array(connectivity, dtype=jnp.int32)
-    node_positions_gpu = jnp.array(node_positions, dtype=jnp.float32)
+    node_positions_gpu = jnp.array(node_positions, dtype=config.FLOAT_DTYPE_JNP)
 
     # Upload cell structure
     cell_morton_codes_gpu = jnp.array(octree_cells.cell_morton_codes, dtype=jnp.uint64)
     cell_levels_gpu = jnp.array(octree_cells.cell_levels, dtype=jnp.uint8)
-    cell_sizes_gpu = jnp.array(octree_cells.cell_sizes, dtype=jnp.float32)
+    cell_sizes_gpu = jnp.array(octree_cells.cell_sizes, dtype=config.FLOAT_DTYPE_JNP)
     cell_grid_indices_gpu = jnp.array(octree_cells.cell_grid_indices, dtype=jnp.int32)
 
     # Upload CSR structure
@@ -423,8 +424,8 @@ def upload_mesh_aligned_octree_to_gpu(
     )
 
     # Compute bounding box
-    bbox_min = node_positions.min(axis=0).astype(np.float32)
-    bbox_max = node_positions.max(axis=0).astype(np.float32)
+    bbox_min = node_positions.min(axis=0).astype(config.FLOAT_DTYPE_NP)
+    bbox_max = node_positions.max(axis=0).astype(config.FLOAT_DTYPE_NP)
     bbox_min_gpu = jnp.array(bbox_min)
     bbox_max_gpu = jnp.array(bbox_max)
 
@@ -438,7 +439,7 @@ def upload_mesh_aligned_octree_to_gpu(
     # This ensures grid index computation matches between assignment and query.
     unique_levels = np.unique(octree_cells.cell_levels)
     max_level = int(np.max(unique_levels))
-    level_cell_sizes_cpu = np.zeros((max_level + 1, 3), dtype=np.float32)
+    level_cell_sizes_cpu = np.zeros((max_level + 1, 3), dtype=config.FLOAT_DTYPE_NP)
 
     for level in unique_levels:
         level_mask = octree_cells.cell_levels == level
@@ -447,12 +448,12 @@ def upload_mesh_aligned_octree_to_gpu(
         # Using first instead of mean avoids floating point accumulation
         level_cell_sizes_cpu[level] = level_sizes[0]
 
-    level_cell_sizes_gpu = jnp.array(level_cell_sizes_cpu, dtype=jnp.float32)
+    level_cell_sizes_gpu = jnp.array(level_cell_sizes_cpu, dtype=config.FLOAT_DTYPE_JNP)
 
     # Statistics
     n_cells = jnp.int32(octree_cells.n_cells)
     n_elements = jnp.int32(octree_cells.n_elements)
-    mean_elements_per_cell = jnp.float32(octree_cells.elements_per_cell_mean)
+    mean_elements_per_cell = config.FLOAT_DTYPE_JNP(octree_cells.elements_per_cell_mean)
 
     # Create GPU structure
     octree_gpu = MeshAlignedOctreeGPU(

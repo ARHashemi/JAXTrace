@@ -15,6 +15,7 @@ References:
 
 import jax
 import jax.numpy as jnp
+import jaxtrace.config as config
 
 
 # ============================================================================
@@ -75,7 +76,7 @@ def point_in_tet_current(
     edge_length_sq = jnp.sum(v1 * v1)  # Typical edge length squared
     expected_det = edge_length_sq ** 1.5  # det scales as L³
     # Use relative threshold: det < ε * L³ where ε = 1e-12
-    is_degenerate = det_abs < 1e-12 * jnp.maximum(expected_det, 1e-15)
+    is_degenerate = det_abs < config.DEGENERATE_ELEMENT_THRESHOLD * jnp.maximum(expected_det, 1e-15)
 
     # Compute barycentric coordinates
     det_inv = jnp.where(is_degenerate, 1.0, 1.0 / det)
@@ -100,7 +101,7 @@ def point_in_tet_current(
 
     # Check if all barycentric coordinates are non-negative
     # Use small tolerance for numerical stability at boundaries
-    tol = -1e-6
+    tol = -config.POINT_IN_TET_TOLERANCE
     inside = (b0 >= tol) & (b1 >= tol) & (b2 >= tol) & (b3 >= tol) & (~is_degenerate)
 
     return inside
@@ -168,7 +169,7 @@ def point_in_tet_skala(
     V0_abs = jnp.abs(V0)
     edge_length_sq = jnp.sum(v1 * v1)
     expected_vol = edge_length_sq ** 1.5  # Volume scales as L³
-    is_degenerate = V0_abs < 1e-12 * jnp.maximum(expected_vol, 1e-15)
+    is_degenerate = V0_abs < config.DEGENERATE_ELEMENT_THRESHOLD * jnp.maximum(expected_vol, 1e-15)
     V0_safe = jnp.where(is_degenerate, 1.0, V0)
 
     # Compute barycentric coordinates by substituting query point
@@ -190,7 +191,7 @@ def point_in_tet_skala(
     lambda0 = 1.0 - lambda1 - lambda2 - lambda3
 
     # Check if all barycentric coordinates are non-negative
-    tol = -1e-6
+    tol = -config.POINT_IN_TET_TOLERANCE
     inside = (lambda0 >= tol) & (lambda1 >= tol) & (lambda2 >= tol) & (lambda3 >= tol) & (~is_degenerate)
 
     return inside
@@ -282,7 +283,7 @@ def point_in_tet_axis_aligned(
         b0 = 1.0 - b1 - b2 - b3
 
         # Check bounds
-        tol = -1e-6
+        tol = -config.POINT_IN_TET_TOLERANCE
         return (b0 >= tol) & (b1 >= tol) & (b2 >= tol) & (b3 >= tol)
 
     # Slow path: Fall back to Skala method

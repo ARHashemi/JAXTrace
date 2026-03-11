@@ -10,6 +10,7 @@ import numpy as np
 from pathlib import Path
 from typing import Tuple, List
 from jaxtrace.gpu.mesh_loader import load_mesh_from_pvtu
+import jaxtrace.config as config
 
 
 def load_velocity_sequence_from_pvtu(
@@ -87,7 +88,7 @@ def load_velocity_sequence_from_pvtu(
         print(f"    Elements: {n_elements:,}")
 
     # Allocate velocity sequence array
-    velocity_sequence = np.zeros((n_timesteps, n_nodes, 3), dtype=np.float32)
+    velocity_sequence = np.zeros((n_timesteps, n_nodes, 3), dtype=config.FLOAT_DTYPE_NP)
     velocity_sequence[0] = first_velocity
 
     # Load remaining velocity fields

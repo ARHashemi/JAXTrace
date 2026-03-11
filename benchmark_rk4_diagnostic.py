@@ -29,11 +29,13 @@ import queue
 import threading
 import csv
 import numpy as np
-import jax
-import jax.numpy as jnp
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+import jaxtrace.config as config  # Must be imported before JAX array creation (sets jax_enable_x64)
+import jax
+import jax.numpy as jnp
 
 from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
 from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes
@@ -57,7 +59,6 @@ from jaxtrace.gpu.search.mesh_aligned_point_location import (
 from jaxtrace.gpu.search.point_in_tet_methods import (
     point_in_tet_gpu as point_in_tet_dispatcher,
 )
-import jaxtrace.config as config
 
 # Import VTK for loading previous results
 try:
@@ -179,7 +180,7 @@ def load_vtu(filepath):
     reader.Update()
     output = reader.GetOutput()
 
-    pts = vtk_to_numpy(output.GetPoints().GetData()).astype(np.float32)
+    pts = vtk_to_numpy(output.GetPoints().GetData()).astype(config.FLOAT_DTYPE_NP)
 
     pd = output.GetPointData()
     pid_arr = pd.GetArray('ParticleID')
@@ -371,7 +372,7 @@ def create_rk4_diagnostic(
         start_volume = jnp.where(
             start_elem_valid,
             mesh_gpu_element_volumes[start_elem_id],
-            jnp.float32(1.0)
+            config.FLOAT_DTYPE_JNP(1.0)
         )
         neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
         valid_neighbor_mask = neighbors_of_start >= 0
@@ -472,7 +473,7 @@ def create_rk4_diagnostic(
         dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
 
         det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < 1e-12, 1e-12, det)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
         b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
         b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
@@ -480,7 +481,7 @@ def create_rk4_diagnostic(
         b0 = 1.0 - b1 - b2 - b3
 
         vel = b0*node_vels[0] + b1*node_vels[1] + b2*node_vels[2] + b3*node_vels[3]
-        return jnp.where(valid, vel, jnp.zeros(3, dtype=jnp.float32))
+        return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ---- RK4 with sub-step stats ----
     @jax.jit
@@ -1087,8 +1088,8 @@ def main():
     print(f"  Removed {n_dup:,} duplicates -> {n_nodes:,} nodes")
 
     # Compute mesh bounding box for sub-step clamping
-    mesh_bbox_min_cpu = node_positions.min(axis=0).astype(np.float32)
-    mesh_bbox_max_cpu = node_positions.max(axis=0).astype(np.float32)
+    mesh_bbox_min_cpu = node_positions.min(axis=0).astype(config.FLOAT_DTYPE_NP)
+    mesh_bbox_max_cpu = node_positions.max(axis=0).astype(config.FLOAT_DTYPE_NP)
     print(f"  Mesh bbox: [{mesh_bbox_min_cpu}] → [{mesh_bbox_max_cpu}]")
 
     # ==================================================================
@@ -1153,7 +1154,7 @@ def main():
     element_vertices_gpu = jax.device_put(element_vertices)
     M_inv_gpu = jax.device_put(M_inv_array)
     p0_gpu = jax.device_put(p0_array)
-    element_volumes_gpu = jax.device_put(element_volumes.astype(np.float32))
+    element_volumes_gpu = jax.device_put(element_volumes.astype(config.FLOAT_DTYPE_NP))
 
     set_corrected_metadata(aa_metadata_gpu, element_vertices_gpu)
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
@@ -1192,8 +1193,8 @@ def main():
         print(f"\n[4/7] Generating particles...")
         nx, ny, nz = PARTICLE_GRID_RESOLUTION
 
-        par_bounds_min = np.zeros(3, dtype=np.float32)
-        par_bounds_max = np.zeros(3, dtype=np.float32)
+        par_bounds_min = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+        par_bounds_max = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
         for i, axis in enumerate(['x', 'y', 'z']):
             mn, mx = PARTICLE_BOUNDS_FRACTION[axis]
             par_bounds_min[i] = domain_min[i] + mn * domain_size[i]
@@ -1223,8 +1224,8 @@ def main():
     if POSITION_FILTER['enabled']:
         print(f"\n  Applying positional filter (mode='{POSITION_FILTER['mode']}')...")
         filter_mode = POSITION_FILTER.get('mode', 'fraction')
-        fmin = np.full(3, -np.inf, dtype=np.float32)
-        fmax = np.full(3,  np.inf, dtype=np.float32)
+        fmin = np.full(3, -np.inf, dtype=config.FLOAT_DTYPE_NP)
+        fmax = np.full(3,  np.inf, dtype=config.FLOAT_DTYPE_NP)
 
         for i, axis in enumerate(['x', 'y', 'z']):
             bounds = POSITION_FILTER.get(axis)
@@ -1320,7 +1321,7 @@ def main():
     exporter.start()
 
     # Export initial state
-    pos_cpu = np.array(positions_gpu, dtype=np.float32)
+    pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
     eid_cpu = np.array(element_ids_initial, dtype=np.int32)
     exporter.enqueue_export(0, pos_cpu, eid_cpu, particle_ids)
     print(f"  Exported initial state (step 0): {n_assigned:,} active")
@@ -1422,7 +1423,7 @@ def main():
         sa_found, sa_missed = 0, 0
         if VERIFY_LOST_WITH_STANDALONE_L2 and n_newly_lost > 0:
             # Get final positions of newly-lost particles
-            pos_cpu_now = np.array(positions_gpu, dtype=np.float32)
+            pos_cpu_now = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             newly_lost_positions = pos_cpu_now[newly_lost_mask]
             newly_lost_ids = particle_ids[newly_lost_mask] if particle_ids is not None else None
 
@@ -1439,7 +1440,7 @@ def main():
         bf_found_step, bf_not_found_step = 0, 0
         if BRUTEFORCE_MAX_PER_STEP > 0 and n_newly_lost > 0:
             if pos_cpu_now is None:
-                pos_cpu_now = np.array(positions_gpu, dtype=np.float32)
+                pos_cpu_now = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             newly_lost_pos = pos_cpu_now[newly_lost_mask]
             n_bf = min(BRUTEFORCE_MAX_PER_STEP, len(newly_lost_pos))
             tolerance_bf = 1e-6
@@ -1521,7 +1522,7 @@ def main():
 
         # Export
         if step % EXPORT_FREQUENCY == 0 or step == N_STEPS or new_lost > 0:
-            pos_cpu = np.array(positions_gpu, dtype=np.float32)
+            pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             eid_cpu = np.array(element_ids_gpu, dtype=np.int32)
             exporter.enqueue_export(step, pos_cpu, eid_cpu, particle_ids)
 
@@ -1567,7 +1568,7 @@ def main():
         print(f"\n  Final standalone L2 on all {n_lost_final:,} lost particles...")
         eid_final_cpu = np.array(element_ids_gpu, dtype=np.int32)
         lost_mask = eid_final_cpu < 0
-        pos_final_cpu = np.array(positions_gpu, dtype=np.float32)
+        pos_final_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
         lost_positions = pos_final_cpu[lost_mask]
         lost_positions_gpu = jax.device_put(lost_positions)
 

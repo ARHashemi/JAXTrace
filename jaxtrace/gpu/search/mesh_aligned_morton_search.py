@@ -28,6 +28,7 @@ from jax import lax
 from dataclasses import dataclass
 from typing import Tuple
 import numpy as np
+import jaxtrace.config as config
 
 # Import point-in-tet methods and configuration
 from jaxtrace.gpu.search.point_in_tet_methods import point_in_tet_gpu as point_in_tet_dispatcher
@@ -95,17 +96,17 @@ def upload_mesh_aligned_morton_to_gpu(
 
     mesh_gpu = MeshAlignedMortonGPU(
         connectivity=jnp.array(connectivity, dtype=jnp.int32),
-        node_positions=jnp.array(node_positions, dtype=jnp.float32),
+        node_positions=jnp.array(node_positions, dtype=config.FLOAT_DTYPE_JNP),
         cell_morton_codes=jnp.array(structure.cell_morton_codes, dtype=jnp.uint64),
         cell_levels=jnp.array(structure.cell_levels, dtype=jnp.uint8),
         cell_grid_indices=jnp.array(structure.cell_grid_indices, dtype=jnp.int32),
-        cell_sizes=jnp.array(structure.cell_sizes, dtype=jnp.float32),
+        cell_sizes=jnp.array(structure.cell_sizes, dtype=config.FLOAT_DTYPE_JNP),
         cell_to_elements_offsets=jnp.array(structure.cell_to_elements_offsets, dtype=jnp.int32),
         cell_to_elements_data=jnp.array(structure.cell_to_elements_data, dtype=jnp.int32),
         morton_min=jnp.uint64(structure.morton_min),
         morton_max=jnp.uint64(structure.morton_max),
-        bbox_min=jnp.array(structure.bbox_min, dtype=jnp.float32),
-        bbox_max=jnp.array(structure.bbox_max, dtype=jnp.float32),
+        bbox_min=jnp.array(structure.bbox_min, dtype=config.FLOAT_DTYPE_JNP),
+        bbox_max=jnp.array(structure.bbox_max, dtype=config.FLOAT_DTYPE_JNP),
         n_cells=jnp.int32(structure.n_cells),
         max_depth=jnp.int32(structure.max_depth),
     )

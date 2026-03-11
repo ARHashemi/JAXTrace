@@ -24,6 +24,8 @@ import jax.numpy as jnp
 from dataclasses import dataclass
 from typing import Optional
 
+import jaxtrace.config as config
+
 
 @dataclass
 class MeshDataGPU:
@@ -123,7 +125,7 @@ def upload_mesh_to_gpu(
     """
     # Ensure correct dtypes
     connectivity = np.asarray(connectivity, dtype=np.int32)
-    node_positions = np.asarray(node_positions, dtype=np.float32)
+    node_positions = np.asarray(node_positions, dtype=config.FLOAT_DTYPE_NP)
 
     # Validate shapes
     if connectivity.ndim != 2 or connectivity.shape[1] != 4:

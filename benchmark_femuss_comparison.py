@@ -26,11 +26,13 @@ import csv
 import queue
 import threading
 import numpy as np
-import jax
-import jax.numpy as jnp
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+import jaxtrace.config as config  # Must be imported before JAX array creation (sets jax_enable_x64)
+import jax
+import jax.numpy as jnp
 
 from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
 from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes
@@ -54,7 +56,6 @@ from jaxtrace.gpu.search.mesh_aligned_point_location import (
 from jaxtrace.gpu.search.point_in_tet_methods import (
     point_in_tet_gpu as point_in_tet_dispatcher,
 )
-import jaxtrace.config as config
 
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
@@ -296,6 +297,7 @@ def create_rk4_comparison(
     use_bbox_clamp=False,
     use_last_valid_vel=False,
     use_boundary_projection=False,
+    boundary_projection_tol=1e-6,
 ):
     """Create RK4 step function (same inline pattern as diagnostic)."""
 
@@ -328,7 +330,7 @@ def create_rk4_comparison(
         start_volume = jnp.where(
             start_elem_valid,
             mesh_gpu_element_volumes[start_elem_id],
-            jnp.float32(1.0)
+            config.FLOAT_DTYPE_JNP(1.0)
         )
         neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
         valid_neighbor_mask = neighbors_of_start >= 0
@@ -413,7 +415,7 @@ def create_rk4_comparison(
         dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
 
         det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < 1e-12, 1e-12, det)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
         b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
         b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
@@ -421,7 +423,7 @@ def create_rk4_comparison(
         b0 = 1.0 - b1 - b2 - b3
 
         vel = b0*node_vels[0] + b1*node_vels[1] + b2*node_vels[2] + b3*node_vels[3]
-        return jnp.where(valid, vel, jnp.zeros(3, dtype=jnp.float32))
+        return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ---- RK4 step ----
     @jax.jit
@@ -467,7 +469,7 @@ def create_rk4_comparison(
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min, mesh_bbox_max)
+                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
                 elem_clamped = search_l0_l1_l2(pos_clamped, elem_k4)
                 lost = elem_final < 0
                 pos_final = jnp.where(lost, pos_clamped, pos_final)
@@ -631,7 +633,8 @@ def main():
     print(f"  L2 method:            {L2_METHOD}")
     print(f"  Bbox clamp:           {'ON' if RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
     print(f"  Last-valid vel:       {'ON' if RK4_SUBSTEP_LAST_VALID_VEL else 'OFF'}")
-    print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'}")
+    print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
+    print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
     print("=" * 80)
 
     # ==================================================================
@@ -655,8 +658,8 @@ def main():
     print(f"  Removed {n_dup:,} duplicates -> {node_positions.shape[0]:,} nodes")
 
     # Compute mesh bounding box for sub-step clamping
-    mesh_bbox_min_cpu = node_positions.min(axis=0).astype(np.float32)
-    mesh_bbox_max_cpu = node_positions.max(axis=0).astype(np.float32)
+    mesh_bbox_min_cpu = node_positions.min(axis=0).astype(config.FLOAT_DTYPE_NP)
+    mesh_bbox_max_cpu = node_positions.max(axis=0).astype(config.FLOAT_DTYPE_NP)
     print(f"  Mesh bbox: [{mesh_bbox_min_cpu}] → [{mesh_bbox_max_cpu}]")
 
     # ==================================================================
@@ -718,7 +721,7 @@ def main():
     element_vertices_gpu = jax.device_put(element_vertices)
     M_inv_gpu = jax.device_put(M_inv_array)
     p0_gpu = jax.device_put(p0_array)
-    element_volumes_gpu = jax.device_put(element_volumes.astype(np.float32))
+    element_volumes_gpu = jax.device_put(element_volumes.astype(config.FLOAT_DTYPE_NP))
 
     set_corrected_metadata(aa_metadata_gpu, element_vertices_gpu)
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
@@ -760,7 +763,7 @@ def main():
     print(f"\n  Active at start: {n_active_start:,} / {femuss_start['n_particles']:,}")
 
     # Use FEMUSS current positions (initial + displacement) as JAXTrace starting positions
-    particle_positions = femuss_start['current_positions'][active_indices].astype(np.float32)
+    particle_positions = femuss_start['current_positions'][active_indices].astype(config.FLOAT_DTYPE_NP)
 
     # Particle IDs = FEMUSS array indices (for matching at comparison)
     particle_ids = active_indices.astype(np.int32)
@@ -807,6 +810,7 @@ def main():
         use_bbox_clamp=RK4_SUBSTEP_BBOX_CLAMP,
         use_last_valid_vel=RK4_SUBSTEP_LAST_VALID_VEL,
         use_boundary_projection=RK4_BOUNDARY_PROJECTION,
+        boundary_projection_tol=config.RK4_BOUNDARY_PROJECTION_TOL,
     )
 
     # Warmup
@@ -836,7 +840,7 @@ def main():
     element_ids_gpu = element_ids_initial
 
     # Export initial state
-    pos_cpu = np.array(positions_gpu, dtype=np.float32)
+    pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
     eid_cpu = np.array(element_ids_initial, dtype=np.int32)
     exporter.enqueue_export(0, pos_cpu, eid_cpu, particle_ids)
     print(f"  Exported initial state (step 0)")
@@ -867,7 +871,7 @@ def main():
 
         # Export VTU
         if step % EXPORT_FREQUENCY == 0 or step == N_STEPS or new_lost > 0:
-            pos_cpu = np.array(positions_gpu, dtype=np.float32)
+            pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             eid_cpu = np.array(element_ids_gpu, dtype=np.int32)
             exporter.enqueue_export(step, pos_cpu, eid_cpu, particle_ids)
 
@@ -892,7 +896,7 @@ def main():
     print(f"  Output: {output_subdir}")
 
     # Compare with FEMUSS end state
-    jt_positions_final = np.array(positions_gpu, dtype=np.float32)
+    jt_positions_final = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
     jt_elem_ids_final = np.array(element_ids_gpu, dtype=np.int32)
 
     comparison = compare_with_femuss(

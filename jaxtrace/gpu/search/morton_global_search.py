@@ -18,6 +18,7 @@ from jax import lax
 from dataclasses import dataclass
 from typing import Tuple
 import numpy as np
+import jaxtrace.config as config
 
 # Import point-in-tet methods and configuration
 from jaxtrace.gpu.search.point_in_tet_methods import point_in_tet_gpu as point_in_tet_dispatcher
@@ -361,10 +362,10 @@ def position_to_leaf_id_linear(
 
     # Normalize to [0, 1] along Morton curve
     morton_range = mesh_gpu.morton_max - mesh_gpu.morton_min + jnp.uint64(1)
-    t = (m - mesh_gpu.morton_min).astype(jnp.float32) / morton_range.astype(jnp.float32)
+    t = (m - mesh_gpu.morton_min).astype(config.FLOAT_DTYPE_JNP) / morton_range.astype(config.FLOAT_DTYPE_JNP)
 
     # Map to leaf index
-    leaf_id_float = t * mesh_gpu.n_leaves.astype(jnp.float32)
+    leaf_id_float = t * mesh_gpu.n_leaves.astype(config.FLOAT_DTYPE_JNP)
     leaf_id = jnp.floor(leaf_id_float).astype(jnp.int32)
 
     # Clamp to valid range
@@ -1169,7 +1170,7 @@ def upload_global_morton_to_gpu(
     return MeshGPUGlobalMorton(
         # Core mesh data
         connectivity=jax.device_put(connectivity.astype(np.int32)),
-        node_positions=jax.device_put(node_positions.astype(np.float32)),
+        node_positions=jax.device_put(node_positions.astype(config.FLOAT_DTYPE_NP)),
 
         # Curve structure (works for both Morton and Hilbert)
         elem_ids_sorted=jax.device_put(morton_struct.elem_ids_sorted.astype(np.int32)),
@@ -1185,8 +1186,8 @@ def upload_global_morton_to_gpu(
         # Curve parameters (works for both Morton and Hilbert)
         morton_min=jnp.uint64(curve_indices.min()),
         morton_max=jnp.uint64(curve_indices.max()),
-        bbox_min=jax.device_put(morton_struct.bbox_min.astype(np.float32)),
-        bbox_max=jax.device_put(morton_struct.bbox_max.astype(np.float32)),
+        bbox_min=jax.device_put(morton_struct.bbox_min.astype(config.FLOAT_DTYPE_NP)),
+        bbox_max=jax.device_put(morton_struct.bbox_max.astype(config.FLOAT_DTYPE_NP)),
 
         # Configuration
         n_leaves=jnp.int32(morton_struct.n_leaves),

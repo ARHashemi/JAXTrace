@@ -562,7 +562,7 @@ def run_rk4_tracking(positions_gpu, element_ids_gpu, mesh_gpu, mesh_gpu_octree,
     exporter.start()
 
     # Snapshot initial state BEFORE warmup/compile (true post-assignment state)
-    positions_cpu_init = np.array(positions_gpu, dtype=np.float32)
+    positions_cpu_init = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
     element_ids_cpu_init = np.array(element_ids_gpu, dtype=np.int32)
     n_active_init = int(np.sum(element_ids_cpu_init >= 0))
     exporter.enqueue_export(0, positions_cpu_init, element_ids_cpu_init, particle_ids)
@@ -642,7 +642,7 @@ def run_rk4_tracking(positions_gpu, element_ids_gpu, mesh_gpu, mesh_gpu_octree,
         # Export VTK at intervals (step 0 was already exported as initial state)
         if step % EXPORT_FREQUENCY == 0 or step == n_steps:
             stats_csv.flush()
-            positions_cpu = np.array(positions_gpu, dtype=np.float32)
+            positions_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             element_ids_cpu = np.array(element_ids_gpu, dtype=np.int32)
             exporter.enqueue_export(step, positions_cpu, element_ids_cpu, particle_ids)
 
@@ -833,7 +833,7 @@ def main():
     element_vertices_gpu = jax.device_put(element_vertices)
     M_inv_gpu = jax.device_put(M_inv_array)
     p0_gpu = jax.device_put(p0_array)
-    element_volumes_gpu = jax.device_put(element_volumes.astype(np.float32))
+    element_volumes_gpu = jax.device_put(element_volumes.astype(config.FLOAT_DTYPE_NP))
 
     set_corrected_metadata(aa_metadata_gpu, element_vertices_gpu)
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
@@ -860,8 +860,8 @@ def main():
         print(f"\n[6/10] Generating particles (uniform grid: {nx}×{ny}×{nz} = {n_particles:,})...")
 
         # Calculate particle bounds from fractions (same as production)
-        par_bounds_min = np.zeros(3, dtype=np.float32)
-        par_bounds_max = np.zeros(3, dtype=np.float32)
+        par_bounds_min = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+        par_bounds_max = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
         for i, axis in enumerate(['x', 'y', 'z']):
             min_frac, max_frac = PARTICLE_BOUNDS_FRACTION[axis]
             par_bounds_min[i] = domain_min[i] + min_frac * domain_size[i]
@@ -905,15 +905,15 @@ def main():
 
         # Compute element centroids
         n_elements = connectivity.shape[0]
-        element_centroids = np.zeros((n_elements, 3), dtype=np.float32)
+        element_centroids = np.zeros((n_elements, 3), dtype=config.FLOAT_DTYPE_NP)
         for elem_idx in range(n_elements):
             elem_nodes = connectivity[elem_idx]
             elem_positions = node_positions[elem_nodes]
             element_centroids[elem_idx] = elem_positions.mean(axis=0)
 
         # Filter elements using PARTICLE_BOUNDS_FRACTION (same bounds as uniform grid)
-        par_bounds_min = np.zeros(3, dtype=np.float32)
-        par_bounds_max = np.zeros(3, dtype=np.float32)
+        par_bounds_min = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+        par_bounds_max = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
         for i, axis in enumerate(['x', 'y', 'z']):
             min_frac, max_frac = PARTICLE_BOUNDS_FRACTION[axis]
             par_bounds_min[i] = domain_min[i] + min_frac * domain_size[i]
@@ -937,7 +937,7 @@ def main():
         selected_elements = np.random.choice(valid_element_ids, n_particles, replace=True)
 
         # Compute element centroids
-        particle_positions = np.zeros((n_particles, 3), dtype=np.float32)
+        particle_positions = np.zeros((n_particles, 3), dtype=config.FLOAT_DTYPE_NP)
         for i, elem_idx in enumerate(selected_elements):
             elem_nodes = connectivity[elem_idx]
             elem_positions = node_positions[elem_nodes]
@@ -945,7 +945,7 @@ def main():
 
         # Add small perturbations (10% of smallest element size)
         sample_size = min(100000, len(valid_element_ids))
-        element_sizes = np.zeros(sample_size, dtype=np.float32)
+        element_sizes = np.zeros(sample_size, dtype=config.FLOAT_DTYPE_NP)
         for i in range(sample_size):
             elem_idx = valid_element_ids[i % len(valid_element_ids)]
             elem_nodes = connectivity[elem_idx]
@@ -960,7 +960,7 @@ def main():
         min_element_size = np.percentile(element_sizes[element_sizes > 0], 5)
         perturbation_scale = min_element_size * 0.1
 
-        perturbations = np.random.randn(n_particles, 3).astype(np.float32) * perturbation_scale
+        perturbations = np.random.randn(n_particles, 3).astype(config.FLOAT_DTYPE_NP) * perturbation_scale
         particle_positions += perturbations
 
         # Store ground truth element IDs for RK4 tracking

@@ -112,7 +112,7 @@ def create_rk4_diagnostic_timedep(
         start_volume = jnp.where(
             start_elem_valid,
             mesh_gpu_element_volumes[start_elem_id],
-            jnp.float32(1.0)
+            config.FLOAT_DTYPE_JNP(1.0)
         )
 
         neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
@@ -254,7 +254,7 @@ def create_rk4_diagnostic_timedep(
         dp2 = jnp.dot(vp, v2)
 
         det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < 1e-12, 1e-12, det)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
         b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
         b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
@@ -262,7 +262,7 @@ def create_rk4_diagnostic_timedep(
         b0 = 1.0 - b1 - b2 - b3
 
         vel = b0 * node_vels[0] + b1 * node_vels[1] + b2 * node_vels[2] + b3 * node_vels[3]
-        return jnp.where(valid, vel, jnp.zeros(3, dtype=jnp.float32))
+        return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ========================================================================
     # Diagnostic RK4 Step
