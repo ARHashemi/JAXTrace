@@ -312,6 +312,55 @@ ambiguous. Matches FEMUSS behaviour (MeshRange ± tol).
 Default: 1e-6
 """
 
+RK4_BOUNDARY_WALLS = None
+"""
+Per-wall control for boundary clamping and projection.
+
+When None (default), all 6 walls are treated equally (original behaviour).
+When set, must be a dict with keys from {'x_min','x_max','y_min','y_max','z_min','z_max'}.
+Each key maps to a wall treatment mode:
+
+    'clamp'    — Apply bbox clamping (sub-step and/or projection) on this wall.
+                 This is the default behaviour when RK4_BOUNDARY_WALLS is None.
+    'outlet'   — No boundary treatment. Particles that exit through this wall
+                 get elem=-1 and are lost (physically correct for outlets).
+    'extended' — Extended domain. Particles that exit through this wall continue
+                 with their last valid velocity (ballistic propagation) for all
+                 remaining time steps. Requires the step function to carry
+                 last_valid_velocities as extra state. See RK4_EXTENDED_DOMAIN.
+
+Example:
+    RK4_BOUNDARY_WALLS = {
+        'x_min': 'clamp', 'x_max': 'extended',
+        'y_min': 'clamp', 'y_max': 'clamp',
+        'z_min': 'clamp', 'z_max': 'clamp',
+    }
+
+Walls not listed default to 'clamp'.
+
+Default: None (all walls clamped, equivalent to all 'clamp')
+"""
+
+# ============================================================================
+# RK4 Stats Collection
+# ============================================================================
+
+RK4_COLLECT_STATS = True
+"""
+Collect per-step L0/L1/L2/miss search statistics during RK4 integration.
+
+When True, uses search_l0_l1_l2_with_level (returns hit_level alongside elem_id)
+and aggregates counts across all particles × 5 RK4 sub-step searches per step.
+
+When False, uses search_l0_l1_l2_single (returns only elem_id). The level-tracking
+code is completely eliminated from the compiled kernel at JIT trace time.
+
+The overhead is small (5 int8 values per particle + 4 sum reductions per step),
+but disabling may help in production runs where every microsecond counts.
+
+Default: True
+"""
+
 # ============================================================================
 # Initial Assignment Method Selection
 # ============================================================================

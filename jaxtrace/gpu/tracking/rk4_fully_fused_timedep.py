@@ -132,6 +132,32 @@ def _create_rk4_fully_fused_timedep_impl(
     use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
     boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
 
+    # Per-wall boundary control: build (3,) boolean masks for min/max walls.
+    # True = apply clamping on this wall, False = outlet (no treatment).
+    # Resolved at trace time — zero runtime cost for disabled walls.
+    wall_config = config.RK4_BOUNDARY_WALLS
+    if wall_config is None:
+        # Default: all walls clamped
+        clamp_min_mask = jnp.array([True, True, True])
+        clamp_max_mask = jnp.array([True, True, True])
+    else:
+        clamp_min_mask = jnp.array([
+            wall_config.get('x_min', 'clamp') == 'clamp',
+            wall_config.get('y_min', 'clamp') == 'clamp',
+            wall_config.get('z_min', 'clamp') == 'clamp',
+        ])
+        clamp_max_mask = jnp.array([
+            wall_config.get('x_max', 'clamp') == 'clamp',
+            wall_config.get('y_max', 'clamp') == 'clamp',
+            wall_config.get('z_max', 'clamp') == 'clamp',
+        ])
+
+    # Extended domain: check if any wall is set to 'extended'
+    use_extended_domain = (
+        wall_config is not None and
+        'extended' in wall_config.values()
+    )
+
     # ============================================================================
     # Single-Particle Helper Functions (Time-Dependent)
     # ============================================================================
@@ -508,193 +534,186 @@ def _create_rk4_fully_fused_timedep_impl(
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ============================================================================
+    # Per-wall clamping helpers (resolved at trace time via masks)
+    # ============================================================================
+
+    def clamp_to_bbox(pos):
+        """Clamp position to bbox, respecting per-wall outlet config."""
+        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, mesh_bbox_min), pos)
+        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, mesh_bbox_max), clamped)
+        return clamped
+
+    def clamp_to_bbox_with_tol(pos):
+        """Clamp position to bbox inset by tol, respecting per-wall outlet config."""
+        bbox_min_inset = mesh_bbox_min + boundary_projection_tol
+        bbox_max_inset = mesh_bbox_max - boundary_projection_tol
+        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, bbox_min_inset), pos)
+        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, bbox_max_inset), clamped)
+        return clamped
+
+    # ============================================================================
     # Fully-Fused RK4 Step (Time-Dependent)
     # ============================================================================
 
-    @jax.jit
-    def rk4_fully_fused_step_timedep(
-        positions_gpu: jax.Array,         # (N, 3) float32
-        element_ids_gpu: jax.Array,       # (N,) int32
-        dt: float,
-        velocity_fields_gpu: jax.Array,   # (n_timesteps, n_nodes, 3) float32
-        time_idx: int                      # Current time index (cycles with modulo)
-    ):
-        """
-        Single RK4 timestep with time-dependent velocity (fully fused).
-
-        All operations fused into single vmap over particles:
-        - All 5 RK4 stages (k1, k2, k3, k4, final)
-        - All 5 L0+L1+L2 searches
-        - All 4 velocity interpolations
-
-        Args:
-            positions_gpu: (N, 3) particle positions
-            element_ids_gpu: (N,) cached element IDs
-            dt: timestep size
-            velocity_fields_gpu: (n_timesteps, n_nodes, 3) velocity sequence
-            time_idx: index into velocity sequence (cyclic with modulo)
-
-        Returns:
-            positions_final: (N, 3) updated positions
-            element_ids_final: (N,) updated element IDs
-        """
-        n_timesteps = velocity_fields_gpu.shape[0]
-
-        # Cyclic indexing for velocity
-        vel_idx = time_idx % n_timesteps
-        velocity_field = velocity_fields_gpu[vel_idx]
-
-        # Single-particle RK4 with all stages fused
-        def rk4_single_particle(pos: jax.Array, elem_id: jax.Array):
-            """RK4 for single particle with all stages inline."""
-
-            # Stage 1: k1 = f(t, y)
-            elem_k1 = search_l0_l1_l2_single(pos, elem_id)
-            vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
-            pos_k1 = pos + 0.5 * dt * vel_k1
-
-            # Stage 2: k2 = f(t + dt/2, y + dt/2 * k1)
-            if use_bbox_clamp:
-                pos_k1 = jnp.clip(pos_k1, mesh_bbox_min, mesh_bbox_max)
-            elem_k2 = search_l0_l1_l2_single(pos_k1, elem_k1)
-            vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
-            if use_last_valid_vel:
-                vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
-            pos_k2 = pos + 0.5 * dt * vel_k2
-
-            # Stage 3: k3 = f(t + dt/2, y + dt/2 * k2)
-            if use_bbox_clamp:
-                pos_k2 = jnp.clip(pos_k2, mesh_bbox_min, mesh_bbox_max)
-            elem_k3 = search_l0_l1_l2_single(pos_k2, elem_k2)
-            vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
-            if use_last_valid_vel:
-                vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
-            pos_k3 = pos + dt * vel_k3
-
-            # Stage 4: k4 = f(t + dt, y + dt * k3)
-            if use_bbox_clamp:
-                pos_k3 = jnp.clip(pos_k3, mesh_bbox_min, mesh_bbox_max)
-            elem_k4 = search_l0_l1_l2_single(pos_k3, elem_k3)
-            vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
-            if use_last_valid_vel:
-                vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
-
-            # Final position: y_n+1 = y_n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
-            pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
-
-            # Final element search
-            elem_final = search_l0_l1_l2_single(pos_final, elem_k4)
-
-            # Boundary projection: clamp to bbox and re-search if lost
-            if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
-                elem_clamped = search_l0_l1_l2_single(pos_clamped, elem_k4)
-                lost = elem_final < 0
-                pos_final = jnp.where(lost, pos_clamped, pos_final)
-                elem_final = jnp.where(lost, elem_clamped, elem_final)
-
-            return pos_final, elem_final
-
-        # SINGLE vmap over all particles (fully fused)
-        positions_final, element_ids_final = jax.vmap(rk4_single_particle)(
-            positions_gpu, element_ids_gpu
-        )
-
-        return positions_final, element_ids_final
-
     # ========================================================================
-    # Stats-Enabled RK4 Step (same numerics, also returns L0/L1/L2/miss counts)
+    # Unified RK4 Step Builder — single implementation, optional stats
     # ========================================================================
+    # Both step functions (with and without stats) share identical numerics.
+    # The `collect_stats` bool is resolved at JIT trace time, so when False
+    # the level-tracking code is completely eliminated from the compiled kernel.
 
-    @jax.jit
-    def rk4_fully_fused_step_timedep_with_stats(
-        positions_gpu: jax.Array,
-        element_ids_gpu: jax.Array,
-        dt: float,
-        velocity_fields_gpu: jax.Array,
-        time_idx: int
-    ):
-        """
-        Identical numerics to rk4_fully_fused_step_timedep, but also returns
-        per-step search-level statistics aggregated across all particles and
-        all 5 RK4 sub-step searches.
+    def _build_rk4_step(collect_stats: bool):
+        """Build a JIT-compiled RK4 step function with or without stats."""
 
-        Returns:
-            positions_final:   (N, 3)
-            element_ids_final: (N,)
-            stats: dict with keys:
-                'l0_hits'  - total L0 hits across all particles × 5 searches
-                'l1_hits'  - total L1 hits
-                'l2_hits'  - total L2 hits
-                'misses'   - total misses (element_id == -1 after full search)
-                (All counts are over 5 searches per particle = N×5 total queries)
-        """
-        n_timesteps = velocity_fields_gpu.shape[0]
-        vel_idx = time_idx % n_timesteps
-        velocity_field = velocity_fields_gpu[vel_idx]
+        search_fn = search_l0_l1_l2_with_level if collect_stats else search_l0_l1_l2_single
 
-        def rk4_single_particle_with_stats(pos: jax.Array, elem_id: jax.Array):
-            # Stage 1
-            elem_k1, lvl_k1 = search_l0_l1_l2_with_level(pos, elem_id)
-            vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
-            pos_k1 = pos + 0.5 * dt * vel_k1
+        @jax.jit
+        def rk4_step(
+            positions_gpu: jax.Array,
+            element_ids_gpu: jax.Array,
+            dt: float,
+            velocity_fields_gpu: jax.Array,
+            time_idx: int,
+            last_valid_velocities: jax.Array = None,
+        ):
+            n_timesteps = velocity_fields_gpu.shape[0]
+            vel_idx = time_idx % n_timesteps
+            velocity_field = velocity_fields_gpu[vel_idx]
 
-            # Stage 2
-            if use_bbox_clamp:
-                pos_k1 = jnp.clip(pos_k1, mesh_bbox_min, mesh_bbox_max)
-            elem_k2, lvl_k2 = search_l0_l1_l2_with_level(pos_k1, elem_k1)
-            vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
-            if use_last_valid_vel:
-                vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
-            pos_k2 = pos + 0.5 * dt * vel_k2
+            def rk4_single_particle(pos, elem_id, last_vel):
+                # --- Extended domain: ballistic propagation for exited particles ---
+                if use_extended_domain:
+                    already_exited = elem_id < 0
+                    # Ballistic: pos += dt * last_vel (for exited particles)
+                    pos_ballistic = pos + dt * last_vel
 
-            # Stage 3
-            if use_bbox_clamp:
-                pos_k2 = jnp.clip(pos_k2, mesh_bbox_min, mesh_bbox_max)
-            elem_k3, lvl_k3 = search_l0_l1_l2_with_level(pos_k2, elem_k2)
-            vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
-            if use_last_valid_vel:
-                vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
-            pos_k3 = pos + dt * vel_k3
+                # --- Full RK4 integration (always computed; selected via jnp.where) ---
+                # Stage 1: k1 = f(t, y)
+                search_result_k1 = search_fn(pos, elem_id)
+                if collect_stats:
+                    elem_k1, lvl_k1 = search_result_k1
+                else:
+                    elem_k1 = search_result_k1
+                vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+                pos_k1 = pos + 0.5 * dt * vel_k1
 
-            # Stage 4
-            if use_bbox_clamp:
-                pos_k3 = jnp.clip(pos_k3, mesh_bbox_min, mesh_bbox_max)
-            elem_k4, lvl_k4 = search_l0_l1_l2_with_level(pos_k3, elem_k3)
-            vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
-            if use_last_valid_vel:
-                vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
+                # Stage 2: k2 = f(t + dt/2, y + dt/2 * k1)
+                if use_bbox_clamp:
+                    pos_k1 = clamp_to_bbox(pos_k1)
+                search_result_k2 = search_fn(pos_k1, elem_k1)
+                if collect_stats:
+                    elem_k2, lvl_k2 = search_result_k2
+                else:
+                    elem_k2 = search_result_k2
+                vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+                if use_last_valid_vel:
+                    vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
+                pos_k2 = pos + 0.5 * dt * vel_k2
 
-            # Final
-            pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
-            elem_final, lvl_final = search_l0_l1_l2_with_level(pos_final, elem_k4)
+                # Stage 3: k3 = f(t + dt/2, y + dt/2 * k2)
+                if use_bbox_clamp:
+                    pos_k2 = clamp_to_bbox(pos_k2)
+                search_result_k3 = search_fn(pos_k2, elem_k2)
+                if collect_stats:
+                    elem_k3, lvl_k3 = search_result_k3
+                else:
+                    elem_k3 = search_result_k3
+                vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+                if use_last_valid_vel:
+                    vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
+                pos_k3 = pos + dt * vel_k3
 
-            # Boundary projection: clamp to bbox and re-search if lost
-            if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
-                elem_clamped, lvl_clamped = search_l0_l1_l2_with_level(pos_clamped, elem_k4)
-                lost = elem_final < 0
-                pos_final = jnp.where(lost, pos_clamped, pos_final)
-                elem_final = jnp.where(lost, elem_clamped, elem_final)
-                lvl_final = jnp.where(lost, lvl_clamped, lvl_final)
+                # Stage 4: k4 = f(t + dt, y + dt * k3)
+                if use_bbox_clamp:
+                    pos_k3 = clamp_to_bbox(pos_k3)
+                search_result_k4 = search_fn(pos_k3, elem_k3)
+                if collect_stats:
+                    elem_k4, lvl_k4 = search_result_k4
+                else:
+                    elem_k4 = search_result_k4
+                vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+                if use_last_valid_vel:
+                    vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
 
-            # Pack hit levels for all 5 searches as a (5,) int8 array
-            hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
+                # Final position: y_n+1 = y_n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+                pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
 
-            return pos_final, elem_final, hit_levels
+                # Final element search
+                search_result_final = search_fn(pos_final, elem_k4)
+                if collect_stats:
+                    elem_final, lvl_final = search_result_final
+                else:
+                    elem_final = search_result_final
 
-        positions_final, element_ids_final, all_hit_levels = jax.vmap(
-            rk4_single_particle_with_stats
-        )(positions_gpu, element_ids_gpu)
-        # all_hit_levels: (N, 5) int8
+                # Boundary projection: clamp to bbox and re-search if lost
+                if use_boundary_projection:
+                    pos_clamped = clamp_to_bbox_with_tol(pos_final)
+                    search_result_clamped = search_fn(pos_clamped, elem_k4)
+                    if collect_stats:
+                        elem_clamped, lvl_clamped = search_result_clamped
+                    else:
+                        elem_clamped = search_result_clamped
+                    lost = elem_final < 0
+                    pos_final = jnp.where(lost, pos_clamped, pos_final)
+                    elem_final = jnp.where(lost, elem_clamped, elem_final)
+                    if collect_stats:
+                        lvl_final = jnp.where(lost, lvl_clamped, lvl_final)
 
-        # Aggregate counts across all particles and all 5 sub-steps
-        l0_hits = jnp.sum(all_hit_levels == 0).astype(jnp.int32)
-        l1_hits = jnp.sum(all_hit_levels == 1).astype(jnp.int32)
-        l2_hits = jnp.sum(all_hit_levels == 2).astype(jnp.int32)
-        misses   = jnp.sum(all_hit_levels == -1).astype(jnp.int32)
+                # --- Extended domain: merge ballistic vs RK4 results ---
+                if use_extended_domain:
+                    # For exited particles: use ballistic position, keep elem=-1
+                    pos_final = jnp.where(already_exited, pos_ballistic, pos_final)
+                    elem_final = jnp.where(already_exited, jnp.int32(-1), elem_final)
+                    # Update last_vel: use vel_k1 if particle is alive, keep old if exited
+                    vel_out = jnp.where(already_exited, last_vel, vel_k1)
+                    if collect_stats:
+                        lvl_final = jnp.where(already_exited, jnp.int8(-1), lvl_final)
+                else:
+                    vel_out = last_vel  # pass-through (unused when extended domain off)
 
-        return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses)
+                if collect_stats:
+                    hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
+                    return pos_final, elem_final, hit_levels, vel_out
+                else:
+                    return pos_final, elem_final, vel_out
+
+            # Provide zero velocities if not passed (non-extended mode)
+            if use_extended_domain:
+                # last_valid_velocities must be provided by caller
+                vels_in = last_valid_velocities
+            else:
+                # Dummy array — not used in computation, just satisfies vmap signature
+                vels_in = jnp.zeros_like(positions_gpu)
+
+            if collect_stats:
+                positions_final, element_ids_final, all_hit_levels, vels_out = jax.vmap(
+                    rk4_single_particle
+                )(positions_gpu, element_ids_gpu, vels_in)
+
+                # Aggregate counts across all particles and all 5 sub-steps
+                l0_hits = jnp.sum(all_hit_levels == 0).astype(jnp.int32)
+                l1_hits = jnp.sum(all_hit_levels == 1).astype(jnp.int32)
+                l2_hits = jnp.sum(all_hit_levels == 2).astype(jnp.int32)
+                misses  = jnp.sum(all_hit_levels == -1).astype(jnp.int32)
+
+                if use_extended_domain:
+                    return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses), vels_out
+                else:
+                    return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses)
+            else:
+                positions_final, element_ids_final, vels_out = jax.vmap(
+                    rk4_single_particle
+                )(positions_gpu, element_ids_gpu, vels_in)
+
+                if use_extended_domain:
+                    return positions_final, element_ids_final, vels_out
+                else:
+                    return positions_final, element_ids_final
+
+        return rk4_step
+
+    rk4_fully_fused_step_timedep = _build_rk4_step(collect_stats=False)
+    rk4_fully_fused_step_timedep_with_stats = _build_rk4_step(collect_stats=True)
 
     return rk4_fully_fused_step_timedep, rk4_fully_fused_step_timedep_with_stats
 

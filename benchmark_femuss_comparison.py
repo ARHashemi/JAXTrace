@@ -298,8 +298,28 @@ def create_rk4_comparison(
     use_last_valid_vel=False,
     use_boundary_projection=False,
     boundary_projection_tol=1e-6,
+    clamp_min_mask=None,
+    clamp_max_mask=None,
 ):
     """Create RK4 step function (same inline pattern as diagnostic)."""
+
+    # Per-wall masks: default to all-clamp if not provided
+    if clamp_min_mask is None:
+        clamp_min_mask = jnp.array([True, True, True])
+    if clamp_max_mask is None:
+        clamp_max_mask = jnp.array([True, True, True])
+
+    def clamp_to_bbox(pos):
+        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, mesh_bbox_min), pos)
+        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, mesh_bbox_max), clamped)
+        return clamped
+
+    def clamp_to_bbox_with_tol(pos):
+        bbox_min_inset = mesh_bbox_min + boundary_projection_tol
+        bbox_max_inset = mesh_bbox_max - boundary_projection_tol
+        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, bbox_min_inset), pos)
+        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, bbox_max_inset), clamped)
+        return clamped
 
     connectivity = mesh_gpu_connectivity
     node_positions = mesh_gpu_node_positions
@@ -440,7 +460,7 @@ def create_rk4_comparison(
 
             # Stage 2
             if use_bbox_clamp:
-                pos_k1 = jnp.clip(pos_k1, mesh_bbox_min, mesh_bbox_max)
+                pos_k1 = clamp_to_bbox(pos_k1)
             elem_k2 = search_l0_l1_l2(pos_k1, elem_k1)
             vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
             if use_last_valid_vel:
@@ -449,7 +469,7 @@ def create_rk4_comparison(
 
             # Stage 3
             if use_bbox_clamp:
-                pos_k2 = jnp.clip(pos_k2, mesh_bbox_min, mesh_bbox_max)
+                pos_k2 = clamp_to_bbox(pos_k2)
             elem_k3 = search_l0_l1_l2(pos_k2, elem_k2)
             vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
             if use_last_valid_vel:
@@ -458,7 +478,7 @@ def create_rk4_comparison(
 
             # Stage 4
             if use_bbox_clamp:
-                pos_k3 = jnp.clip(pos_k3, mesh_bbox_min, mesh_bbox_max)
+                pos_k3 = clamp_to_bbox(pos_k3)
             elem_k4 = search_l0_l1_l2(pos_k3, elem_k3)
             vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
             if use_last_valid_vel:
@@ -469,7 +489,7 @@ def create_rk4_comparison(
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
-                pos_clamped = jnp.clip(pos_final, mesh_bbox_min + boundary_projection_tol, mesh_bbox_max - boundary_projection_tol)
+                pos_clamped = clamp_to_bbox_with_tol(pos_final)
                 elem_clamped = search_l0_l1_l2(pos_clamped, elem_k4)
                 lost = elem_final < 0
                 pos_final = jnp.where(lost, pos_clamped, pos_final)
@@ -634,8 +654,26 @@ def main():
     print(f"  Bbox clamp:           {'ON' if RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
     print(f"  Last-valid vel:       {'ON' if RK4_SUBSTEP_LAST_VALID_VEL else 'OFF'}")
     print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
+    print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
     print("=" * 80)
+
+    # Build per-wall clamp masks from config
+    wall_config = config.RK4_BOUNDARY_WALLS
+    if wall_config is None:
+        clamp_min_mask = jnp.array([True, True, True])
+        clamp_max_mask = jnp.array([True, True, True])
+    else:
+        clamp_min_mask = jnp.array([
+            wall_config.get('x_min', 'clamp') == 'clamp',
+            wall_config.get('y_min', 'clamp') == 'clamp',
+            wall_config.get('z_min', 'clamp') == 'clamp',
+        ])
+        clamp_max_mask = jnp.array([
+            wall_config.get('x_max', 'clamp') == 'clamp',
+            wall_config.get('y_max', 'clamp') == 'clamp',
+            wall_config.get('z_max', 'clamp') == 'clamp',
+        ])
 
     # ==================================================================
     # [1/7] Load mesh (identical to benchmark_rk4_diagnostic.py)
@@ -811,6 +849,8 @@ def main():
         use_last_valid_vel=RK4_SUBSTEP_LAST_VALID_VEL,
         use_boundary_projection=RK4_BOUNDARY_PROJECTION,
         boundary_projection_tol=config.RK4_BOUNDARY_PROJECTION_TOL,
+        clamp_min_mask=clamp_min_mask,
+        clamp_max_mask=clamp_max_mask,
     )
 
     # Warmup
