@@ -342,6 +342,31 @@ Default: None (all walls clamped, equivalent to all 'clamp')
 """
 
 # ============================================================================
+# Level-Set Velocity Masking
+# ============================================================================
+
+RK4_LEVELSET_MASK = False
+"""
+Zero out interpolated velocity where the level-set field is negative.
+
+When True, a nodal level-set array must be uploaded to GPU and passed to the
+RK4 builder. At each RK4 sub-step, the level-set is interpolated to the
+particle position using the same barycentric coordinates as velocity.
+If level_set < 0 (inside the tool), the velocity is set to zero.
+
+This matches FEMUSS behaviour:
+    if (levelSetValue < 0.0) AddFluidInteraction = .false.
+
+Requires: levelset_gpu array passed to _create_rk4_fully_fused_timedep_impl().
+Default: False
+"""
+
+LEVELSET_FIELD_NAME = 'LEVEL'
+"""
+Name of the level-set field in PVTU files (default: 'LEVEL').
+"""
+
+# ============================================================================
 # RK4 Stats Collection
 # ============================================================================
 

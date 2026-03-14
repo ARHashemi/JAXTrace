@@ -63,6 +63,7 @@ def _create_rk4_fully_fused_timedep_impl(
     kdtree_max_tests: int = 256,
     mesh_bbox_min: Optional[jax.Array] = None,
     mesh_bbox_max: Optional[jax.Array] = None,
+    levelset_gpu: Optional[jax.Array] = None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -131,11 +132,14 @@ def _create_rk4_fully_fused_timedep_impl(
     use_last_valid_vel = config.RK4_SUBSTEP_LAST_VALID_VEL
     use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
     boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
+    use_levelset_mask = config.RK4_LEVELSET_MASK and levelset_gpu is not None
 
     # Per-wall boundary control: build (3,) boolean masks for min/max walls.
     # True = apply clamping on this wall, False = outlet (no treatment).
     # Resolved at trace time — zero runtime cost for disabled walls.
     wall_config = config.RK4_BOUNDARY_WALLS
+    if wall_config is not None and not isinstance(wall_config, dict):
+        wall_config = None  # non-dict value (e.g. 'clamp') → default all-clamp
     if wall_config is None:
         # Default: all walls clamped
         clamp_min_mask = jnp.array([True, True, True])
@@ -531,6 +535,12 @@ def _create_rk4_fully_fused_timedep_impl(
         # Interpolate velocity
         vel = b0 * node_vels[0] + b1 * node_vels[1] + b2 * node_vels[2] + b3 * node_vels[3]
 
+        # Level-set masking: zero velocity inside tool (level-set < 0)
+        if use_levelset_mask:
+            node_ls = levelset_gpu[nodes_idx]  # (4,)
+            ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+            vel = jnp.where(ls_val >= 0.0, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
+
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ============================================================================
@@ -538,17 +548,20 @@ def _create_rk4_fully_fused_timedep_impl(
     # ============================================================================
 
     def clamp_to_bbox(pos):
-        """Clamp position to bbox, respecting per-wall outlet config."""
-        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, mesh_bbox_min), pos)
-        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, mesh_bbox_max), clamped)
-        return clamped
+        """Clamp position to mesh bbox, applying +tol inward only on the clamped component.
 
-    def clamp_to_bbox_with_tol(pos):
-        """Clamp position to bbox inset by tol, respecting per-wall outlet config."""
-        bbox_min_inset = mesh_bbox_min + boundary_projection_tol
-        bbox_max_inset = mesh_bbox_max - boundary_projection_tol
-        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, bbox_min_inset), pos)
-        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, bbox_max_inset), clamped)
+        For each axis, if the position is below bbox_min, clamp to bbox_min + tol.
+        If above bbox_max, clamp to bbox_max - tol. Components inside the bbox are untouched.
+        The tolerance is applied only in the inward-normal direction of the crossed wall.
+        Per-wall outlet mask: walls with mask=False are not clamped.
+        """
+        tol = boundary_projection_tol
+        # Min walls: clamp to bbox_min + tol (only where pos < bbox_min AND wall is active)
+        hit_min = clamp_min_mask & (pos < mesh_bbox_min)
+        clamped = jnp.where(hit_min, mesh_bbox_min + tol, pos)
+        # Max walls: clamp to bbox_max - tol (only where pos > bbox_max AND wall is active)
+        hit_max = clamp_max_mask & (clamped > mesh_bbox_max)
+        clamped = jnp.where(hit_max, mesh_bbox_max - tol, clamped)
         return clamped
 
     # ============================================================================
@@ -647,7 +660,7 @@ def _create_rk4_fully_fused_timedep_impl(
 
                 # Boundary projection: clamp to bbox and re-search if lost
                 if use_boundary_projection:
-                    pos_clamped = clamp_to_bbox_with_tol(pos_final)
+                    pos_clamped = clamp_to_bbox(pos_final)
                     search_result_clamped = search_fn(pos_clamped, elem_k4)
                     if collect_stats:
                         elem_clamped, lvl_clamped = search_result_clamped
@@ -739,6 +752,7 @@ def create_rk4_fully_fused_timedep(
     kdtree_max_tests: int = 256,
     mesh_bbox_min=None,
     mesh_bbox_max=None,
+    levelset_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -753,7 +767,7 @@ def create_rk4_fully_fused_timedep(
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
-        mesh_bbox_min, mesh_bbox_max,
+        mesh_bbox_min, mesh_bbox_max, levelset_gpu,
     )
     return step_fn
 
@@ -779,6 +793,7 @@ def create_rk4_fully_fused_timedep_with_stats(
     kdtree_max_tests: int = 256,
     mesh_bbox_min=None,
     mesh_bbox_max=None,
+    levelset_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -796,6 +811,6 @@ def create_rk4_fully_fused_timedep_with_stats(
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
-        mesh_bbox_min, mesh_bbox_max,
+        mesh_bbox_min, mesh_bbox_max, levelset_gpu,
     )
     return step_fn, step_fn_with_stats

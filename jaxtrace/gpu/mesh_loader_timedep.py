@@ -26,6 +26,10 @@ def load_velocity_sequence_from_pvtu(
     Loads mesh topology from first file, then loads velocity field from each
     timestep in the range. All files must have identical mesh topology.
 
+    If a file is missing the requested field, the loader skips forward to find
+    the first file that has it (for mesh topology). All subsequent files must
+    contain the field or a RuntimeError is raised.
+
     Parameters
     ----------
     base_path : Path
@@ -44,62 +48,84 @@ def load_velocity_sequence_from_pvtu(
     Returns
     -------
     node_positions : np.ndarray
-        (n_nodes, 3) float32 - node coordinates (from first file)
+        (n_nodes, 3) float32 - node coordinates (from first file with field)
     connectivity : np.ndarray
-        (n_elements, 4) int32 - element connectivity (from first file)
+        (n_elements, 4) int32 - element connectivity (from first file with field)
     velocity_sequence : np.ndarray
-        (n_timesteps, n_nodes, 3) float32 - velocity field sequence
+        (n_valid, n_nodes, 3) float32 - velocity field sequence (only valid timesteps)
 
-    Examples
-    --------
-    >>> node_pos, conn, vel_seq = load_velocity_sequence_from_pvtu(
-    ...     Path("/data/mesh"),
-    ...     "threadedAvtk_{timestep}.pvtu",
-    ...     (120, 159),
-    ...     field_name='Displacement'
-    ... )
-    >>> vel_seq.shape
-    (40, 900658, 3)
+    Raises
+    ------
+    RuntimeError
+        If no files in the range contain the requested field, or if a non-first
+        file is missing the field (only the leading files may be skipped).
     """
     start, end = timestep_range
-    n_timesteps = end - start + 1
+    all_timesteps = list(range(start, end + 1))
 
     if verbose:
         print(f"\nLoading velocity sequence:")
         print(f"  Pattern: {file_pattern}")
-        print(f"  Range: {start}-{end} ({n_timesteps} timesteps)")
+        print(f"  Range: {start}-{end} ({len(all_timesteps)} timesteps)")
         print(f"  Field: '{field_name}'")
 
-    # Load first file to get mesh topology
-    first_file = base_path / file_pattern.format(timestep=start)
-    if verbose:
-        print(f"\n  Loading mesh topology from: {first_file.name}")
+    # --- Find first timestep that has the field (for mesh topology) ---
+    node_positions = None
+    connectivity = None
+    first_valid_idx = None
 
-    node_positions, connectivity, first_velocity = load_mesh_from_pvtu(
-        first_file,
-        field_name=field_name
-    )
+    for idx, timestep in enumerate(all_timesteps):
+        file_path = base_path / file_pattern.format(timestep=timestep)
+        node_positions, connectivity, velocity = load_mesh_from_pvtu(
+            file_path, field_name=field_name
+        )
+        if velocity is not None:
+            first_valid_idx = idx
+            first_velocity = velocity
+            break
+        elif verbose:
+            print(f"  ⚠ Skipping timestep {timestep}: field '{field_name}' not found")
+
+    if first_valid_idx is None:
+        raise RuntimeError(
+            f"None of the {len(all_timesteps)} files in range {start}-{end} "
+            f"contain field '{field_name}'"
+        )
+
+    valid_timesteps = all_timesteps[first_valid_idx:]
+    n_skipped = first_valid_idx
+    n_valid = len(valid_timesteps)
 
     n_nodes = node_positions.shape[0]
     n_elements = connectivity.shape[0]
 
     if verbose:
+        if n_skipped > 0:
+            print(f"  Skipped {n_skipped} timestep(s) without '{field_name}', "
+                  f"starting from timestep {valid_timesteps[0]}")
         print(f"    Nodes: {n_nodes:,}")
         print(f"    Elements: {n_elements:,}")
 
-    # Allocate velocity sequence array
-    velocity_sequence = np.zeros((n_timesteps, n_nodes, 3), dtype=config.FLOAT_DTYPE_NP)
+    # Allocate velocity sequence array (only valid timesteps)
+    velocity_sequence = np.zeros((n_valid, n_nodes, 3), dtype=config.FLOAT_DTYPE_NP)
     velocity_sequence[0] = first_velocity
 
     # Load remaining velocity fields
     if verbose:
         print(f"\n  Loading velocity fields:")
 
-    for i, timestep in enumerate(range(start + 1, end + 1)):
+    for i, timestep in enumerate(valid_timesteps[1:], start=1):
         file_path = base_path / file_pattern.format(timestep=timestep)
 
         # Load only velocity field (mesh topology assumed identical)
         _, _, velocity = load_mesh_from_pvtu(file_path, field_name=field_name)
+
+        if velocity is None:
+            raise RuntimeError(
+                f"Field '{field_name}' missing in timestep {timestep} "
+                f"(file: {file_path}). Only leading timesteps may be skipped; "
+                f"gaps within the sequence are not supported."
+            )
 
         # Validate shape
         if velocity.shape != (n_nodes, 3):
@@ -108,13 +134,13 @@ def load_velocity_sequence_from_pvtu(
                 f"expected {(n_nodes, 3)}, got {velocity.shape}"
             )
 
-        velocity_sequence[i + 1] = velocity
+        velocity_sequence[i] = velocity
 
-        if verbose and (i + 1) % 10 == 0:
-            print(f"    Loaded {i + 2}/{n_timesteps} timesteps...")
+        if verbose and i % 10 == 0:
+            print(f"    Loaded {i + 1}/{n_valid} timesteps...")
 
     if verbose:
-        print(f"    Loaded {n_timesteps}/{n_timesteps} timesteps")
+        print(f"    Loaded {n_valid}/{n_valid} timesteps")
         memory_mb = velocity_sequence.nbytes / (1024**2)
         print(f"    Memory: {memory_mb:.1f} MB")
 

@@ -66,24 +66,26 @@ from vtk.util.numpy_support import vtk_to_numpy
 
 # --- Mesh ---
 MESH_BASE_PATH = Path("data/FLA/post/0eule")
-MESH_FILE_PATTERN = "featurelessAvtk_{timestep}.pvtu"
+MESH_FILE_PATTERN = "cylA_{timestep}.pvtu"
 VELOCITY_FIELD_NAME = 'Displacement'
 
 # --- Mesh velocity timestep range ---
-# Which two consecutive mesh files to load for velocity interpolation.
-# The velocity field is computed as (disp[end] - disp[start]) / DT.
-VELOCITY_TIMESTEP_RANGE = (158, 159)
+# Range of mesh files to load. The 'Displacement' field is actual velocity (m/s),
+# not cumulative displacement — used directly without differencing.
+# FEMUSS recycles 40 velocity snapshots (1 revolution). Load the full range
+# to match: e.g. (121, 160) for 40 snapshots, cycled via vel_idx % n_timesteps.
+VELOCITY_TIMESTEP_RANGE = (121, 160)
 
 # --- FEMUSS particle data ---
-FEMUSS_PARTICLE_PATH = Path("/home/arhashemi/Workspace/welding/Edgar/FLA/post/1part")
-FEMUSS_FILE_PATTERN = "featurelessA_pt_{timestep}.pvtu"
+FEMUSS_PARTICLE_PATH = Path("data/FLA/post/1part")
+FEMUSS_FILE_PATTERN = "cylA_pt_{timestep}.pvtu"
 
 # --- Comparison timesteps ---
 # Load particles from FEMUSS at START_STEP, track for N_STEPS,
 # compare with FEMUSS at END_STEP.
 # END_STEP = START_STEP + N_STEPS
-FEMUSS_START_STEP = 1000
-N_STEPS = 50
+FEMUSS_START_STEP = 0
+N_STEPS = 2684                   # <-- small for quick testing, set to 50/250 for real runs
 DT = 0.0025
 
 # --- Search configuration ---
@@ -98,13 +100,31 @@ L2_METHOD = 'mesh_aligned_octree_multi_local_where'
 POINT_IN_TET_METHOD = 'inverse'
 
 # --- RK4 sub-step recovery ---
-RK4_SUBSTEP_BBOX_CLAMP = True
-RK4_SUBSTEP_LAST_VALID_VEL = True
-RK4_BOUNDARY_PROJECTION = True
+RK4_SUBSTEP_BBOX_CLAMP = True       # Clamp sub-step positions to mesh bbox
+RK4_SUBSTEP_LAST_VALID_VEL = True   # Fall back to last valid velocity if sub-step search fails
+RK4_BOUNDARY_PROJECTION = True      # Clamp final pos to bbox (inset by tol) and re-search if lost
+
+# --- Boundary projection tolerance (FEMUSS uses ±1e-6) ---
+config.RK4_BOUNDARY_PROJECTION_TOL = 1e-6
+
+# --- Per-wall boundary control ---
+# Set to None for default (all walls clamped), or a dict:
+#   'clamp'   = project back onto this wall (default)
+#   'outlet'  = no treatment (particle exits freely)
+#   'extended' = continue with last velocity outside mesh (not wired in this benchmark)
+# Example: allow particles to exit through x_max:
+#   config.RK4_BOUNDARY_WALLS = {'x_max': 'outlet'}
+config.RK4_BOUNDARY_WALLS = 'clamp'
+
+# --- Level-set velocity masking ---
+# Zero out velocity where level-set < 0 (inside tool region).
+# Matches FEMUSS: if (levelSetValue < 0) AddFluidInteraction = .false.
+config.RK4_LEVELSET_MASK = True
+LEVELSET_FIELD_NAME = 'LEVEL'
 
 # --- Export ---
-EXPORT_FREQUENCY = 10
-LOG_INTERVAL = 1
+EXPORT_FREQUENCY = 1
+LOG_INTERVAL = 10
 OUTPUT_DIR = Path("output/femuss_comparison")
 
 SEED = 42
@@ -300,8 +320,10 @@ def create_rk4_comparison(
     boundary_projection_tol=1e-6,
     clamp_min_mask=None,
     clamp_max_mask=None,
+    levelset_gpu=None,
 ):
     """Create RK4 step function (same inline pattern as diagnostic)."""
+    use_levelset_mask = config.RK4_LEVELSET_MASK and levelset_gpu is not None
 
     # Per-wall masks: default to all-clamp if not provided
     if clamp_min_mask is None:
@@ -310,15 +332,12 @@ def create_rk4_comparison(
         clamp_max_mask = jnp.array([True, True, True])
 
     def clamp_to_bbox(pos):
-        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, mesh_bbox_min), pos)
-        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, mesh_bbox_max), clamped)
-        return clamped
-
-    def clamp_to_bbox_with_tol(pos):
-        bbox_min_inset = mesh_bbox_min + boundary_projection_tol
-        bbox_max_inset = mesh_bbox_max - boundary_projection_tol
-        clamped = jnp.where(clamp_min_mask, jnp.maximum(pos, bbox_min_inset), pos)
-        clamped = jnp.where(clamp_max_mask, jnp.minimum(clamped, bbox_max_inset), clamped)
+        """Clamp to bbox, applying +tol inward only on the clamped component."""
+        tol = boundary_projection_tol
+        hit_min = clamp_min_mask & (pos < mesh_bbox_min)
+        clamped = jnp.where(hit_min, mesh_bbox_min + tol, pos)
+        hit_max = clamp_max_mask & (clamped > mesh_bbox_max)
+        clamped = jnp.where(hit_max, mesh_bbox_max - tol, clamped)
         return clamped
 
     connectivity = mesh_gpu_connectivity
@@ -443,6 +462,13 @@ def create_rk4_comparison(
         b0 = 1.0 - b1 - b2 - b3
 
         vel = b0*node_vels[0] + b1*node_vels[1] + b2*node_vels[2] + b3*node_vels[3]
+
+        # Level-set masking: zero velocity inside tool (level-set < 0)
+        if use_levelset_mask:
+            node_ls = levelset_gpu[nodes_idx]  # (4,)
+            ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+            vel = jnp.where(ls_val >= 0.0, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
+
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
     # ---- RK4 step ----
@@ -489,7 +515,7 @@ def create_rk4_comparison(
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
-                pos_clamped = clamp_to_bbox_with_tol(pos_final)
+                pos_clamped = clamp_to_bbox(pos_final)
                 elem_clamped = search_l0_l1_l2(pos_clamped, elem_k4)
                 lost = elem_final < 0
                 pos_final = jnp.where(lost, pos_clamped, pos_final)
@@ -654,12 +680,19 @@ def main():
     print(f"  Bbox clamp:           {'ON' if RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
     print(f"  Last-valid vel:       {'ON' if RK4_SUBSTEP_LAST_VALID_VEL else 'OFF'}")
     print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
-    print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
+    print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all walls clamp (default)'}")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
+    print(f"  Collect stats:        {config.RK4_COLLECT_STATS} (library RK4 only, not this benchmark)")
+    print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (field: '{LEVELSET_FIELD_NAME}')")
     print("=" * 80)
 
     # Build per-wall clamp masks from config
     wall_config = config.RK4_BOUNDARY_WALLS
+    if wall_config is not None and not isinstance(wall_config, dict):
+        # Shorthand: 'clamp' or 'outlet' applied to all walls → treat as None (all clamp)
+        # For per-wall control, use a dict: {'x_max': 'outlet', ...}
+        print(f"  WARNING: RK4_BOUNDARY_WALLS='{wall_config}' is not a dict, treating as None (all clamp)")
+        wall_config = None
     if wall_config is None:
         clamp_min_mask = jnp.array([True, True, True])
         clamp_max_mask = jnp.array([True, True, True])
@@ -699,6 +732,52 @@ def main():
     mesh_bbox_min_cpu = node_positions.min(axis=0).astype(config.FLOAT_DTYPE_NP)
     mesh_bbox_max_cpu = node_positions.max(axis=0).astype(config.FLOAT_DTYPE_NP)
     print(f"  Mesh bbox: [{mesh_bbox_min_cpu}] → [{mesh_bbox_max_cpu}]")
+
+    # Load level-set field for tool masking (if enabled)
+    levelset_cpu = None
+    if config.RK4_LEVELSET_MASK:
+        # Load level-set from the first valid mesh file
+        # Use the same file used for velocity to ensure same node ordering
+        start_ts, end_ts = VELOCITY_TIMESTEP_RANGE
+        ls_raw = None
+        for ts in range(start_ts, end_ts + 1):
+            ls_file = MESH_BASE_PATH / MESH_FILE_PATTERN.format(timestep=ts)
+            reader = vtk.vtkXMLPUnstructuredGridReader()
+            reader.SetFileName(str(ls_file))
+            reader.Update()
+            pd = reader.GetOutput().GetPointData()
+            if pd.HasArray(LEVELSET_FIELD_NAME):
+                ls_raw = vtk_to_numpy(pd.GetArray(LEVELSET_FIELD_NAME)).astype(np.float64)
+                break
+        if ls_raw is None:
+            print(f"  WARNING: Level-set field '{LEVELSET_FIELD_NAME}' not found, disabling mask")
+            config.RK4_LEVELSET_MASK = False
+        else:
+            # Deduplicate: expand to (1, n_nodes_raw, 3) to pass through deduplicate_nodes
+            n_raw = ls_raw.shape[0]
+            ls_scalar = ls_raw.ravel()  # (n_nodes_raw,)
+            ls_as_vel = np.zeros((1, n_raw, 3), dtype=np.float64)
+            ls_as_vel[0, :, 0] = ls_scalar
+            # Re-load raw positions for dedup (same file)
+            raw_pos = vtk_to_numpy(reader.GetOutput().GetPoints().GetData()).astype(np.float64)
+            raw_conn = connectivity  # already remapped, but we need raw for dedup
+            # Build node_map directly from raw positions (same logic as deduplicate_nodes)
+            seen = {}
+            node_map = np.zeros(n_raw, dtype=np.int32)
+            new_id = 0
+            for old_id in range(n_raw):
+                key = tuple(raw_pos[old_id])
+                if key not in seen:
+                    seen[key] = new_id
+                    new_id += 1
+                node_map[old_id] = seen[key]
+            n_dedup = node_positions.shape[0]
+            levelset_cpu = np.zeros(n_dedup, dtype=config.FLOAT_DTYPE_NP)
+            for old_id in range(n_raw):
+                levelset_cpu[node_map[old_id]] = ls_scalar[old_id]
+            n_neg = np.sum(levelset_cpu < 0)
+            print(f"  Level-set loaded: {n_neg:,}/{n_dedup:,} nodes inside tool "
+                  f"({100*n_neg/n_dedup:.1f}%)")
 
     # ==================================================================
     # [2/7] Precompute metadata (identical to benchmark_rk4_diagnostic.py)
@@ -768,6 +847,7 @@ def main():
 
     mesh_bbox_min_gpu = jax.device_put(mesh_bbox_min_cpu)
     mesh_bbox_max_gpu = jax.device_put(mesh_bbox_max_cpu)
+    levelset_gpu = jax.device_put(levelset_cpu) if levelset_cpu is not None else None
     print("  Uploaded to GPU")
 
     # ==================================================================
@@ -851,6 +931,7 @@ def main():
         boundary_projection_tol=config.RK4_BOUNDARY_PROJECTION_TOL,
         clamp_min_mask=clamp_min_mask,
         clamp_max_mask=clamp_max_mask,
+        levelset_gpu=levelset_gpu,
     )
 
     # Warmup
