@@ -704,6 +704,9 @@ def main():
     RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
     config.RK4_LEVELSET_MASK = not args.no_levelset
 
+    t_total_start = time.time()
+    stage_times = {}
+
     print("=" * 80)
     print("FEMUSS Particle Tracking Comparison")
     print("=" * 80)
@@ -758,6 +761,7 @@ def main():
     # ==================================================================
     # [1/7] Load mesh (identical to benchmark_rk4_diagnostic.py)
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[1/7] Loading mesh...")
     node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
         base_path=MESH_BASE_PATH,
@@ -826,9 +830,13 @@ def main():
             print(f"  Level-set loaded: {n_neg:,}/{n_dedup:,} nodes inside tool "
                   f"({100*n_neg/n_dedup:.1f}%)")
 
+    stage_times['1_load_mesh'] = time.time() - t_stage
+    print(f"  Stage 1 time: {stage_times['1_load_mesh']:.1f}s")
+
     # ==================================================================
     # [2/7] Precompute metadata (identical to benchmark_rk4_diagnostic.py)
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[2/7] Precomputing metadata...")
 
     config.POINT_IN_TET_METHOD = POINT_IN_TET_METHOD
@@ -847,9 +855,13 @@ def main():
     element_volumes = np.abs(det_values) / 6.0
     print("  Done")
 
+    stage_times['2_precompute'] = time.time() - t_stage
+    print(f"  Stage 2 time: {stage_times['2_precompute']:.1f}s")
+
     # ==================================================================
     # [3/7] Build structures and upload to GPU (identical to benchmark_rk4_diagnostic.py)
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[3/7] Building structures and uploading to GPU...")
 
     octree_struct = build_global_morton_octree(
@@ -897,9 +909,13 @@ def main():
     levelset_gpu = jax.device_put(levelset_cpu) if levelset_cpu is not None else None
     print("  Uploaded to GPU")
 
+    stage_times['3_build_upload'] = time.time() - t_stage
+    print(f"  Stage 3 time: {stage_times['3_build_upload']:.1f}s")
+
     # ==================================================================
     # [4/7] Load FEMUSS particles at start and end timesteps
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[4/7] Loading FEMUSS particles...")
 
     start_file = FEMUSS_PARTICLE_PATH / FEMUSS_FILE_PATTERN.format(timestep=FEMUSS_START_STEP)
@@ -933,9 +949,13 @@ def main():
     # Particle IDs = FEMUSS array indices (for matching at comparison)
     particle_ids = active_indices.astype(np.int32)
 
+    stage_times['4_load_particles'] = time.time() - t_stage
+    print(f"  Stage 4 time: {stage_times['4_load_particles']:.1f}s")
+
     # ==================================================================
     # [5/7] Initial assignment (mesh-aligned multi-local, same as benchmark)
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[5/7] Initial assignment...")
     positions_gpu = jax.device_put(particle_positions)
     n_particles = len(particle_positions)
@@ -955,9 +975,13 @@ def main():
     if n_unassigned > 0:
         print(f"  WARNING: {n_unassigned:,} particles not assigned to any element")
 
+    stage_times['5_initial_assign'] = time.time() - t_stage
+    print(f"  Stage 5 time: {stage_times['5_initial_assign']:.1f}s")
+
     # ==================================================================
     # [6/7] Build RK4 and run
     # ==================================================================
+    t_stage = time.time()
     print(f"\n[6/7] Building RK4...")
 
     rk4_step = create_rk4_comparison(
@@ -988,7 +1012,10 @@ def main():
         positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0
     )
     jax.block_until_ready(positions_gpu)
-    print(f"  Compilation: {time.time() - t_compile:.1f}s")
+    stage_times['6_compile'] = time.time() - t_compile
+    print(f"  Compilation: {stage_times['6_compile']:.1f}s")
+    stage_times['6_build_rk4'] = time.time() - t_stage
+    print(f"  Stage 6 time: {stage_times['6_build_rk4']:.1f}s (incl. compilation)")
 
     # Output directory
     output_subdir = OUTPUT_DIR / f"femuss_{FEMUSS_START_STEP}_to_{femuss_end_step}"
@@ -1033,7 +1060,11 @@ def main():
 
             stats_csv.write(f"{step},{n_active},{n_lost},{new_lost}\n")
 
-            print(f"  Step {step:5d}: active={n_active:,} lost={n_lost:,} (+{new_lost})")
+            elapsed = time.time() - t_start
+            steps_per_sec = step / elapsed if elapsed > 0 else 0
+            eta = (N_STEPS - step) / steps_per_sec if steps_per_sec > 0 else 0
+            print(f"  Step {step:5d}/{N_STEPS}: active={n_active:,} lost={n_lost:,} (+{new_lost})"
+                  f"  [{elapsed:.0f}s elapsed, {steps_per_sec:.1f} step/s, ETA {eta:.0f}s]")
 
             prev_lost = n_lost
 
@@ -1044,9 +1075,11 @@ def main():
             exporter.enqueue_export(step, pos_cpu, eid_cpu, particle_ids)
 
     t_elapsed = time.time() - t_start
+    stage_times['7_tracking'] = t_elapsed
     stats_csv.close()
     exporter.stop()
     print(f"  Exported {exporter.n_exported} VTU files")
+    print(f"  Stage 7 time: {t_elapsed:.1f}s")
 
     # ==================================================================
     # Summary & Comparison
@@ -1090,6 +1123,20 @@ def main():
         },
     )
     print(f"\n  Comparison data saved to {output_subdir / 'comparison_data.npz'}")
+
+    # ==================================================================
+    # Timing Summary
+    # ==================================================================
+    t_total = time.time() - t_total_start
+    print(f"\n{'='*80}")
+    print(f"TIMING SUMMARY")
+    print(f"{'='*80}")
+    for name, t in stage_times.items():
+        pct = 100 * t / t_total if t_total > 0 else 0
+        print(f"  {name:<25s} {t:8.1f}s  ({pct:5.1f}%)")
+    print(f"  {'─'*45}")
+    print(f"  {'TOTAL':<25s} {t_total:8.1f}s")
+    print(f"{'='*80}")
 
     print(f"\nDone.")
 

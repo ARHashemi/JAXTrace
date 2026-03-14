@@ -14,12 +14,14 @@
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
 JAXTRACE=/project/project_465002752/hashemia/JAXTrace
 PKGS=/project/project_465002752/hashemia/required-packages
-INPUT=/scratch/project_465001942/Cases-Edgar/new
+INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid/post
 
 # Fast NVMe for active writing
 FLASH_OUT=/flash/project_465002752/hashemia/run_$SLURM_JOB_ID
 # Final long-term storage
 SCRATCH_OUT=/scratch/project_465002752/hashemia/outputs/run_$SLURM_JOB_ID
+# Monitoring log
+MONITOR_LOG=/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_monitor.log
 
 mkdir -p $FLASH_OUT $SCRATCH_OUT
 
@@ -28,7 +30,43 @@ export MIOPEN_USER_DB_PATH="/tmp/hashemia-miopen-$SLURM_NODEID"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p $MIOPEN_USER_DB_PATH
 
+# ── GPU & Memory Monitor (background) ────────────────────────────────────────
+# Logs GPU utilization, VRAM, and host memory every 30s
+(
+  echo "=== GPU & Memory Monitor === Job $SLURM_JOB_ID === $(date) ==="
+  echo ""
+  while true; do
+    echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
+
+    # AMD GPU stats via rocm-smi
+    if command -v rocm-smi &>/dev/null; then
+      rocm-smi --showuse --showmemuse --showtemp 2>/dev/null | grep -E 'GPU|%|MiB|Temperature' || \
+      rocm-smi 2>/dev/null | tail -n +3
+    fi
+
+    # Host memory
+    echo ""
+    free -h | head -2
+    echo ""
+
+    # Disk usage on flash output
+    if [ -d "$FLASH_OUT" ]; then
+      N_VTU=$(find $FLASH_OUT -name '*.vtu' 2>/dev/null | wc -l)
+      DISK_USAGE=$(du -sh $FLASH_OUT 2>/dev/null | cut -f1)
+      echo "Output: $N_VTU VTU files, $DISK_USAGE on flash"
+    fi
+
+    echo ""
+    sleep 30
+  done
+) > $MONITOR_LOG 2>&1 &
+MONITOR_PID=$!
+
 # ── Run simulation → writes to Flash ──────────────────────────────────────────
+echo "Starting simulation at $(date)"
+echo "Monitor log: $MONITOR_LOG"
+echo ""
+
 srun singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
   $SIF \
@@ -36,8 +74,17 @@ srun singularity exec --cleanenv \
     --input  $INPUT \
     --output $FLASH_OUT
 
+SIM_EXIT=$?
+
+# ── Stop monitor ──────────────────────────────────────────────────────────────
+kill $MONITOR_PID 2>/dev/null
+wait $MONITOR_PID 2>/dev/null
+
+echo ""
+echo "Simulation exited with code $SIM_EXIT at $(date)"
+
 # ── Move results to Scratch after job ─────────────────────────────────────────
-echo "Simulation done. Moving results to scratch..."
-mv $FLASH_OUT/* $SCRATCH_OUT/
-rmdir $FLASH_OUT
+echo "Moving results to scratch..."
+mv $FLASH_OUT/* $SCRATCH_OUT/ 2>/dev/null
+rmdir $FLASH_OUT 2>/dev/null
 echo "Done. Results in $SCRATCH_OUT"
