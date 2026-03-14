@@ -12,19 +12,22 @@ FEMUSS particle data:
   - 'Has Once Left Domain' flag marks particles that left the mesh
 
 Usage:
-    python benchmark_femuss_comparison.py 2>&1 | tee logs/femuss_comparison.log
+    python benchmark_femuss_comparison.py --input /path/to/data --output /path/to/output
+    python benchmark_femuss_comparison.py  # uses defaults for local runs
 """
 
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['JAX_PLATFORMS'] = 'cuda,cpu'
+# Support both NVIDIA (cuda) and AMD (rocm) GPUs
+os.environ.setdefault('JAX_PLATFORMS', 'cuda,rocm,cpu')
 
 import sys
 import time
 import csv
 import queue
 import threading
+import argparse
 import numpy as np
 from pathlib import Path
 
@@ -61,32 +64,71 @@ import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
 # =============================================================================
-# USER CONFIGURATION
+# ARGUMENT PARSING
 # =============================================================================
 
-# --- Mesh ---
-MESH_BASE_PATH = Path("data/FLA/post/0eule")
-MESH_FILE_PATTERN = "cylA_{timestep}.pvtu"
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="FEMUSS Particle Tracking Comparison with JAXTrace",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--input", type=Path, default=Path("data/FLA/post"),
+        help="Base input directory containing 0eule/ (mesh) and 1part/ (FEMUSS particles)",
+    )
+    parser.add_argument(
+        "--output", type=Path, default=Path("output/femuss_comparison"),
+        help="Output directory for VTU files and comparison data",
+    )
+    parser.add_argument(
+        "--mesh-pattern", type=str, default="cylA_{timestep}.pvtu",
+        help="Mesh PVTU file pattern with {timestep} placeholder",
+    )
+    parser.add_argument(
+        "--femuss-pattern", type=str, default="cylA_pt_{timestep}.pvtu",
+        help="FEMUSS particle PVTU file pattern with {timestep} placeholder",
+    )
+    parser.add_argument(
+        "--vel-range", type=int, nargs=2, default=[121, 160], metavar=("START", "END"),
+        help="Velocity timestep range (inclusive) for cyclic loading",
+    )
+    parser.add_argument(
+        "--n-steps", type=int, default=2684,
+        help="Number of RK4 tracking steps",
+    )
+    parser.add_argument(
+        "--dt", type=float, default=0.0025,
+        help="Timestep size for RK4 integration",
+    )
+    parser.add_argument(
+        "--femuss-start", type=int, default=0,
+        help="FEMUSS start step (load particles from this timestep)",
+    )
+    parser.add_argument(
+        "--export-freq", type=int, default=1,
+        help="VTU export frequency (every N steps)",
+    )
+    parser.add_argument(
+        "--log-interval", type=int, default=10,
+        help="Print progress every N steps",
+    )
+    parser.add_argument(
+        "--no-levelset", action="store_true",
+        help="Disable level-set velocity masking",
+    )
+    parser.add_argument(
+        "--no-boundary-proj", action="store_true",
+        help="Disable boundary projection recovery",
+    )
+    return parser.parse_args()
+
+
+# =============================================================================
+# USER CONFIGURATION (defaults, overridden by CLI args in main())
+# =============================================================================
+
 VELOCITY_FIELD_NAME = 'Displacement'
-
-# --- Mesh velocity timestep range ---
-# Range of mesh files to load. The 'Displacement' field is actual velocity (m/s),
-# not cumulative displacement — used directly without differencing.
-# FEMUSS recycles 40 velocity snapshots (1 revolution). Load the full range
-# to match: e.g. (121, 160) for 40 snapshots, cycled via vel_idx % n_timesteps.
-VELOCITY_TIMESTEP_RANGE = (121, 160)
-
-# --- FEMUSS particle data ---
-FEMUSS_PARTICLE_PATH = Path("data/FLA/post/1part")
-FEMUSS_FILE_PATTERN = "cylA_pt_{timestep}.pvtu"
-
-# --- Comparison timesteps ---
-# Load particles from FEMUSS at START_STEP, track for N_STEPS,
-# compare with FEMUSS at END_STEP.
-# END_STEP = START_STEP + N_STEPS
-FEMUSS_START_STEP = 0
-N_STEPS = 2684                   # <-- small for quick testing, set to 50/250 for real runs
-DT = 0.0025
+LEVELSET_FIELD_NAME = 'LEVEL'
 
 # --- Search configuration ---
 ENABLE_L0_SEARCH = True
@@ -102,30 +144,12 @@ POINT_IN_TET_METHOD = 'inverse'
 # --- RK4 sub-step recovery ---
 RK4_SUBSTEP_BBOX_CLAMP = True       # Clamp sub-step positions to mesh bbox
 RK4_SUBSTEP_LAST_VALID_VEL = True   # Fall back to last valid velocity if sub-step search fails
-RK4_BOUNDARY_PROJECTION = True      # Clamp final pos to bbox (inset by tol) and re-search if lost
 
 # --- Boundary projection tolerance (FEMUSS uses ±1e-6) ---
 config.RK4_BOUNDARY_PROJECTION_TOL = 1e-6
 
 # --- Per-wall boundary control ---
-# Set to None for default (all walls clamped), or a dict:
-#   'clamp'   = project back onto this wall (default)
-#   'outlet'  = no treatment (particle exits freely)
-#   'extended' = continue with last velocity outside mesh (not wired in this benchmark)
-# Example: allow particles to exit through x_max:
-#   config.RK4_BOUNDARY_WALLS = {'x_max': 'outlet'}
 config.RK4_BOUNDARY_WALLS = 'clamp'
-
-# --- Level-set velocity masking ---
-# Zero out velocity where level-set < 0 (inside tool region).
-# Matches FEMUSS: if (levelSetValue < 0) AddFluidInteraction = .false.
-config.RK4_LEVELSET_MASK = True
-LEVELSET_FIELD_NAME = 'LEVEL'
-
-# --- Export ---
-EXPORT_FREQUENCY = 1
-LOG_INTERVAL = 10
-OUTPUT_DIR = Path("output/femuss_comparison")
 
 SEED = 42
 
@@ -661,6 +685,25 @@ def compare_with_femuss(jaxtrace_positions, jaxtrace_elem_ids,
 # =============================================================================
 
 def main():
+    args = parse_args()
+
+    # Derive paths from --input base
+    MESH_BASE_PATH = args.input / "0eule"
+    MESH_FILE_PATTERN = args.mesh_pattern
+    FEMUSS_PARTICLE_PATH = args.input / "1part"
+    FEMUSS_FILE_PATTERN = args.femuss_pattern
+    VELOCITY_TIMESTEP_RANGE = tuple(args.vel_range)
+    N_STEPS = args.n_steps
+    DT = args.dt
+    FEMUSS_START_STEP = args.femuss_start
+    EXPORT_FREQUENCY = args.export_freq
+    LOG_INTERVAL = args.log_interval
+    OUTPUT_DIR = args.output
+
+    # Config switches from CLI flags
+    RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
+    config.RK4_LEVELSET_MASK = not args.no_levelset
+
     print("=" * 80)
     print("FEMUSS Particle Tracking Comparison")
     print("=" * 80)
@@ -670,10 +713,15 @@ def main():
     femuss_end_step = FEMUSS_START_STEP + N_STEPS
 
     print(f"\nConfiguration:")
+    print(f"  Input base:           {args.input}")
+    print(f"  Mesh dir:             {MESH_BASE_PATH}")
+    print(f"  FEMUSS particle dir:  {FEMUSS_PARTICLE_PATH}")
+    print(f"  Output dir:           {OUTPUT_DIR}")
     print(f"  FEMUSS start step:    {FEMUSS_START_STEP}")
     print(f"  FEMUSS end step:      {femuss_end_step}")
     print(f"  N_STEPS:              {N_STEPS}")
     print(f"  DT:                   {DT}")
+    print(f"  Velocity range:       {VELOCITY_TIMESTEP_RANGE[0]}-{VELOCITY_TIMESTEP_RANGE[1]}")
     print(f"  L0: {'ON' if ENABLE_L0_SEARCH else 'OFF'}")
     print(f"  L1: {'ON' if ENABLE_L1_SEARCH else 'OFF'}")
     print(f"  L2 method:            {L2_METHOD}")
@@ -682,7 +730,6 @@ def main():
     print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
     print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all walls clamp (default)'}")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
-    print(f"  Collect stats:        {config.RK4_COLLECT_STATS} (library RK4 only, not this benchmark)")
     print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (field: '{LEVELSET_FIELD_NAME}')")
     print("=" * 80)
 
