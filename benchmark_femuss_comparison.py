@@ -72,6 +72,7 @@ def parse_args():
         description="FEMUSS Particle Tracking Comparison with JAXTrace",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    # --- I/O ---
     parser.add_argument(
         "--input", type=Path, default=Path("data/FLA/post"),
         help="Base input directory containing 0eule/ (mesh) and 1part/ (FEMUSS particles)",
@@ -88,8 +89,9 @@ def parse_args():
         "--femuss-pattern", type=str, default="cylA_pt_{timestep}.pvtu",
         help="FEMUSS particle PVTU file pattern with {timestep} placeholder",
     )
+    # --- Simulation parameters ---
     parser.add_argument(
-        "--vel-range", type=int, nargs=2, default=[121, 160], metavar=("START", "END"),
+        "--vel-range", type=int, nargs=2, default=[159, 159], metavar=("START", "END"),
         help="Velocity timestep range (inclusive) for cyclic loading",
     )
     parser.add_argument(
@@ -112,13 +114,57 @@ def parse_args():
         "--log-interval", type=int, default=10,
         help="Print progress every N steps",
     )
+    # --- Tolerances ---
+    parser.add_argument(
+        "--point-in-tet-tol", type=float, default=None,
+        help="Point-in-tet containment tolerance (default: 1e-10 for float64, 1e-6 for float32). "
+             "FEMUSS uses 1e-6.",
+    )
+    parser.add_argument(
+        "--interpolation-det-min", type=float, default=None,
+        help="Minimum determinant for barycentric interpolation (default: 1e-14 for float64)",
+    )
+    parser.add_argument(
+        "--boundary-proj-tol", type=float, default=1e-6,
+        help="Inward tolerance for boundary projection clamping. FEMUSS uses 1e-6.",
+    )
+    # --- RK4 substep policies ---
+    parser.add_argument(
+        "--bbox-clamp", action="store_true", default=True,
+        help="Enable substep bbox clamping (default: on)",
+    )
+    parser.add_argument(
+        "--no-bbox-clamp", action="store_true",
+        help="Disable substep bbox clamping",
+    )
+    parser.add_argument(
+        "--failed-substage", type=str, default="zero_vel",
+        choices=["zero_vel", "last_valid_vel", "skip_step"],
+        help="Policy for failed RK4 substages. "
+             "'zero_vel' matches FEMUSS RK4 behavior (k[i]=0). "
+             "'last_valid_vel' reuses previous substage velocity. "
+             "'skip_step' discards entire step if any substage fails.",
+    )
+    # --- Boundary projection ---
+    parser.add_argument(
+        "--boundary-proj", action="store_true", default=True,
+        help="Enable boundary projection recovery (default: on)",
+    )
+    parser.add_argument(
+        "--no-boundary-proj", action="store_true",
+        help="Disable boundary projection recovery",
+    )
+    # --- Level-set ---
     parser.add_argument(
         "--no-levelset", action="store_true",
         help="Disable level-set velocity masking",
     )
     parser.add_argument(
-        "--no-boundary-proj", action="store_true",
-        help="Disable boundary projection recovery",
+        "--levelset-mode", type=str, default="zero_vel",
+        choices=["zero_vel", "skip_step"],
+        help="Level-set masking mode. "
+             "'zero_vel' zeros velocity inside tool (FEMUSS-equivalent for RK4). "
+             "'skip_step' discards entire step if any substage is inside tool.",
     )
     return parser.parse_args()
 
@@ -140,16 +186,6 @@ L2_METHOD = 'mesh_aligned_octree_multi_local_where'
 
 # --- Point-in-tet ---
 POINT_IN_TET_METHOD = 'inverse'
-
-# --- RK4 sub-step recovery ---
-RK4_SUBSTEP_BBOX_CLAMP = True       # Clamp sub-step positions to mesh bbox
-RK4_SUBSTEP_LAST_VALID_VEL = True   # Fall back to last valid velocity if sub-step search fails
-
-# --- Boundary projection tolerance (FEMUSS uses ±1e-6) ---
-config.RK4_BOUNDARY_PROJECTION_TOL = 1e-6
-
-# --- Per-wall boundary control ---
-config.RK4_BOUNDARY_WALLS = 'clamp'
 
 SEED = 42
 
@@ -338,16 +374,25 @@ def create_rk4_comparison(
     n_hops=5,
     mesh_bbox_min=None,
     mesh_bbox_max=None,
-    use_bbox_clamp=False,
-    use_last_valid_vel=False,
-    use_boundary_projection=False,
-    boundary_projection_tol=1e-6,
     clamp_min_mask=None,
     clamp_max_mask=None,
     levelset_gpu=None,
 ):
-    """Create RK4 step function (same inline pattern as diagnostic)."""
+    """Create RK4 step function. Reads policies from config at creation time."""
+    # Capture all config at creation time (Python-level, resolved before JIT)
+    use_bbox_clamp = config.RK4_SUBSTEP_BBOX_CLAMP and mesh_bbox_min is not None
+    use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
+    boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
     use_levelset_mask = config.RK4_LEVELSET_MASK and levelset_gpu is not None
+    levelset_mode = config.RK4_LEVELSET_MODE if use_levelset_mask else None
+
+    # Failed substage policy (backward compat with deprecated flag)
+    failed_substage_policy = config.RK4_FAILED_SUBSTAGE_POLICY
+    if config.RK4_SUBSTEP_LAST_VALID_VEL:
+        failed_substage_policy = 'last_valid_vel'
+    use_last_valid_vel = (failed_substage_policy == 'last_valid_vel')
+    use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
+    use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
     # Per-wall masks: default to all-clamp if not provided
     if clamp_min_mask is None:
@@ -495,6 +540,40 @@ def create_rk4_comparison(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    # ---- Check inside tool (for skip_step level-set mode) ----
+    def check_inside_tool(pos, elem_id):
+        """Returns True if position is inside tool (level-set < 0)."""
+        valid = (elem_id >= 0) & (elem_id < len(connectivity))
+        nodes_idx = connectivity[elem_id]
+        nodes = node_positions[nodes_idx]
+        node_ls = levelset_gpu[nodes_idx]
+
+        v0 = nodes[1] - nodes[0]
+        v1 = nodes[2] - nodes[0]
+        v2 = nodes[3] - nodes[0]
+        vp = pos - nodes[0]
+
+        d00 = jnp.dot(v0, v0)
+        d01 = jnp.dot(v0, v1)
+        d02 = jnp.dot(v0, v2)
+        d11 = jnp.dot(v1, v1)
+        d12 = jnp.dot(v1, v2)
+        d22 = jnp.dot(v2, v2)
+        dp0 = jnp.dot(vp, v0)
+        dp1 = jnp.dot(vp, v1)
+        dp2 = jnp.dot(vp, v2)
+
+        det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+
+        b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
+        b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
+        b3 = (d00 * (d11*dp2 - d12*dp1) - d01 * (d01*dp2 - d02*dp1) + dp0 * (d01*d12 - d02*d11)) / det
+        b0 = 1.0 - b1 - b2 - b3
+
+        ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+        return valid & (ls_val < 0.0)
+
     # ---- RK4 step ----
     @jax.jit
     def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
@@ -536,6 +615,23 @@ def create_rk4_comparison(
 
             pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
             elem_final = search_l0_l1_l2(pos_final, elem_k4)
+
+            # Skip-step policy: discard entire step if any substage failed
+            if use_skip_step_on_fail:
+                any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
+                pos_final = jnp.where(any_failed, pos, pos_final)
+                elem_final = jnp.where(any_failed, elem_id, elem_final)
+
+            # Skip-step policy: discard entire step if any substage is inside tool
+            if use_skip_step_on_tool:
+                any_inside = (
+                    check_inside_tool(pos, elem_k1) |
+                    check_inside_tool(pos_k1, elem_k2) |
+                    check_inside_tool(pos_k2, elem_k3) |
+                    check_inside_tool(pos_k3, elem_k4)
+                )
+                pos_final = jnp.where(any_inside, pos, pos_final)
+                elem_final = jnp.where(any_inside, elem_id, elem_final)
 
             # Boundary projection: clamp to bbox and re-search if lost
             if use_boundary_projection:
@@ -700,9 +796,18 @@ def main():
     LOG_INTERVAL = args.log_interval
     OUTPUT_DIR = args.output
 
-    # Config switches from CLI flags
-    RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
+    # Apply CLI flags to config
+    config.RK4_SUBSTEP_BBOX_CLAMP = not args.no_bbox_clamp
+    config.RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
+    config.RK4_BOUNDARY_PROJECTION_TOL = args.boundary_proj_tol
     config.RK4_LEVELSET_MASK = not args.no_levelset
+    config.RK4_LEVELSET_MODE = args.levelset_mode
+    config.RK4_FAILED_SUBSTAGE_POLICY = args.failed_substage
+    config.RK4_SUBSTEP_LAST_VALID_VEL = False  # deprecated; use --failed-substage
+    if args.point_in_tet_tol is not None:
+        config.POINT_IN_TET_TOLERANCE = args.point_in_tet_tol
+    if args.interpolation_det_min is not None:
+        config.INTERPOLATION_DET_MIN = args.interpolation_det_min
 
     t_total_start = time.time()
     stage_times = {}
@@ -728,12 +833,14 @@ def main():
     print(f"  L0: {'ON' if ENABLE_L0_SEARCH else 'OFF'}")
     print(f"  L1: {'ON' if ENABLE_L1_SEARCH else 'OFF'}")
     print(f"  L2 method:            {L2_METHOD}")
-    print(f"  Bbox clamp:           {'ON' if RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
-    print(f"  Last-valid vel:       {'ON' if RK4_SUBSTEP_LAST_VALID_VEL else 'OFF'}")
-    print(f"  Boundary projection:  {'ON' if RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
-    print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all walls clamp (default)'}")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
-    print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (field: '{LEVELSET_FIELD_NAME}')")
+    print(f"  Point-in-tet tol:     {config.POINT_IN_TET_TOLERANCE:.0e}")
+    print(f"  Interpolation det min:{config.INTERPOLATION_DET_MIN:.0e}")
+    print(f"  Bbox clamp:           {'ON' if config.RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
+    print(f"  Failed substage:      {config.RK4_FAILED_SUBSTAGE_POLICY}")
+    print(f"  Boundary projection:  {'ON' if config.RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
+    print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
+    print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (mode: {config.RK4_LEVELSET_MODE}, field: '{LEVELSET_FIELD_NAME}')")
     print("=" * 80)
 
     # Build per-wall clamp masks from config
@@ -996,10 +1103,6 @@ def main():
         n_hops=N_HOPS,
         mesh_bbox_min=mesh_bbox_min_gpu,
         mesh_bbox_max=mesh_bbox_max_gpu,
-        use_bbox_clamp=RK4_SUBSTEP_BBOX_CLAMP,
-        use_last_valid_vel=RK4_SUBSTEP_LAST_VALID_VEL,
-        use_boundary_projection=RK4_BOUNDARY_PROJECTION,
-        boundary_projection_tol=config.RK4_BOUNDARY_PROJECTION_TOL,
         clamp_min_mask=clamp_min_mask,
         clamp_max_mask=clamp_max_mask,
         levelset_gpu=levelset_gpu,

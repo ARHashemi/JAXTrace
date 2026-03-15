@@ -72,7 +72,13 @@ srun singularity exec --cleanenv \
   $SIF \
   python $JAXTRACE/benchmark_femuss_comparison.py \
     --input  $INPUT \
-    --output $FLASH_OUT
+    --output $FLASH_OUT \
+    --failed-substage zero_vel \
+    --levelset-mode zero_vel \
+    --no-bbox-clamp \
+    --boundary-proj \
+    --boundary-proj-tol 1e-6 \
+    --point-in-tet-tol 1e-6
 
 SIM_EXIT=$?
 

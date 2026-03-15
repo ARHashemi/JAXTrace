@@ -129,10 +129,18 @@ def _create_rk4_fully_fused_timedep_impl(
 
     # Capture RK4 sub-step recovery config at creation time.
     use_bbox_clamp = config.RK4_SUBSTEP_BBOX_CLAMP and mesh_bbox_min is not None
-    use_last_valid_vel = config.RK4_SUBSTEP_LAST_VALID_VEL
     use_boundary_projection = config.RK4_BOUNDARY_PROJECTION and mesh_bbox_min is not None
     boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
     use_levelset_mask = config.RK4_LEVELSET_MASK and levelset_gpu is not None
+    levelset_mode = config.RK4_LEVELSET_MODE if use_levelset_mask else None
+
+    # Failed substage policy: backward compat with deprecated RK4_SUBSTEP_LAST_VALID_VEL
+    failed_substage_policy = config.RK4_FAILED_SUBSTAGE_POLICY
+    if config.RK4_SUBSTEP_LAST_VALID_VEL:
+        failed_substage_policy = 'last_valid_vel'
+    use_last_valid_vel = (failed_substage_policy == 'last_valid_vel')
+    use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
+    use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
     # Per-wall boundary control: build (3,) boolean masks for min/max walls.
     # True = apply clamping on this wall, False = outlet (no treatment).
@@ -543,6 +551,39 @@ def _create_rk4_fully_fused_timedep_impl(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    def check_inside_tool(pos, elem_id):
+        """Check if position is inside tool (level-set < 0). Returns boolean."""
+        valid = (elem_id >= 0) & (elem_id < len(connectivity))
+        nodes_idx = connectivity[elem_id]
+        nodes = node_positions[nodes_idx]
+        node_ls = levelset_gpu[nodes_idx]
+
+        v0 = nodes[1] - nodes[0]
+        v1 = nodes[2] - nodes[0]
+        v2 = nodes[3] - nodes[0]
+        vp = pos - nodes[0]
+
+        d00 = jnp.dot(v0, v0)
+        d01 = jnp.dot(v0, v1)
+        d02 = jnp.dot(v0, v2)
+        d11 = jnp.dot(v1, v1)
+        d12 = jnp.dot(v1, v2)
+        d22 = jnp.dot(v2, v2)
+        dp0 = jnp.dot(vp, v0)
+        dp1 = jnp.dot(vp, v1)
+        dp2 = jnp.dot(vp, v2)
+
+        det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+
+        b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
+        b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
+        b3 = (d00 * (d11*dp2 - d12*dp1) - d01 * (d01*dp2 - d02*dp1) + dp0 * (d01*d12 - d02*d11)) / det
+        b0 = 1.0 - b1 - b2 - b3
+
+        ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+        return valid & (ls_val < 0.0)
+
     # ============================================================================
     # Per-wall clamping helpers (resolved at trace time via masks)
     # ============================================================================
@@ -657,6 +698,27 @@ def _create_rk4_fully_fused_timedep_impl(
                     elem_final, lvl_final = search_result_final
                 else:
                     elem_final = search_result_final
+
+                # Skip-step policy: discard entire step if any substage failed
+                if use_skip_step_on_fail:
+                    any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
+                    pos_final = jnp.where(any_failed, pos, pos_final)
+                    elem_final = jnp.where(any_failed, elem_id, elem_final)
+                    if collect_stats:
+                        lvl_final = jnp.where(any_failed, jnp.int8(-1), lvl_final)
+
+                # Skip-step policy: discard entire step if any substage is inside tool
+                if use_skip_step_on_tool:
+                    any_inside = (
+                        check_inside_tool(pos, elem_k1) |
+                        check_inside_tool(pos_k1, elem_k2) |
+                        check_inside_tool(pos_k2, elem_k3) |
+                        check_inside_tool(pos_k3, elem_k4)
+                    )
+                    pos_final = jnp.where(any_inside, pos, pos_final)
+                    elem_final = jnp.where(any_inside, elem_id, elem_final)
+                    if collect_stats:
+                        lvl_final = jnp.where(any_inside, jnp.int8(-1), lvl_final)
 
                 # Boundary projection: clamp to bbox and re-search if lost
                 if use_boundary_projection:

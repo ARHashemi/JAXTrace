@@ -269,32 +269,68 @@ always has a chance of finding an element, preventing zero-velocity corruption.
 
 Requires mesh_bbox_min and mesh_bbox_max to be passed to the RK4 constructor.
 
+FEMUSS note: FEMUSS does NOT clamp substep positions. When a substage exits the
+domain, the element search simply fails and k[i] = 0 (zero velocity for that
+substage). This option is a JAXTrace extension for additional robustness.
+
 Default: False
+"""
+
+RK4_FAILED_SUBSTAGE_POLICY = 'zero_vel'
+"""
+Policy when an RK4 substage element search fails (particle outside domain).
+
+Options:
+    'zero_vel'        - Use zero velocity for the failed substage (k[i] = 0).
+                        The RK4 weighted sum naturally reduces the step size.
+                        MATCHES FEMUSS RK4 BEHAVIOR: when element is not found,
+                        FluidInteractionFunction is never called, so
+                        ParticleInteractionQuantity stays 0 → k[i] = 0.
+
+    'last_valid_vel'  - Reuse the previous substage's velocity.
+                        k2 falls back to k1, k3→k2, k4→k3.
+                        JAXTrace extension, NOT FEMUSS behavior.
+                        Prevents velocity "holes" when particles temporarily
+                        overshoot the mesh boundary during RK4 substages.
+
+    'skip_step'       - If ANY substage search fails, discard the entire step.
+                        Particle stays at its previous position (pos_final = pos).
+                        Most conservative option, more aggressive than FEMUSS.
+
+This policy applies AFTER RK4_SUBSTEP_BBOX_CLAMP (if enabled). Bbox clamping
+runs before the search; this policy handles what happens when the search STILL
+fails after clamping (or when clamping is disabled).
+
+Default: 'zero_vel' (FEMUSS-equivalent)
 """
 
 RK4_SUBSTEP_LAST_VALID_VEL = False
 """
-When a sub-step search fails (element not found), reuse the previous stage's
-velocity instead of returning zero.
+DEPRECATED: Use RK4_FAILED_SUBSTAGE_POLICY = 'last_valid_vel' instead.
 
-This prevents RK4 integration corruption when intermediate positions temporarily
-exit the mesh domain. The fallback velocity is a physically reasonable approximation
-(the particle just crossed a boundary region slightly).
-
-Cascade: vel_k2 falls back to vel_k1, vel_k3 to vel_k2, vel_k4 to vel_k3.
+When True, overrides RK4_FAILED_SUBSTAGE_POLICY to 'last_valid_vel'.
+Kept for backward compatibility.
 
 Default: False
 """
 
+# ============================================================================
+# RK4 Boundary Projection (Final Position)
+# ============================================================================
+
 RK4_BOUNDARY_PROJECTION = False
 """
 When the final-position search fails (particle exits mesh after RK4 integration),
-clamp pos_final to the mesh bounding box (inset by RK4_BOUNDARY_PROJECTION_TOL) and
-re-search. If the re-search succeeds, keep the particle alive at the projected position.
+clamp pos_final to the mesh bounding box (inset by RK4_BOUNDARY_PROJECTION_TOL)
+and re-search. If the re-search succeeds, keep the particle alive at the
+projected position.
 
 This recovers particles that overshoot the mesh boundary by a small amount during
-the full RK4 step. The clamped position lies just inside the mesh surface, which is
-physically meaningful (the particle is projected back to the nearest boundary).
+the full RK4 step. The clamped position lies just inside the mesh surface, which
+is physically meaningful (the particle is projected back to the nearest boundary).
+
+FEMUSS equivalent: kfl_keepParticlesInBoundingBox = .true.
+FEMUSS clamps to MeshRange ± tol and marks ParticleHasLeftDomain = 1.
 
 Requires mesh_bbox_min and mesh_bbox_max to be passed to the RK4 constructor.
 
@@ -305,40 +341,50 @@ RK4_BOUNDARY_PROJECTION_TOL = 1e-6
 """
 Inward tolerance for boundary projection clamping.
 
-When clamping to the bounding box, the position is pushed inward by this tolerance
-to avoid landing exactly on the boundary face where point-in-tet tests may be
-ambiguous. Matches FEMUSS behaviour (MeshRange ± tol).
+When clamping to the bounding box, the position is pushed inward by this
+tolerance to avoid landing exactly on the boundary face where point-in-tet
+tests may be ambiguous.
 
-Default: 1e-6
+FEMUSS uses a similar tolerance in its boundary clamping:
+    Position(idime) = MeshRange(2,idime) - tol
+
+Default: 1e-6 (matches FEMUSS)
 """
 
 RK4_BOUNDARY_WALLS = None
 """
 Per-wall control for boundary clamping and projection.
 
-When None (default), all 6 walls are treated equally (original behaviour).
-When set, must be a dict with keys from {'x_min','x_max','y_min','y_max','z_min','z_max'}.
-Each key maps to a wall treatment mode:
+Affects both RK4_SUBSTEP_BBOX_CLAMP (substep clamping) and
+RK4_BOUNDARY_PROJECTION (final position projection). Each wall can be
+independently configured for different boundary treatments.
 
-    'clamp'    — Apply bbox clamping (sub-step and/or projection) on this wall.
-                 This is the default behaviour when RK4_BOUNDARY_WALLS is None.
-    'outlet'   — No boundary treatment. Particles that exit through this wall
-                 get elem=-1 and are lost (physically correct for outlets).
-    'extended' — Extended domain. Particles that exit through this wall continue
-                 with their last valid velocity (ballistic propagation) for all
-                 remaining time steps. Requires the step function to carry
-                 last_valid_velocities as extra state. See RK4_EXTENDED_DOMAIN.
+When None (default): all 6 walls use 'clamp' behaviour.
 
-Example:
+When set to a dict: keys from {'x_min','x_max','y_min','y_max','z_min','z_max'},
+each mapping to a wall treatment:
+
+    'clamp'  — Apply bbox clamping on this wall (substep and/or projection).
+               Particles that overshoot are pushed back to the wall ± tolerance.
+               This is the default when RK4_BOUNDARY_WALLS is None.
+
+    'outlet' — No boundary treatment on this wall. Particles that exit through
+               this wall get elem_id = -1 and are permanently lost.
+               Physically correct for open boundaries / outlets.
+
+Walls not listed in the dict default to 'clamp'.
+
+Example — clamp all walls except x_max (outlet):
     RK4_BOUNDARY_WALLS = {
-        'x_min': 'clamp', 'x_max': 'extended',
+        'x_min': 'clamp', 'x_max': 'outlet',
         'y_min': 'clamp', 'y_max': 'clamp',
         'z_min': 'clamp', 'z_max': 'clamp',
     }
 
-Walls not listed default to 'clamp'.
+Example — all walls clamped (equivalent to None):
+    RK4_BOUNDARY_WALLS = None
 
-Default: None (all walls clamped, equivalent to all 'clamp')
+Default: None (all walls clamped)
 """
 
 # ============================================================================
@@ -347,23 +393,49 @@ Default: None (all walls clamped, equivalent to all 'clamp')
 
 RK4_LEVELSET_MASK = False
 """
-Zero out interpolated velocity where the level-set field is negative.
+Enable level-set-based velocity masking for particles inside the tool.
 
 When True, a nodal level-set array must be uploaded to GPU and passed to the
-RK4 builder. At each RK4 sub-step, the level-set is interpolated to the
+RK4 builder. At each RK4 substage, the level-set is interpolated at the
 particle position using the same barycentric coordinates as velocity.
-If level_set < 0 (inside the tool), the velocity is set to zero.
+The behavior depends on RK4_LEVELSET_MODE.
 
-This matches FEMUSS behaviour:
-    if (levelSetValue < 0.0) AddFluidInteraction = .false.
+FEMUSS reference (Mod_ParticleTracer.f90, line 1646):
+    if (levelSetValue < 0.0_rp) AddFluidInteraction = .false.
+In FEMUSS RK4 mode, this means k[i] = 0 for substages inside the tool,
+which corresponds to RK4_LEVELSET_MODE = 'zero_vel'.
 
-Requires: levelset_gpu array passed to _create_rk4_fully_fused_timedep_impl().
+Requires: levelset_gpu array passed to the RK4 builder.
 Default: False
+"""
+
+RK4_LEVELSET_MODE = 'zero_vel'
+"""
+Level-set masking mode (only applies when RK4_LEVELSET_MASK = True).
+
+Options:
+    'zero_vel'  - Zero velocity for substages inside tool (level-set < 0).
+                  Each affected substage contributes k[i] = 0 to the RK4 sum.
+                  Unaffected substages contribute normally.
+                  MATCHES FEMUSS RK4 BEHAVIOR: ParticleInteractionQuantity
+                  stays 0 when FluidInteractionFunction is not called, so
+                  k[i] = 0.
+
+    'skip_step' - If ANY RK4 substage is inside the tool (level-set < 0),
+                  discard the ENTIRE step. Particle stays at its previous
+                  position (pos_final = pos_start, elem_final = elem_start).
+                  MORE AGGRESSIVE than FEMUSS RK4 (which only zeros the
+                  affected substages, not the whole step).
+                  Use case: prevent any tool-contaminated displacement from
+                  accumulating in particles near the tool boundary.
+
+Default: 'zero_vel' (FEMUSS-equivalent)
 """
 
 LEVELSET_FIELD_NAME = 'LEVEL'
 """
-Name of the level-set field in PVTU files (default: 'LEVEL').
+Name of the level-set field in PVTU files.
+Default: 'LEVEL'
 """
 
 # ============================================================================
@@ -511,15 +583,34 @@ def validate_config():
                         f"Valid options: {valid_methods}")
 
     if USE_PRECOMPUTED_AABB and USE_AABB_FILTER:
-        print("⚠️  WARNING: USE_PRECOMPUTED_AABB=True may cause OOM in vmap/scan!")
+        print("WARNING: USE_PRECOMPUTED_AABB=True may cause OOM in vmap/scan!")
         print("   Consider setting USE_PRECOMPUTED_AABB=False to compute AABBs on-the-fly.")
 
     if L1_MAX_HOPS < 1 or L1_MAX_HOPS > 4:
         raise ValueError(f"L1_MAX_HOPS must be in range [1, 4], got {L1_MAX_HOPS}")
 
     if VALIDATE_METHOD_AGREEMENT and POINT_IN_TET_METHOD == "current":
-        print("⚠️  WARNING: VALIDATE_METHOD_AGREEMENT=True with POINT_IN_TET_METHOD='current' "
+        print("WARNING: VALIDATE_METHOD_AGREEMENT=True with POINT_IN_TET_METHOD='current' "
               "will compare current method with itself (no-op).")
+
+    valid_levelset_modes = ('zero_vel', 'skip_step')
+    if RK4_LEVELSET_MODE not in valid_levelset_modes:
+        raise ValueError(f"Invalid RK4_LEVELSET_MODE: '{RK4_LEVELSET_MODE}'. "
+                        f"Valid options: {valid_levelset_modes}")
+
+    valid_policies = ('zero_vel', 'last_valid_vel', 'skip_step')
+    if RK4_FAILED_SUBSTAGE_POLICY not in valid_policies:
+        raise ValueError(f"Invalid RK4_FAILED_SUBSTAGE_POLICY: '{RK4_FAILED_SUBSTAGE_POLICY}'. "
+                        f"Valid options: {valid_policies}")
+
+    if RK4_SUBSTEP_LAST_VALID_VEL and RK4_FAILED_SUBSTAGE_POLICY != 'last_valid_vel':
+        print(f"WARNING: RK4_SUBSTEP_LAST_VALID_VEL=True overrides "
+              f"RK4_FAILED_SUBSTAGE_POLICY='{RK4_FAILED_SUBSTAGE_POLICY}' "
+              f"to 'last_valid_vel'")
+
+    if RK4_BOUNDARY_WALLS is not None and not isinstance(RK4_BOUNDARY_WALLS, dict):
+        print(f"WARNING: RK4_BOUNDARY_WALLS should be None or a dict, "
+              f"got '{RK4_BOUNDARY_WALLS}'. Will be treated as None (all clamp).")
 
 # Run validation on import
 validate_config()
