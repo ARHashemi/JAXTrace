@@ -67,18 +67,21 @@ echo "Starting simulation at $(date)"
 echo "Monitor log: $MONITOR_LOG"
 echo ""
 
+# All defaults now match FEMUSS behavior:
+#   --failed-substage zero_vel   (k[i]=0 for failed substages)
+#   --levelset-mode zero_vel     (zero velocity inside tool)
+#   --bbox-clamp OFF             (no substep bbox clamping)
+#   --boundary-proj ON           (boundary projection recovery)
+#   --boundary-proj-tol 1e-6     (FEMUSS tolerance)
+#   --point-in-tet-tol 1e-6      (FEMUSS tolerance)
+#   --pin-velocity ON            (reconstruct composite velocity field)
+#   --pin-rpm -600               (FEMUSS PROCESS_PARAMETERS RPM)
 srun singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
   $SIF \
   python $JAXTRACE/benchmark_femuss_comparison.py \
     --input  $INPUT \
-    --output $FLASH_OUT \
-    --failed-substage zero_vel \
-    --levelset-mode zero_vel \
-    --no-bbox-clamp \
-    --boundary-proj \
-    --boundary-proj-tol 1e-6 \
-    --point-in-tet-tol 1e-6
+    --output $FLASH_OUT
 
 SIM_EXIT=$?
 

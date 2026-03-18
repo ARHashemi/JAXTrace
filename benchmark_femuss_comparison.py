@@ -116,9 +116,8 @@ def parse_args():
     )
     # --- Tolerances ---
     parser.add_argument(
-        "--point-in-tet-tol", type=float, default=None,
-        help="Point-in-tet containment tolerance (default: 1e-10 for float64, 1e-6 for float32). "
-             "FEMUSS uses 1e-6.",
+        "--point-in-tet-tol", type=float, default=1e-6,
+        help="Point-in-tet containment tolerance. FEMUSS uses 1e-6.",
     )
     parser.add_argument(
         "--interpolation-det-min", type=float, default=None,
@@ -130,12 +129,12 @@ def parse_args():
     )
     # --- RK4 substep policies ---
     parser.add_argument(
-        "--bbox-clamp", action="store_true", default=True,
-        help="Enable substep bbox clamping (default: on)",
+        "--bbox-clamp", action="store_true", default=False,
+        help="Enable substep bbox clamping (FEMUSS does not use this)",
     )
     parser.add_argument(
         "--no-bbox-clamp", action="store_true",
-        help="Disable substep bbox clamping",
+        help="Disable substep bbox clamping (default, matches FEMUSS)",
     )
     parser.add_argument(
         "--failed-substage", type=str, default="zero_vel",
@@ -165,6 +164,42 @@ def parse_args():
         help="Level-set masking mode. "
              "'zero_vel' zeros velocity inside tool (FEMUSS-equivalent for RK4). "
              "'skip_step' discards entire step if any substage is inside tool.",
+    )
+    # --- Pin velocity reconstruction (FEMUSS embedded FSW equivalent) ---
+    parser.add_argument(
+        "--pin-velocity", action="store_true", default=True,
+        help="Reconstruct pin rotation velocity for nodes inside tool (level-set < 0). "
+             "FEMUSS internally overwrites inside-tool node velocities with rigid body "
+             "rotation (omega x r) but the PVTU 'Displacement' field contains the raw "
+             "solver solution instead. This flag reconstructs the composite velocity "
+             "field that the FEMUSS particle tracer actually uses. Default: ON.",
+    )
+    parser.add_argument(
+        "--no-pin-velocity", action="store_true", default=False,
+        help="Disable pin velocity reconstruction (use raw PVTU velocity everywhere).",
+    )
+    parser.add_argument(
+        "--pin-rpm", type=float, default=-600.0,
+        help="Pin rotation speed in RPM (revolutions per minute). "
+             "Sign convention: positive = clockwise when viewed from +axis "
+             "(matches FEMUSS convention where vx=omega*y, vy=-omega*x). "
+             "Default: -600 (CCW, matching FEMUSS PROCESS_PARAMETERS RPM).",
+    )
+    parser.add_argument(
+        "--pin-center", type=float, nargs=3, default=[0.0, 0.0, 0.0],
+        metavar=("X", "Y", "Z"),
+        help="Pin rotation axis center point (in mesh coordinates, typically meters).",
+    )
+    parser.add_argument(
+        "--pin-axis", type=float, nargs=3, default=[0.0, 0.0, 1.0],
+        metavar=("AX", "AY", "AZ"),
+        help="Pin rotation axis direction vector (will be normalized). "
+             "Default [0,0,1] = rotation around Z axis.",
+    )
+    parser.add_argument(
+        "--pin-tilt", type=float, default=0.0,
+        help="Pin tilting angle in degrees (tilts the axis in the XZ plane). "
+             "Overrides --pin-axis if non-zero (matches FEMUSS pp_tiltingAngle).",
     )
     return parser.parse_args()
 
@@ -238,6 +273,120 @@ def load_femuss_particles(filepath):
         'has_left_domain': has_left,
         'n_particles': n,
     }
+
+
+# =============================================================================
+# Pin Velocity Reconstruction (FEMUSS embedded FSW equivalent)
+# =============================================================================
+
+def reconstruct_pin_velocity(
+    node_positions: np.ndarray,
+    velocity_sequence: np.ndarray,
+    levelset: np.ndarray,
+    rpm: float,
+    center: np.ndarray,
+    axis: np.ndarray,
+    tilt_deg: float = 0.0,
+) -> np.ndarray:
+    """
+    Overwrite velocity at inside-tool nodes with rigid body pin rotation.
+
+    This reconstructs the composite velocity field that the FEMUSS particle
+    tracer uses internally (FswData%Velocity). The PVTU 'Displacement' field
+    contains the raw solver solution, but FEMUSS overwrites inside-tool nodes
+    (PointType < 0, equivalent to level-set < 0) with the pin rotation velocity
+    v = omega x r, where omega is the angular velocity vector and r is the
+    radial vector from the pin axis to the node.
+
+    Matches FEMUSS som_fswEndite() + som_ComputePinVelocityEmbedded().
+
+    Parameters
+    ----------
+    node_positions : (N, 3) float64
+        Node coordinates.
+    velocity_sequence : (T, N, 3) float64
+        Velocity field for T timesteps. Modified IN-PLACE.
+    levelset : (N,) float64
+        Level-set field. Nodes with levelset < 0 are inside the tool.
+    rpm : float
+        Pin rotation speed in RPM. Positive = CW viewed from +axis
+        (FEMUSS convention: vx = omega*y, vy = -omega*x).
+    center : (3,) array
+        Point on the pin rotation axis.
+    axis : (3,) array
+        Pin rotation axis direction (will be normalized).
+    tilt_deg : float
+        Tilting angle in degrees (tilts axis in XZ plane, matching FEMUSS
+        pp_tiltingAngle). Overrides axis if non-zero.
+
+    Returns
+    -------
+    velocity_sequence : (T, N, 3) float64
+        Modified velocity sequence (same array, modified in-place).
+    n_overwritten : int
+        Number of nodes overwritten.
+    """
+    center = np.asarray(center, dtype=np.float64)
+    axis = np.asarray(axis, dtype=np.float64)
+
+    # Apply tilting angle (FEMUSS convention: tilt in XZ plane)
+    if abs(tilt_deg) > 1e-12:
+        alpha = np.radians(tilt_deg)
+        axis = np.array([np.sin(alpha), 0.0, np.cos(alpha)], dtype=np.float64)
+
+    # Normalize axis
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm < 1e-15:
+        raise ValueError("Pin axis has zero length")
+    axis = axis / axis_norm
+
+    # Angular velocity (rad/s)
+    # Negate to match FEMUSS convention: positive RPM = CW from +axis.
+    # FEMUSS conforming: vx = omega*y, vy = -omega*x (CW for positive omega).
+    # Cross product (omega_vec x r) gives CCW for positive omega,
+    # so we negate to get CW.
+    omega = -(rpm / 60.0 * 2.0 * np.pi)  # scalar, negated for CW convention
+
+    # Find inside-tool nodes
+    inside_mask = levelset < 0
+    n_inside = inside_mask.sum()
+    if n_inside == 0:
+        print("  WARNING: No inside-tool nodes found (levelset < 0)")
+        return velocity_sequence, 0
+
+    inside_indices = np.where(inside_mask)[0]
+    inside_pos = node_positions[inside_indices]  # (M, 3)
+
+    # Compute pin velocity for each inside-tool node: v = omega_vec x r
+    # where r is the vector from the closest point on the axis to the node.
+    #
+    # FEMUSS (som_ComputePinVelocityEmbedded):
+    #   P3 = closest point on axis to node
+    #   rr = node - P3  (radial vector)
+    #   rN = |rr|
+    #   uDir = cross(rr/rN, axis/|axis|)  (tangential direction)
+    #   pinVelocity = rN * omega * uDir
+    #
+    # Equivalent to: v = omega_vec x rr, where omega_vec = omega * axis
+
+    # Vector from center to node
+    to_node = inside_pos - center[np.newaxis, :]  # (M, 3)
+
+    # Project onto axis to find closest point
+    proj_len = np.dot(to_node, axis)  # (M,)
+    # Radial vector (perpendicular to axis)
+    radial = to_node - proj_len[:, np.newaxis] * axis[np.newaxis, :]  # (M, 3)
+
+    # Pin velocity = omega_vec x radial = omega * (axis x radial)
+    omega_vec = omega * axis  # (3,)
+    pin_vel = np.cross(omega_vec[np.newaxis, :], radial)  # (M, 3)
+
+    # Overwrite velocity at inside-tool nodes for ALL timesteps
+    n_timesteps = velocity_sequence.shape[0]
+    for t in range(n_timesteps):
+        velocity_sequence[t, inside_indices, :] = pin_vel
+
+    return velocity_sequence, n_inside
 
 
 # =============================================================================
@@ -796,8 +945,8 @@ def main():
     LOG_INTERVAL = args.log_interval
     OUTPUT_DIR = args.output
 
-    # Apply CLI flags to config
-    config.RK4_SUBSTEP_BBOX_CLAMP = not args.no_bbox_clamp
+    # Apply CLI flags to config (defaults match FEMUSS behavior)
+    config.RK4_SUBSTEP_BBOX_CLAMP = args.bbox_clamp and not args.no_bbox_clamp
     config.RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
     config.RK4_BOUNDARY_PROJECTION_TOL = args.boundary_proj_tol
     config.RK4_LEVELSET_MASK = not args.no_levelset
@@ -808,6 +957,9 @@ def main():
         config.POINT_IN_TET_TOLERANCE = args.point_in_tet_tol
     if args.interpolation_det_min is not None:
         config.INTERPOLATION_DET_MIN = args.interpolation_det_min
+
+    # Resolve pin velocity flag
+    use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
 
     t_total_start = time.time()
     stage_times = {}
@@ -841,6 +993,11 @@ def main():
     print(f"  Boundary projection:  {'ON' if config.RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
     print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
     print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (mode: {config.RK4_LEVELSET_MODE}, field: '{LEVELSET_FIELD_NAME}')")
+    if use_pin_velocity:
+        pin_axis_str = f"tilt={args.pin_tilt}°" if abs(args.pin_tilt) > 1e-12 else f"axis={args.pin_axis}"
+        print(f"  Pin velocity:         ON (RPM={args.pin_rpm}, center={args.pin_center}, {pin_axis_str})")
+    else:
+        print(f"  Pin velocity:         OFF")
     print("=" * 80)
 
     # Build per-wall clamp masks from config
@@ -936,6 +1093,26 @@ def main():
             n_neg = np.sum(levelset_cpu < 0)
             print(f"  Level-set loaded: {n_neg:,}/{n_dedup:,} nodes inside tool "
                   f"({100*n_neg/n_dedup:.1f}%)")
+
+    # --- Pin velocity reconstruction (FEMUSS embedded FSW equivalent) ---
+    if use_pin_velocity:
+        if levelset_cpu is None:
+            print("  WARNING: --pin-velocity requires level-set field; skipping reconstruction")
+        else:
+            print(f"  Reconstructing pin velocity (RPM={args.pin_rpm}, "
+                  f"center={args.pin_center}, tilt={args.pin_tilt}°)...")
+            velocity_sequence, n_overwritten = reconstruct_pin_velocity(
+                node_positions=node_positions,
+                velocity_sequence=velocity_sequence,
+                levelset=levelset_cpu,
+                rpm=args.pin_rpm,
+                center=np.array(args.pin_center),
+                axis=np.array(args.pin_axis),
+                tilt_deg=args.pin_tilt,
+            )
+            n_nodes = node_positions.shape[0]
+            print(f"  Pin velocity applied to {n_overwritten:,}/{n_nodes:,} nodes "
+                  f"({100*n_overwritten/n_nodes:.1f}%)")
 
     stage_times['1_load_mesh'] = time.time() - t_stage
     print(f"  Stage 1 time: {stage_times['1_load_mesh']:.1f}s")
