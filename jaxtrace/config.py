@@ -432,6 +432,27 @@ Options:
 Default: 'zero_vel' (FEMUSS-equivalent)
 """
 
+RK4_L0_SKIP_BOUNDARY_ELEMENTS = True
+"""
+Skip L0 cached-element check for elements at the tool boundary (mixed level-set).
+
+When True, elements whose nodes have BOTH positive and negative level-set values
+are flagged as "boundary elements". L0 caching is bypassed for these elements,
+forcing a fresh L1/L2 search every substage — matching FEMUSS behavior, which
+always does a fresh octree search (no caching at all).
+
+This fixes trajectory divergence near the tool: adjacent elements at the tool
+boundary can have opposite level-set sign at the centroid, so L0 caching keeps
+a particle in an element where velocity is applied (LS >= 0) while FEMUSS's
+fresh search would find the adjacent element where velocity is zeroed (LS < 0).
+
+Requires: RK4_LEVELSET_MASK = True and levelset_gpu array.
+Only affects elements with mixed level-set sign (~11% of mesh typically).
+Interior elements (all-positive or all-negative LS) still benefit from L0 caching.
+
+Default: True (FEMUSS-equivalent)
+"""
+
 LEVELSET_FIELD_NAME = 'LEVEL'
 """
 Name of the level-set field in PVTU files.

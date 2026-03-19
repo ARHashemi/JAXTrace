@@ -76,6 +76,7 @@ echo ""
 #   --point-in-tet-tol 1e-6      (FEMUSS tolerance)
 #   --pin-velocity ON            (reconstruct composite velocity field)
 #   --pin-rpm -600               (FEMUSS PROCESS_PARAMETERS RPM)
+#   --l0-skip-boundary ON        (skip L0 cache for mixed-LS elements, fresh search like FEMUSS)
 srun singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
   $SIF \

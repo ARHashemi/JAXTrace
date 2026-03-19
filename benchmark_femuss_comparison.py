@@ -165,6 +165,13 @@ def parse_args():
              "'zero_vel' zeros velocity inside tool (FEMUSS-equivalent for RK4). "
              "'skip_step' discards entire step if any substage is inside tool.",
     )
+    # --- L0 boundary skip (FEMUSS-equivalent fresh search at tool boundary) ---
+    parser.add_argument(
+        "--no-l0-skip-boundary", action="store_true", default=False,
+        help="Disable L0 skip for boundary elements. By default, L0 caching is "
+             "bypassed for elements with mixed level-set sign (tool boundary), "
+             "forcing fresh L1/L2 search — matching FEMUSS's fresh octree search.",
+    )
     # --- Pin velocity reconstruction (FEMUSS embedded FSW equivalent) ---
     parser.add_argument(
         "--pin-velocity", action="store_true", default=True,
@@ -526,6 +533,7 @@ def create_rk4_comparison(
     clamp_min_mask=None,
     clamp_max_mask=None,
     levelset_gpu=None,
+    boundary_elements_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -542,6 +550,12 @@ def create_rk4_comparison(
     use_last_valid_vel = (failed_substage_policy == 'last_valid_vel')
     use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
+
+    # L0 skip for boundary elements (mixed level-set sign at tool boundary)
+    use_l0_skip_boundary = (
+        config.RK4_L0_SKIP_BOUNDARY_ELEMENTS
+        and boundary_elements_gpu is not None
+    )
 
     # Per-wall masks: default to all-clamp if not provided
     if clamp_min_mask is None:
@@ -567,6 +581,16 @@ def create_rk4_comparison(
         if not enable_l0:
             return jnp.int32(-1)
         is_valid = (cached_elem_id >= 0) & (cached_elem_id < len(connectivity))
+
+        # Skip L0 for boundary elements: force fresh search near tool boundary
+        if use_l0_skip_boundary:
+            is_boundary = jnp.where(
+                is_valid,
+                boundary_elements_gpu[cached_elem_id],
+                False
+            )
+            is_valid = is_valid & (~is_boundary)
+
         inside = jnp.where(
             is_valid,
             point_in_tet_dispatcher(pos, cached_elem_id, connectivity, node_positions,
@@ -953,6 +977,7 @@ def main():
     config.RK4_LEVELSET_MODE = args.levelset_mode
     config.RK4_FAILED_SUBSTAGE_POLICY = args.failed_substage
     config.RK4_SUBSTEP_LAST_VALID_VEL = False  # deprecated; use --failed-substage
+    config.RK4_L0_SKIP_BOUNDARY_ELEMENTS = not args.no_l0_skip_boundary
     if args.point_in_tet_tol is not None:
         config.POINT_IN_TET_TOLERANCE = args.point_in_tet_tol
     if args.interpolation_det_min is not None:
@@ -993,6 +1018,7 @@ def main():
     print(f"  Boundary projection:  {'ON' if config.RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
     print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
     print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (mode: {config.RK4_LEVELSET_MODE}, field: '{LEVELSET_FIELD_NAME}')")
+    print(f"  L0 skip boundary:    {'ON' if config.RK4_L0_SKIP_BOUNDARY_ELEMENTS else 'OFF'}")
     if use_pin_velocity:
         pin_axis_str = f"tilt={args.pin_tilt}°" if abs(args.pin_tilt) > 1e-12 else f"axis={args.pin_axis}"
         print(f"  Pin velocity:         ON (RPM={args.pin_rpm}, center={args.pin_center}, {pin_axis_str})")
@@ -1191,6 +1217,19 @@ def main():
     mesh_bbox_min_gpu = jax.device_put(mesh_bbox_min_cpu)
     mesh_bbox_max_gpu = jax.device_put(mesh_bbox_max_cpu)
     levelset_gpu = jax.device_put(levelset_cpu) if levelset_cpu is not None else None
+
+    # Compute boundary element flag: elements with mixed level-set sign at nodes
+    boundary_elements_gpu = None
+    if levelset_cpu is not None and config.RK4_L0_SKIP_BOUNDARY_ELEMENTS:
+        node_ls = levelset_cpu[connectivity]  # (n_elements, 4)
+        has_positive = np.any(node_ls >= 0, axis=1)
+        has_negative = np.any(node_ls < 0, axis=1)
+        is_boundary = has_positive & has_negative
+        n_boundary = int(np.sum(is_boundary))
+        print(f"  Boundary elements (mixed LS): {n_boundary:,}/{len(connectivity):,} "
+              f"({100*n_boundary/len(connectivity):.1f}%)")
+        boundary_elements_gpu = jax.device_put(is_boundary)
+
     print("  Uploaded to GPU")
 
     stage_times['3_build_upload'] = time.time() - t_stage
@@ -1283,6 +1322,7 @@ def main():
         clamp_min_mask=clamp_min_mask,
         clamp_max_mask=clamp_max_mask,
         levelset_gpu=levelset_gpu,
+        boundary_elements_gpu=boundary_elements_gpu,
     )
 
     # Warmup

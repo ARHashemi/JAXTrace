@@ -64,6 +64,7 @@ def _create_rk4_fully_fused_timedep_impl(
     mesh_bbox_min: Optional[jax.Array] = None,
     mesh_bbox_max: Optional[jax.Array] = None,
     levelset_gpu: Optional[jax.Array] = None,
+    boundary_elements_gpu: Optional[jax.Array] = None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -108,6 +109,11 @@ def _create_rk4_fully_fused_timedep_impl(
         uses mesh-aligned octree instead of Morton curve search.
         Only works with Kuhn tetrahedral meshes (axis-aligned tets).
         Provides ~100% searchability with ~5.9 elements per cell.
+    boundary_elements_gpu : Optional[jax.Array], default=None
+        Boolean array (n_elements,) marking elements at the tool boundary (mixed
+        level-set sign). When RK4_L0_SKIP_BOUNDARY_ELEMENTS is True, L0 caching
+        is bypassed for these elements, forcing fresh L1/L2 search each substage.
+        Matches FEMUSS behavior which always does fresh octree search.
 
     Returns
     -------
@@ -142,6 +148,12 @@ def _create_rk4_fully_fused_timedep_impl(
     use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
+    # L0 skip for boundary elements (mixed level-set sign at tool boundary)
+    use_l0_skip_boundary = (
+        config.RK4_L0_SKIP_BOUNDARY_ELEMENTS
+        and boundary_elements_gpu is not None
+    )
+
     # Per-wall boundary control: build (3,) boolean masks for min/max walls.
     # True = apply clamping on this wall, False = outlet (no treatment).
     # Resolved at trace time — zero runtime cost for disabled walls.
@@ -175,8 +187,22 @@ def _create_rk4_fully_fused_timedep_impl(
     # ============================================================================
 
     def search_l0_single(pos: jax.Array, cached_elem_id: jax.Array) -> jax.Array:
-        """L0: Check if particle still in cached element (single particle)."""
+        """L0: Check if particle still in cached element (single particle).
+
+        When use_l0_skip_boundary is enabled, boundary elements (mixed level-set
+        sign) are treated as L0 miss, forcing a fresh L1/L2 search. This matches
+        FEMUSS behavior which always does a fresh octree search with no caching.
+        """
         is_valid = (cached_elem_id >= 0) & (cached_elem_id < len(connectivity))
+
+        # Skip L0 for boundary elements: force fresh search near tool boundary
+        if use_l0_skip_boundary:
+            is_boundary = jnp.where(
+                is_valid,
+                boundary_elements_gpu[cached_elem_id],
+                False
+            )
+            is_valid = is_valid & (~is_boundary)
 
         # Use GPU-optimized point-in-tet with JIT compilation and relative degeneracy threshold
         inside = jnp.where(
@@ -815,6 +841,7 @@ def create_rk4_fully_fused_timedep(
     mesh_bbox_min=None,
     mesh_bbox_max=None,
     levelset_gpu=None,
+    boundary_elements_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -829,7 +856,7 @@ def create_rk4_fully_fused_timedep(
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
-        mesh_bbox_min, mesh_bbox_max, levelset_gpu,
+        mesh_bbox_min, mesh_bbox_max, levelset_gpu, boundary_elements_gpu,
     )
     return step_fn
 
@@ -856,6 +883,7 @@ def create_rk4_fully_fused_timedep_with_stats(
     mesh_bbox_min=None,
     mesh_bbox_max=None,
     levelset_gpu=None,
+    boundary_elements_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -873,6 +901,6 @@ def create_rk4_fully_fused_timedep_with_stats(
         mesh_aligned_octree, mesh_aligned_morton, mesh_aligned_octree_neighbors,
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
-        mesh_bbox_min, mesh_bbox_max, levelset_gpu,
+        mesh_bbox_min, mesh_bbox_max, levelset_gpu, boundary_elements_gpu,
     )
     return step_fn, step_fn_with_stats
