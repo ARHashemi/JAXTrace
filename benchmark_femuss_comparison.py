@@ -166,28 +166,37 @@ def parse_args():
              "'zero_vel' zeros velocity inside tool (FEMUSS-equivalent for RK4). "
              "'skip_step' discards entire step if any substage is inside tool.",
     )
-    # --- L0 boundary skip (FEMUSS-equivalent fresh search at tool boundary) ---
+    # --- Level-set band widths for search enhancement near tool ---
+    parser.add_argument(
+        "--l0-skip-band", type=float, default=0.0,
+        help="Level-set band width for L0 cache skip. Elements where ANY node "
+             "has |level-set| < this value skip L0 caching (fresh L1/L2 search). "
+             "0.0 = only mixed-sign elements (default). Use e.g. 0.5e-3 for ±0.5mm band.",
+    )
     parser.add_argument(
         "--no-l0-skip-boundary", action="store_true", default=False,
-        help="Disable L0 skip for boundary elements. By default, L0 caching is "
-             "bypassed for elements with mixed level-set sign (tool boundary), "
-             "forcing fresh L1/L2 search — matching FEMUSS's fresh octree search.",
+        help="Disable L0 skip entirely (even for mixed-sign elements).",
     )
-    # --- L1 neighbor method ---
+    parser.add_argument(
+        "--enhanced-search-band", type=float, default=0.0,
+        help="Level-set band width for enhanced search (node L1 + 5x5x5 L2). "
+             "Elements where ANY node has |level-set| < this value use node-based "
+             "L1 neighbors and 5x5x5 L2 instead of face-based L1 and 3x3x3 L2. "
+             "0.0 = disabled, use global --l1-method and --l2-neighborhood instead. "
+             "Use e.g. 1e-3 for ±1mm band around tool boundary.",
+    )
+    # --- L1 neighbor method (global, or baseline outside enhanced band) ---
     parser.add_argument(
         "--l1-method", type=str, default="face", choices=["face", "node"],
-        help="L1 neighbor identification method. "
-             "'face': 4 face-sharing neighbors per element (standard). "
-             "'node': all node-sharing neighbors (20-100+), captures coarse/fine "
-             "boundary crossings in adaptively refined meshes. More memory but "
-             "wider search coverage in one hop.",
+        help="L1 neighbor method (global, or baseline outside enhanced-search-band). "
+             "'face': 4 face-sharing neighbors (standard). "
+             "'node': all node-sharing neighbors (20-100+).",
     )
-    # --- L2 neighborhood size ---
+    # --- L2 neighborhood size (global, or baseline outside enhanced band) ---
     parser.add_argument(
         "--l2-neighborhood", type=int, default=3, choices=[3, 5],
-        help="L2 mesh-aligned octree search neighborhood size. "
-             "3: 3x3x3 = 27 cells per level (default). "
-             "5: 5x5x5 = 125 cells per level (wider search, slower).",
+        help="L2 neighborhood size (global, or baseline outside enhanced-search-band). "
+             "3: 3x3x3 (default). 5: 5x5x5 (wider, slower).",
     )
     # --- Pin velocity reconstruction (FEMUSS embedded FSW equivalent) ---
     parser.add_argument(
@@ -239,11 +248,13 @@ LEVELSET_FIELD_NAME = 'LEVEL'
 ENABLE_L0_SEARCH = True
 ENABLE_L1_SEARCH = True
 N_HOPS = 5
-L1_METHOD = 'face'  # 'face' or 'node'
+L1_METHOD = 'face'  # 'face' or 'node' (global / baseline outside enhanced band)
+L0_SKIP_BAND = 0.0  # Level-set band for L0 skip (0=mixed-sign only)
+ENHANCED_SEARCH_BAND = 0.0  # Level-set band for node L1 + 5x5x5 L2 (0=disabled)
 
 # --- L2 method ---
 L2_METHOD = 'mesh_aligned_octree_multi_local_where'
-L2_NEIGHBORHOOD = 3  # 3 (3x3x3) or 5 (5x5x5)
+L2_NEIGHBORHOOD = 3  # 3 (3x3x3) or 5 (5x5x5) (global / baseline outside enhanced band)
 
 # --- Point-in-tet ---
 POINT_IN_TET_METHOD = 'inverse'
@@ -555,6 +566,8 @@ def create_rk4_comparison(
     levelset_gpu=None,
     boundary_elements_gpu=None,
     l2_neighborhood=3,
+    enhanced_elements_gpu=None,
+    element_neighbors_node_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -576,6 +589,12 @@ def create_rk4_comparison(
     use_l0_skip_boundary = (
         config.RK4_L0_SKIP_BOUNDARY_ELEMENTS
         and boundary_elements_gpu is not None
+    )
+
+    # Enhanced search band: per-element node L1 + 5x5x5 L2
+    use_enhanced_band = (
+        enhanced_elements_gpu is not None
+        and element_neighbors_node_gpu is not None
     )
 
     # Per-wall masks: default to all-clamp if not provided
@@ -620,108 +639,140 @@ def create_rk4_comparison(
         )
         return jnp.where(inside, cached_elem_id, jnp.int32(-1))
 
-    # ---- L1 ----
-    # For node-based neighbors (20-100+), use fori_loop + single hop (wide coverage).
-    # For face-based (4 neighbors), use unrolled loop + multi-hop (narrow but deep).
+    # ---- L1 helpers ----
     _n_neighbors = n_neighbors_per_element
-    _use_node_l1 = (_n_neighbors > 4)
+    _use_node_l1_global = (_n_neighbors > 4)  # global node L1 (--l1-method node)
+
+    def _search_l1_face(pos, start_elem_id):
+        """Face-based L1: multi-hop with adaptive hop count (4 neighbors/hop)."""
+        current_elem = start_elem_id
+        found = False
+        start_elem_valid = start_elem_id >= 0
+
+        # Use face neighbors (first 4 columns, or full array if face-based)
+        face_neighbors = element_neighbors  # shape (n_elem, 4) when face-based
+
+        start_volume = jnp.where(
+            start_elem_valid,
+            mesh_gpu_element_volumes[start_elem_id],
+            config.FLOAT_DTYPE_JNP(1.0)
+        )
+        neighbors_of_start = face_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+        valid_neighbor_mask = neighbors_of_start[:4] >= 0
+        neighbor_volumes = jnp.where(
+            valid_neighbor_mask,
+            mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start[:4], 0)],
+            start_volume
+        )
+        median_neighbor_volume = jnp.median(neighbor_volumes)
+        size_ratio = start_volume / (median_neighbor_volume + 1e-10)
+        n_hops_adaptive = jnp.where(size_ratio < 0.1, jnp.int32(6), jnp.int32(n_hops))
+
+        for hop_idx in range(6):
+            hop_enabled = hop_idx < n_hops_adaptive
+            should_search = (~found) & (current_elem >= 0) & hop_enabled
+
+            neighbors = face_neighbors[jnp.where(should_search, current_elem, 0)]
+            found_containing = jnp.int32(-1)
+
+            for neighbor_idx in range(4):
+                elem_id = neighbors[neighbor_idx]
+                valid = elem_id >= 0
+                check_this = (found_containing < 0) & valid
+                inside = jnp.where(
+                    check_this,
+                    point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
+                                            config.POINT_IN_TET_METHOD),
+                    False
+                )
+                found_containing = jnp.where(inside & check_this, elem_id, found_containing)
+
+            first_valid_neighbor = jnp.where(
+                jnp.any(neighbors[:4] >= 0),
+                neighbors[jnp.argmax(neighbors[:4] >= 0)],
+                current_elem
+            )
+            current_elem = jnp.where(
+                should_search,
+                jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
+                current_elem
+            )
+            found = found | (found_containing >= 0)
+
+        return jnp.where(found, current_elem, jnp.int32(-1))
+
+    def _search_l1_node(pos, start_elem_id, node_neighbors):
+        """Node-based L1: single hop with fori_loop over all neighbors."""
+        start_elem_valid = start_elem_id >= 0
+        neighbors = node_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+        n_valid = jnp.where(start_elem_valid, jnp.sum(neighbors >= 0), jnp.int32(0))
+
+        def test_neighbor(idx, carry):
+            found_elem = carry
+            elem_id = neighbors[idx]
+            valid = (elem_id >= 0) & (found_elem < 0)
+            inside = jnp.where(
+                valid,
+                point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
+                                        config.POINT_IN_TET_METHOD),
+                False
+            )
+            return jnp.where(inside & valid, elem_id, found_elem)
+
+        return jax.lax.fori_loop(0, n_valid, test_neighbor, jnp.int32(-1))
 
     def search_l1_single(pos, start_elem_id):
         if not enable_l1:
             return jnp.int32(-1)
 
-        start_elem_valid = start_elem_id >= 0
-
-        if _use_node_l1:
-            # Node-based: single hop, test all neighbors via fori_loop
-            neighbors = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
-            n_valid = jnp.sum(neighbors >= 0)
-
-            def test_neighbor(idx, carry):
-                found_elem = carry
-                elem_id = neighbors[idx]
-                valid = (elem_id >= 0) & (found_elem < 0)
-                inside = jnp.where(
-                    valid,
-                    point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
-                                            config.POINT_IN_TET_METHOD),
-                    False
-                )
-                return jnp.where(inside & valid, elem_id, found_elem)
-
-            found_elem = jax.lax.fori_loop(
-                0, jnp.where(start_elem_valid, n_valid, 0),
-                test_neighbor,
-                jnp.int32(-1)
-            )
-            return found_elem
-        else:
-            # Face-based: multi-hop with adaptive hop count
-            current_elem = start_elem_id
-            found = False
-
-            start_volume = jnp.where(
+        if _use_node_l1_global:
+            # Global node L1 (--l1-method node): node everywhere
+            return _search_l1_node(pos, start_elem_id, element_neighbors)
+        elif use_enhanced_band:
+            # Per-element dispatch: node L1 in enhanced band, face L1 elsewhere
+            start_elem_valid = start_elem_id >= 0
+            is_enhanced = jnp.where(
                 start_elem_valid,
-                mesh_gpu_element_volumes[start_elem_id],
-                config.FLOAT_DTYPE_JNP(1.0)
+                enhanced_elements_gpu[start_elem_id],
+                False
             )
-            neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
-            valid_neighbor_mask = neighbors_of_start >= 0
-            neighbor_volumes = jnp.where(
-                valid_neighbor_mask,
-                mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start, 0)],
-                start_volume
-            )
-            median_neighbor_volume = jnp.median(neighbor_volumes)
-            size_ratio = start_volume / (median_neighbor_volume + 1e-10)
-            n_hops_adaptive = jnp.where(size_ratio < 0.1, jnp.int32(6), jnp.int32(n_hops))
-
-            for hop_idx in range(6):
-                hop_enabled = hop_idx < n_hops_adaptive
-                should_search = (~found) & (current_elem >= 0) & hop_enabled
-
-                neighbors = element_neighbors[jnp.where(should_search, current_elem, 0)]
-                found_containing = jnp.int32(-1)
-
-                for neighbor_idx in range(4):
-                    elem_id = neighbors[neighbor_idx]
-                    valid = elem_id >= 0
-                    check_this = (found_containing < 0) & valid
-                    inside = jnp.where(
-                        check_this,
-                        point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
-                                                config.POINT_IN_TET_METHOD),
-                        False
-                    )
-                    found_containing = jnp.where(inside & check_this, elem_id, found_containing)
-
-                first_valid_neighbor = jnp.where(
-                    jnp.any(neighbors >= 0),
-                    neighbors[jnp.argmax(neighbors >= 0)],
-                    current_elem
-                )
-                current_elem = jnp.where(
-                    should_search,
-                    jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
-                    current_elem
-                )
-                found = found | (found_containing >= 0)
-
-            return jnp.where(found, current_elem, jnp.int32(-1))
+            result_node = _search_l1_node(pos, start_elem_id, element_neighbors_node_gpu)
+            result_face = _search_l1_face(pos, start_elem_id)
+            return jnp.where(is_enhanced, result_node, result_face)
+        else:
+            return _search_l1_face(pos, start_elem_id)
 
     # ---- L2 ----
-    _l2_use_5x5x5 = (l2_neighborhood == 5)
+    _l2_use_5x5x5_global = (l2_neighborhood == 5)
 
-    def search_l2_single(pos):
-        if _l2_use_5x5x5:
-            elem_id, _ = search_mesh_aligned_octree_5x5x5_where(
-                pos, mesh_aligned_octree, max_tests=jnp.int32(1500)
-            )
-        else:
-            elem_id, _ = search_mesh_aligned_octree_multi_local_where(
-                pos, mesh_aligned_octree, max_tests=jnp.int32(600)
-            )
+    def _search_l2_3x3x3(pos):
+        elem_id, _ = search_mesh_aligned_octree_multi_local_where(
+            pos, mesh_aligned_octree, max_tests=jnp.int32(600)
+        )
         return elem_id
+
+    def _search_l2_5x5x5(pos):
+        elem_id, _ = search_mesh_aligned_octree_5x5x5_where(
+            pos, mesh_aligned_octree, max_tests=jnp.int32(1500)
+        )
+        return elem_id
+
+    def search_l2_single(pos, cached_elem_id=None):
+        if _l2_use_5x5x5_global:
+            # Global 5x5x5 (--l2-neighborhood 5): 5x5x5 everywhere
+            return _search_l2_5x5x5(pos)
+        elif use_enhanced_band and cached_elem_id is not None:
+            # Per-element dispatch: 5x5x5 in enhanced band, 3x3x3 elsewhere
+            is_enhanced = jnp.where(
+                (cached_elem_id >= 0) & (cached_elem_id < len(connectivity)),
+                enhanced_elements_gpu[cached_elem_id],
+                False
+            )
+            result_5x5 = _search_l2_5x5x5(pos)
+            result_3x3 = _search_l2_3x3x3(pos)
+            return jnp.where(is_enhanced, result_5x5, result_3x3)
+        else:
+            return _search_l2_3x3x3(pos)
 
     # ---- Combined search ----
     def search_l0_l1_l2(pos, cached_elem_id):
@@ -731,9 +782,9 @@ def create_rk4_comparison(
         if enable_l1:
             elem_l1 = jnp.where(found_l0, elem_l0, search_l1_single(pos, cached_elem_id))
             found_l1 = elem_l1 >= 0
-            elem_final = jnp.where(found_l1, elem_l1, search_l2_single(pos))
+            elem_final = jnp.where(found_l1, elem_l1, search_l2_single(pos, cached_elem_id))
         else:
-            elem_final = jnp.where(found_l0, elem_l0, search_l2_single(pos))
+            elem_final = jnp.where(found_l0, elem_l0, search_l2_single(pos, cached_elem_id))
 
         return elem_final
 
@@ -1042,10 +1093,12 @@ def main():
     if args.interpolation_det_min is not None:
         config.INTERPOLATION_DET_MIN = args.interpolation_det_min
 
-    # Apply L1/L2 CLI flags to module-level config
-    global L1_METHOD, L2_NEIGHBORHOOD
+    # Apply L1/L2/band CLI flags to module-level config
+    global L1_METHOD, L2_NEIGHBORHOOD, L0_SKIP_BAND, ENHANCED_SEARCH_BAND
     L1_METHOD = args.l1_method
     L2_NEIGHBORHOOD = args.l2_neighborhood
+    L0_SKIP_BAND = args.l0_skip_band
+    ENHANCED_SEARCH_BAND = args.enhanced_search_band
 
     # Resolve pin velocity flag
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
@@ -1082,7 +1135,10 @@ def main():
     print(f"  Boundary projection:  {'ON' if config.RK4_BOUNDARY_PROJECTION else 'OFF'} (tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
     print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
     print(f"  Level-set mask:       {'ON' if config.RK4_LEVELSET_MASK else 'OFF'} (mode: {config.RK4_LEVELSET_MODE}, field: '{LEVELSET_FIELD_NAME}')")
-    print(f"  L0 skip boundary:    {'ON' if config.RK4_L0_SKIP_BOUNDARY_ELEMENTS else 'OFF'}")
+    l0_band_str = f"band={L0_SKIP_BAND:.1e}" if L0_SKIP_BAND > 0 else "mixed-sign only"
+    print(f"  L0 skip boundary:    {'ON' if config.RK4_L0_SKIP_BOUNDARY_ELEMENTS else 'OFF'} ({l0_band_str})")
+    if ENHANCED_SEARCH_BAND > 0:
+        print(f"  Enhanced search band: {ENHANCED_SEARCH_BAND:.1e} (node L1 + 5x5x5 L2 in band)")
     if use_pin_velocity:
         pin_axis_str = f"tilt={args.pin_tilt}°" if abs(args.pin_tilt) > 1e-12 else f"axis={args.pin_axis}"
         print(f"  Pin velocity:         ON (RPM={args.pin_rpm}, center={args.pin_center}, {pin_axis_str})")
@@ -1251,10 +1307,25 @@ def main():
           f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
           f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
 
-    element_neighbors = build_element_neighbors_array(connectivity, method=L1_METHOD, verbose=True)
+    # Build face neighbors (always needed as baseline)
+    element_neighbors_face = build_element_neighbors_array(connectivity, method='face', verbose=False)
+    print(f"  Face neighbors: shape={element_neighbors_face.shape}")
+
+    # Build node neighbors if needed (global node L1, or enhanced band)
+    use_enhanced_band = (ENHANCED_SEARCH_BAND > 0 and levelset_cpu is not None)
+    need_node_neighbors = (L1_METHOD == 'node') or use_enhanced_band
+    element_neighbors_node = None
+    if need_node_neighbors:
+        element_neighbors_node = build_element_neighbors_array(connectivity, method='node', verbose=True)
+        print(f"  Node neighbors: shape={element_neighbors_node.shape}, "
+              f"{element_neighbors_node.shape[1]} max neighbors/element")
+
+    # Select primary neighbors based on global L1 method
+    if L1_METHOD == 'node' and element_neighbors_node is not None:
+        element_neighbors = element_neighbors_node
+    else:
+        element_neighbors = element_neighbors_face
     n_neighbors_per_element = element_neighbors.shape[1]
-    print(f"  L1 neighbors: method={L1_METHOD}, shape={element_neighbors.shape}, "
-          f"{n_neighbors_per_element} neighbors/element")
 
     mesh_gpu = upload_mesh_to_gpu(connectivity, node_positions, element_neighbors, verbose=False)
     morton_gpu = upload_global_morton_to_gpu(octree_struct, connectivity, node_positions)
@@ -1285,17 +1356,36 @@ def main():
     mesh_bbox_max_gpu = jax.device_put(mesh_bbox_max_cpu)
     levelset_gpu = jax.device_put(levelset_cpu) if levelset_cpu is not None else None
 
-    # Compute boundary element flag: elements with mixed level-set sign at nodes
+    # Compute per-element band flags from level-set
     boundary_elements_gpu = None
-    if levelset_cpu is not None and config.RK4_L0_SKIP_BOUNDARY_ELEMENTS:
+    enhanced_elements_gpu = None
+    element_neighbors_node_gpu = None
+    if levelset_cpu is not None:
         node_ls = levelset_cpu[connectivity]  # (n_elements, 4)
         has_positive = np.any(node_ls >= 0, axis=1)
         has_negative = np.any(node_ls < 0, axis=1)
-        is_boundary = has_positive & has_negative
-        n_boundary = int(np.sum(is_boundary))
-        print(f"  Boundary elements (mixed LS): {n_boundary:,}/{len(connectivity):,} "
-              f"({100*n_boundary/len(connectivity):.1f}%)")
-        boundary_elements_gpu = jax.device_put(is_boundary)
+        min_abs_ls = np.min(np.abs(node_ls), axis=1)  # closest node to LS=0
+
+        # L0 skip band: mixed-sign OR any node within band
+        if config.RK4_L0_SKIP_BOUNDARY_ELEMENTS:
+            is_l0_skip = has_positive & has_negative  # always include mixed-sign
+            if L0_SKIP_BAND > 0:
+                is_l0_skip = is_l0_skip | (min_abs_ls < L0_SKIP_BAND)
+            n_l0_skip = int(np.sum(is_l0_skip))
+            print(f"  L0 skip elements: {n_l0_skip:,}/{len(connectivity):,} "
+                  f"({100*n_l0_skip/len(connectivity):.1f}%) "
+                  f"[mixed-sign + band={L0_SKIP_BAND:.1e}]")
+            boundary_elements_gpu = jax.device_put(is_l0_skip)
+
+        # Enhanced search band: node L1 + 5x5x5 L2 near tool
+        if use_enhanced_band:
+            is_enhanced = (min_abs_ls < ENHANCED_SEARCH_BAND)
+            n_enhanced = int(np.sum(is_enhanced))
+            print(f"  Enhanced search elements: {n_enhanced:,}/{len(connectivity):,} "
+                  f"({100*n_enhanced/len(connectivity):.1f}%) "
+                  f"[band={ENHANCED_SEARCH_BAND:.1e}, node L1 + 5x5x5 L2]")
+            enhanced_elements_gpu = jax.device_put(is_enhanced)
+            element_neighbors_node_gpu = jax.device_put(element_neighbors_node)
 
     print("  Uploaded to GPU")
 
@@ -1392,6 +1482,8 @@ def main():
         levelset_gpu=levelset_gpu,
         boundary_elements_gpu=boundary_elements_gpu,
         l2_neighborhood=L2_NEIGHBORHOOD,
+        enhanced_elements_gpu=enhanced_elements_gpu,
+        element_neighbors_node_gpu=element_neighbors_node_gpu,
     )
 
     # Warmup
