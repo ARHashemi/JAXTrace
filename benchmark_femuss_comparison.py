@@ -55,6 +55,7 @@ from jaxtrace.gpu.search.point_in_tet_methods import set_corrected_metadata, set
 from jaxtrace.gpu.search.point_in_tet_inverse import precompute_inverse_matrices
 from jaxtrace.gpu.search.mesh_aligned_point_location import (
     search_mesh_aligned_octree_multi_local_where,
+    search_mesh_aligned_octree_5x5x5_where,
 )
 from jaxtrace.gpu.search.point_in_tet_methods import (
     point_in_tet_gpu as point_in_tet_dispatcher,
@@ -172,6 +173,22 @@ def parse_args():
              "bypassed for elements with mixed level-set sign (tool boundary), "
              "forcing fresh L1/L2 search — matching FEMUSS's fresh octree search.",
     )
+    # --- L1 neighbor method ---
+    parser.add_argument(
+        "--l1-method", type=str, default="face", choices=["face", "node"],
+        help="L1 neighbor identification method. "
+             "'face': 4 face-sharing neighbors per element (standard). "
+             "'node': all node-sharing neighbors (20-100+), captures coarse/fine "
+             "boundary crossings in adaptively refined meshes. More memory but "
+             "wider search coverage in one hop.",
+    )
+    # --- L2 neighborhood size ---
+    parser.add_argument(
+        "--l2-neighborhood", type=int, default=3, choices=[3, 5],
+        help="L2 mesh-aligned octree search neighborhood size. "
+             "3: 3x3x3 = 27 cells per level (default). "
+             "5: 5x5x5 = 125 cells per level (wider search, slower).",
+    )
     # --- Pin velocity reconstruction (FEMUSS embedded FSW equivalent) ---
     parser.add_argument(
         "--pin-velocity", action="store_true", default=True,
@@ -222,9 +239,11 @@ LEVELSET_FIELD_NAME = 'LEVEL'
 ENABLE_L0_SEARCH = True
 ENABLE_L1_SEARCH = True
 N_HOPS = 5
+L1_METHOD = 'face'  # 'face' or 'node'
 
 # --- L2 method ---
 L2_METHOD = 'mesh_aligned_octree_multi_local_where'
+L2_NEIGHBORHOOD = 3  # 3 (3x3x3) or 5 (5x5x5)
 
 # --- Point-in-tet ---
 POINT_IN_TET_METHOD = 'inverse'
@@ -528,12 +547,14 @@ def create_rk4_comparison(
     enable_l0=True,
     enable_l1=True,
     n_hops=5,
+    n_neighbors_per_element=4,
     mesh_bbox_min=None,
     mesh_bbox_max=None,
     clamp_min_mask=None,
     clamp_max_mask=None,
     levelset_gpu=None,
     boundary_elements_gpu=None,
+    l2_neighborhood=3,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -600,68 +621,106 @@ def create_rk4_comparison(
         return jnp.where(inside, cached_elem_id, jnp.int32(-1))
 
     # ---- L1 ----
+    # For node-based neighbors (20-100+), use fori_loop + single hop (wide coverage).
+    # For face-based (4 neighbors), use unrolled loop + multi-hop (narrow but deep).
+    _n_neighbors = n_neighbors_per_element
+    _use_node_l1 = (_n_neighbors > 4)
+
     def search_l1_single(pos, start_elem_id):
         if not enable_l1:
             return jnp.int32(-1)
 
-        current_elem = start_elem_id
-        found = False
-
         start_elem_valid = start_elem_id >= 0
-        start_volume = jnp.where(
-            start_elem_valid,
-            mesh_gpu_element_volumes[start_elem_id],
-            config.FLOAT_DTYPE_JNP(1.0)
-        )
-        neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
-        valid_neighbor_mask = neighbors_of_start >= 0
-        neighbor_volumes = jnp.where(
-            valid_neighbor_mask,
-            mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start, 0)],
-            start_volume
-        )
-        median_neighbor_volume = jnp.median(neighbor_volumes)
-        size_ratio = start_volume / (median_neighbor_volume + 1e-10)
-        n_hops_adaptive = jnp.where(size_ratio < 0.1, jnp.int32(6), jnp.int32(n_hops))
 
-        for hop_idx in range(6):
-            hop_enabled = hop_idx < n_hops_adaptive
-            should_search = (~found) & (current_elem >= 0) & hop_enabled
+        if _use_node_l1:
+            # Node-based: single hop, test all neighbors via fori_loop
+            neighbors = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+            n_valid = jnp.sum(neighbors >= 0)
 
-            neighbors = element_neighbors[jnp.where(should_search, current_elem, 0)]
-            found_containing = jnp.int32(-1)
-
-            for neighbor_idx in range(4):
-                elem_id = neighbors[neighbor_idx]
-                valid = elem_id >= 0
-                check_this = (found_containing < 0) & valid
+            def test_neighbor(idx, carry):
+                found_elem = carry
+                elem_id = neighbors[idx]
+                valid = (elem_id >= 0) & (found_elem < 0)
                 inside = jnp.where(
-                    check_this,
+                    valid,
                     point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
                                             config.POINT_IN_TET_METHOD),
                     False
                 )
-                found_containing = jnp.where(inside & check_this, elem_id, found_containing)
+                return jnp.where(inside & valid, elem_id, found_elem)
 
-            first_valid_neighbor = jnp.where(
-                jnp.any(neighbors >= 0),
-                neighbors[jnp.argmax(neighbors >= 0)],
-                current_elem
+            found_elem = jax.lax.fori_loop(
+                0, jnp.where(start_elem_valid, n_valid, 0),
+                test_neighbor,
+                jnp.int32(-1)
             )
-            current_elem = jnp.where(
-                should_search,
-                jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
-                current_elem
-            )
-            found = found | (found_containing >= 0)
+            return found_elem
+        else:
+            # Face-based: multi-hop with adaptive hop count
+            current_elem = start_elem_id
+            found = False
 
-        return jnp.where(found, current_elem, jnp.int32(-1))
+            start_volume = jnp.where(
+                start_elem_valid,
+                mesh_gpu_element_volumes[start_elem_id],
+                config.FLOAT_DTYPE_JNP(1.0)
+            )
+            neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+            valid_neighbor_mask = neighbors_of_start >= 0
+            neighbor_volumes = jnp.where(
+                valid_neighbor_mask,
+                mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start, 0)],
+                start_volume
+            )
+            median_neighbor_volume = jnp.median(neighbor_volumes)
+            size_ratio = start_volume / (median_neighbor_volume + 1e-10)
+            n_hops_adaptive = jnp.where(size_ratio < 0.1, jnp.int32(6), jnp.int32(n_hops))
+
+            for hop_idx in range(6):
+                hop_enabled = hop_idx < n_hops_adaptive
+                should_search = (~found) & (current_elem >= 0) & hop_enabled
+
+                neighbors = element_neighbors[jnp.where(should_search, current_elem, 0)]
+                found_containing = jnp.int32(-1)
+
+                for neighbor_idx in range(4):
+                    elem_id = neighbors[neighbor_idx]
+                    valid = elem_id >= 0
+                    check_this = (found_containing < 0) & valid
+                    inside = jnp.where(
+                        check_this,
+                        point_in_tet_dispatcher(pos, elem_id, connectivity, node_positions,
+                                                config.POINT_IN_TET_METHOD),
+                        False
+                    )
+                    found_containing = jnp.where(inside & check_this, elem_id, found_containing)
+
+                first_valid_neighbor = jnp.where(
+                    jnp.any(neighbors >= 0),
+                    neighbors[jnp.argmax(neighbors >= 0)],
+                    current_elem
+                )
+                current_elem = jnp.where(
+                    should_search,
+                    jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
+                    current_elem
+                )
+                found = found | (found_containing >= 0)
+
+            return jnp.where(found, current_elem, jnp.int32(-1))
 
     # ---- L2 ----
+    _l2_use_5x5x5 = (l2_neighborhood == 5)
+
     def search_l2_single(pos):
-        elem_id, _ = search_mesh_aligned_octree_multi_local_where(
-            pos, mesh_aligned_octree, max_tests=jnp.int32(600)
-        )
+        if _l2_use_5x5x5:
+            elem_id, _ = search_mesh_aligned_octree_5x5x5_where(
+                pos, mesh_aligned_octree, max_tests=jnp.int32(1500)
+            )
+        else:
+            elem_id, _ = search_mesh_aligned_octree_multi_local_where(
+                pos, mesh_aligned_octree, max_tests=jnp.int32(600)
+            )
         return elem_id
 
     # ---- Combined search ----
@@ -983,6 +1042,11 @@ def main():
     if args.interpolation_det_min is not None:
         config.INTERPOLATION_DET_MIN = args.interpolation_det_min
 
+    # Apply L1/L2 CLI flags to module-level config
+    global L1_METHOD, L2_NEIGHBORHOOD
+    L1_METHOD = args.l1_method
+    L2_NEIGHBORHOOD = args.l2_neighborhood
+
     # Resolve pin velocity flag
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
 
@@ -1008,8 +1072,8 @@ def main():
     print(f"  DT:                   {DT}")
     print(f"  Velocity range:       {VELOCITY_TIMESTEP_RANGE[0]}-{VELOCITY_TIMESTEP_RANGE[1]}")
     print(f"  L0: {'ON' if ENABLE_L0_SEARCH else 'OFF'}")
-    print(f"  L1: {'ON' if ENABLE_L1_SEARCH else 'OFF'}")
-    print(f"  L2 method:            {L2_METHOD}")
+    print(f"  L1: {'ON' if ENABLE_L1_SEARCH else 'OFF'} (method: {L1_METHOD})")
+    print(f"  L2 method:            {L2_METHOD} ({L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD})")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
     print(f"  Point-in-tet tol:     {config.POINT_IN_TET_TOLERANCE:.0e}")
     print(f"  Interpolation det min:{config.INTERPOLATION_DET_MIN:.0e}")
@@ -1187,7 +1251,10 @@ def main():
           f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
           f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
 
-    element_neighbors = build_element_neighbors_array(connectivity, method='face', verbose=False)
+    element_neighbors = build_element_neighbors_array(connectivity, method=L1_METHOD, verbose=True)
+    n_neighbors_per_element = element_neighbors.shape[1]
+    print(f"  L1 neighbors: method={L1_METHOD}, shape={element_neighbors.shape}, "
+          f"{n_neighbors_per_element} neighbors/element")
 
     mesh_gpu = upload_mesh_to_gpu(connectivity, node_positions, element_neighbors, verbose=False)
     morton_gpu = upload_global_morton_to_gpu(octree_struct, connectivity, node_positions)
@@ -1317,12 +1384,14 @@ def main():
         enable_l0=ENABLE_L0_SEARCH,
         enable_l1=ENABLE_L1_SEARCH,
         n_hops=N_HOPS,
+        n_neighbors_per_element=n_neighbors_per_element,
         mesh_bbox_min=mesh_bbox_min_gpu,
         mesh_bbox_max=mesh_bbox_max_gpu,
         clamp_min_mask=clamp_min_mask,
         clamp_max_mask=clamp_max_mask,
         levelset_gpu=levelset_gpu,
         boundary_elements_gpu=boundary_elements_gpu,
+        l2_neighborhood=L2_NEIGHBORHOOD,
     )
 
     # Warmup

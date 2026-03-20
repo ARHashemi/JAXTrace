@@ -77,12 +77,16 @@ echo ""
 #   --pin-velocity ON            (reconstruct composite velocity field)
 #   --pin-rpm -600               (FEMUSS PROCESS_PARAMETERS RPM)
 #   --l0-skip-boundary ON        (skip L0 cache for mixed-LS elements, fresh search like FEMUSS)
+#   --l1-method face             (face-based L1; use 'node' for wider search)
+#   --l2-neighborhood 3          (3x3x3 L2; use 5 for 5x5x5 wider search)
 srun singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
   $SIF \
   python $JAXTRACE/benchmark_femuss_comparison.py \
     --input  $INPUT \
-    --output $FLASH_OUT
+    --output $FLASH_OUT \
+    --l1-method node \
+    --l2-neighborhood 5
 
 SIM_EXIT=$?
 

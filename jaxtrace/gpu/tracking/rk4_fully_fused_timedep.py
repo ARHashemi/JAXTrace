@@ -213,118 +213,96 @@ def _create_rk4_fully_fused_timedep_impl(
 
         return jnp.where(inside, cached_elem_id, jnp.int32(-1))
 
+    # Determine neighbor count from array shape (static at JIT trace time)
+    _n_neighbors_per_elem = element_neighbors.shape[1]
+    _use_node_l1 = (_n_neighbors_per_elem > 4)
+
     def search_l1_single(pos: jax.Array, start_elem_id: jax.Array) -> jax.Array:
-        """L1: Multi-hop neighbor search with ADAPTIVE hop count (Phase 1.3).
+        """L1: Neighbor search — adapts to face-based (4) or node-based (20-100+).
 
-        Note: L1 is only called when L0 fails, meaning start_elem_id does NOT
-        contain the position. We start with found=False to force neighbor search.
-
-        Multi-hop strategy:
-        - If containing element found: stop and return it
-        - If not found: advance to first valid neighbor for next hop
-        - This allows traversing the neighbor graph (neighbors-of-neighbors)
-
-        Adaptive hop count (Phase 1.3 fix):
-        - Detect refinement boundary crossings by comparing element volumes
-        - If start element is 10× smaller than median neighbor → likely refined→coarse boundary
-        - Use extended hop count (6) for boundary cases, normal (3) otherwise
-        - This handles particles crossing from refined to coarse regions
+        Face-based (4 neighbors): Multi-hop with adaptive hop count.
+        Node-based (>4 neighbors): Single hop with fori_loop over all neighbors.
         """
-        current_elem = start_elem_id
-        found = False  # Force neighbor search (L0 already verified non-containment)
-
-        # PHASE 1.3: Adaptive hop count based on element size ratio
-        # Detect refinement boundary by comparing start element volume with neighbor volumes
         start_elem_valid = start_elem_id >= 0
-        start_volume = jnp.where(
-            start_elem_valid,
-            mesh_gpu_element_volumes[start_elem_id],
-            config.FLOAT_DTYPE_JNP(1.0)  # Default to avoid division issues
-        )
 
-        # Get neighbor volumes
-        neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
-        valid_neighbor_mask = neighbors_of_start >= 0
+        if _use_node_l1:
+            # Node-based: single hop, test all neighbors via fori_loop
+            neighbors = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+            n_valid = jnp.where(start_elem_valid, jnp.sum(neighbors >= 0), jnp.int32(0))
 
-        # Compute neighbor volumes (use safe indexing)
-        neighbor_volumes = jnp.where(
-            valid_neighbor_mask,
-            mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start, 0)],
-            start_volume  # Use start volume for invalid neighbors
-        )
-
-        # Median neighbor volume (robust to outliers)
-        median_neighbor_volume = jnp.median(neighbor_volumes)
-
-        # Size ratio: start_volume / median_neighbor_volume
-        # If ratio < 0.1 → start element is 10× SMALLER than neighbors (refined→coarse boundary)
-        size_ratio = start_volume / (median_neighbor_volume + 1e-10)  # Avoid division by zero
-
-        # Adaptive hop count:
-        # - Small→Large transition (size_ratio < 0.1): Use 6 hops (extended search)
-        # - Normal case: Use n_hops (default 3)
-        n_hops_adaptive = jnp.where(
-            size_ratio < 0.1,
-            jnp.int32(6),  # Extended search for refinement boundary
-            jnp.int32(n_hops)  # Normal search
-        )
-
-        # Multi-hop search (unrolled for maximum hop count = 6)
-        # Use masking to skip extra iterations when n_hops_adaptive < 6
-        for hop_idx in range(6):
-            # Skip this hop if hop_idx >= n_hops_adaptive (adaptive masking)
-            hop_enabled = hop_idx < n_hops_adaptive
-            should_search = (~found) & (current_elem >= 0) & hop_enabled
-
-            # Get neighbors of current element
-            neighbors = element_neighbors[jnp.where(should_search, current_elem, 0)]
-
-            # FIXED: Remove nested vmap - use sequential search with jnp.where
-            # This eliminates vmap-in-vmap overhead and allows logical early-exit
-            found_containing = jnp.int32(-1)
-
-            # Unroll 4-neighbor check (sequential, not vmapped)
-            for neighbor_idx in range(4):
-                elem_id = neighbors[neighbor_idx]
-                valid = elem_id >= 0
-
-                # Only check if not found yet and valid
-                check_this = (found_containing < 0) & valid
-
+            def test_neighbor(idx, carry):
+                found_elem = carry
+                elem_id = neighbors[idx]
+                valid = (elem_id >= 0) & (found_elem < 0)
                 inside = jnp.where(
-                    check_this,
+                    valid,
                     point_in_tet_gpu(pos, elem_id, connectivity, node_positions),
                     False
                 )
+                return jnp.where(inside & valid, elem_id, found_elem)
 
-                # Update found_containing if inside
-                found_containing = jnp.where(
-                    inside & check_this,
-                    elem_id,
-                    found_containing
+            return jax.lax.fori_loop(0, n_valid, test_neighbor, jnp.int32(-1))
+        else:
+            # Face-based: multi-hop with adaptive hop count
+            current_elem = start_elem_id
+            found = False
+
+            start_volume = jnp.where(
+                start_elem_valid,
+                mesh_gpu_element_volumes[start_elem_id],
+                config.FLOAT_DTYPE_JNP(1.0)
+            )
+
+            neighbors_of_start = element_neighbors[jnp.where(start_elem_valid, start_elem_id, 0)]
+            valid_neighbor_mask = neighbors_of_start >= 0
+            neighbor_volumes = jnp.where(
+                valid_neighbor_mask,
+                mesh_gpu_element_volumes[jnp.where(valid_neighbor_mask, neighbors_of_start, 0)],
+                start_volume
+            )
+            median_neighbor_volume = jnp.median(neighbor_volumes)
+            size_ratio = start_volume / (median_neighbor_volume + 1e-10)
+            n_hops_adaptive = jnp.where(
+                size_ratio < 0.1,
+                jnp.int32(6),
+                jnp.int32(n_hops)
+            )
+
+            for hop_idx in range(6):
+                hop_enabled = hop_idx < n_hops_adaptive
+                should_search = (~found) & (current_elem >= 0) & hop_enabled
+
+                neighbors = element_neighbors[jnp.where(should_search, current_elem, 0)]
+                found_containing = jnp.int32(-1)
+
+                for neighbor_idx in range(4):
+                    elem_id = neighbors[neighbor_idx]
+                    valid = elem_id >= 0
+                    check_this = (found_containing < 0) & valid
+                    inside = jnp.where(
+                        check_this,
+                        point_in_tet_gpu(pos, elem_id, connectivity, node_positions),
+                        False
+                    )
+                    found_containing = jnp.where(
+                        inside & check_this,
+                        elem_id,
+                        found_containing
+                    )
+
+                first_valid_neighbor = jnp.where(
+                    jnp.any(neighbors >= 0),
+                    neighbors[jnp.argmax(neighbors >= 0)],
+                    current_elem
                 )
+                current_elem = jnp.where(
+                    should_search,
+                    jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
+                    current_elem
+                )
+                found = found | (found_containing >= 0)
 
-            # MULTI-HOP FIX: Get first valid neighbor (even if point not inside) for next hop
-            # This allows advancing through the neighbor graph
-            first_valid_neighbor = jnp.where(
-                jnp.any(neighbors >= 0),
-                neighbors[jnp.argmax(neighbors >= 0)],
-                current_elem  # Stay at current if no valid neighbors
-            )
-
-            # Update for next hop:
-            # - If found containing element: use it and set found=True (stops hopping)
-            # - If not found: advance to first_valid_neighbor for next hop
-            current_elem = jnp.where(
-                should_search,
-                jnp.where(found_containing >= 0, found_containing, first_valid_neighbor),
-                current_elem
-            )
-            found = found | (found_containing >= 0)
-
-        # CRITICAL FIX: Return -1 if search failed (not found after all hops)
-        # This ensures L2 fallback is triggered when L1 fails
-        return jnp.where(found, current_elem, jnp.int32(-1))
+            return jnp.where(found, current_elem, jnp.int32(-1))
 
     def search_l2_single(pos: jax.Array) -> jax.Array:
         """L2: Global search (single particle) - method selected at creation time."""
