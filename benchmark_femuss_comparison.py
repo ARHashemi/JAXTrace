@@ -65,6 +65,7 @@ from jaxtrace.gpu.search.aa_detection import precompute_aa_metadata, precompute_
 from jaxtrace.gpu.search.point_in_tet_methods import set_corrected_metadata, set_inverse_matrices_gpu
 from jaxtrace.gpu.search.point_in_tet_inverse import precompute_inverse_matrices
 from jaxtrace.gpu.search.mesh_aligned_point_location import (
+    search_mesh_aligned_octree_multi_local_where,
     search_mesh_aligned_octree_5x5x5_where,
     search_l2_vectorized,
 )
@@ -283,6 +284,17 @@ def parse_args():
         help="Pin tilting angle in degrees (tilts the axis in the XZ plane). "
              "Overrides --pin-axis if non-zero (matches FEMUSS pp_tiltingAngle).",
     )
+    parser.add_argument(
+        "--rk4-mode", type=str, default="fused", choices=["fused", "split"],
+        help="RK4 kernel mode. 'fused': single vmap(rk4_single) over all particles "
+             "(default, validated). 'split': separate vmap per L0/L1/L2/interpolate "
+             "kernel (experimental, not yet benchmarked).",
+    )
+    parser.add_argument(
+        "--l2-vectorized", action="store_true", default=False,
+        help="Use vectorized L2 (gather_l2_candidates + parallel PIT tests) instead of "
+             "fori_loop-based search. Only active inside 'fused' mode. Experimental.",
+    )
     return parser.parse_args()
 
 
@@ -304,6 +316,13 @@ ENHANCED_SEARCH_BAND = 0.0  # Level-set band for node L1 + 5x5x5 L2 (0=disabled)
 # --- L2 method ---
 L2_METHOD = 'mesh_aligned_octree_multi_local_where'
 L2_NEIGHBORHOOD = 3  # 3 (3x3x3) or 5 (5x5x5) (global / baseline outside enhanced band)
+
+# --- RK4 kernel architecture ---
+# 'fused': single jax.vmap(rk4_single) — all stages fused per particle (default, validated)
+# 'split': separate jax.vmap per L0/L1/L2/interpolate kernel per stage (experimental)
+RK4_MODE = 'fused'
+# Use gather+parallel-PIT vectorized L2 inside fused mode (experimental)
+L2_VECTORIZED = False
 
 # --- Point-in-tet ---
 POINT_IN_TET_METHOD = 'inverse'
@@ -670,6 +689,8 @@ def create_rk4_comparison(
     interpolation_method="direct_inverse",
     M_inv_gpu=None,
     p0_gpu=None,
+    rk4_mode="fused",
+    use_l2_vectorized=False,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -844,15 +865,20 @@ def create_rk4_comparison(
         else:
             return _search_l1_face(pos, start_elem_id)
 
-    # ---- L2 (vectorized) ----
-    # search_l2_vectorized gathers all candidate element IDs into a flat
-    # (L2_MAX_CANDIDATES,) buffer, then runs point_in_tet on all candidates
-    # in parallel via an inner jax.vmap.  No carry-dependent fori_loop.
+    # ---- L2 ----
     _l2_use_5x5x5_global = (l2_neighborhood == 5)
 
     def _search_l2_3x3x3(pos):
-        # Vectorized: gather flat candidates, vmap point_in_tet over them
-        return search_l2_vectorized(pos, mesh_aligned_octree)
+        if use_l2_vectorized:
+            # Experimental: gather flat candidates, then vmap point_in_tet over them.
+            # Intended for use inside fused mode only.
+            return search_l2_vectorized(pos, mesh_aligned_octree)
+        else:
+            # Default: fori_loop with carry-dependent early exit (validated).
+            elem_id, _ = search_mesh_aligned_octree_multi_local_where(
+                pos, mesh_aligned_octree, max_tests=jnp.int32(600)
+            )
+            return elem_id
 
     def _search_l2_5x5x5(pos):
         # 5x5x5 still uses the original fori_loop path (less common)
@@ -999,98 +1025,170 @@ def create_rk4_comparison(
         ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
         return valid & (ls_val < 0.0)
 
-    # ---- Helper: vectorized search over all particles (Option B) ----
-    # Each stage launches separate GPU kernels for L0, L1, L2.
-    # No outer vmap(rk4_single) → no nested lax.cond vmap artifact.
-    # XLA sees independent kernel shapes → better register allocation per kernel.
+    # =========================================================
+    # RK4 mode: 'fused' (default, validated) or 'split' (experimental)
+    # =========================================================
 
-    def _vmap_search(positions, hints):
-        """Run L0 → L1 → L2 as three separate vmap'd kernels over all particles."""
-        elem_l0 = jax.vmap(do_l0)(positions, hints)
-        found_l0 = elem_l0 >= 0
-        if enable_l1:
-            elem_l1 = jax.vmap(do_l1)(positions, hints)
-            elem_l01 = jnp.where(found_l0, elem_l0, elem_l1)
-            found_l01 = elem_l01 >= 0
-            elem_l2 = jax.vmap(do_l2)(positions, elem_l01)
-            return jnp.where(found_l01, elem_l01, elem_l2)
-        else:
-            elem_l2 = jax.vmap(do_l2)(positions, elem_l0)
-            return jnp.where(found_l0, elem_l0, elem_l2)
+    if rk4_mode == 'split':
+        # ---- Option B: separate vmap per kernel per stage ----
+        # EXPERIMENTAL — measured 70x slower on LUMI ROCm due to
+        # dynamic loop bounds in gather_l2_candidates under vmap.
+        # Not yet suitable for production use.
 
-    def _vmap_interpolate(positions, elem_ids, velocity_field):
-        return jax.vmap(do_interpolate, in_axes=(0, 0, None))(positions, elem_ids, velocity_field)
+        def _vmap_search(positions, hints):
+            elem_l0 = jax.vmap(do_l0)(positions, hints)
+            found_l0 = elem_l0 >= 0
+            if enable_l1:
+                elem_l1 = jax.vmap(do_l1)(positions, hints)
+                elem_l01 = jnp.where(found_l0, elem_l0, elem_l1)
+                found_l01 = elem_l01 >= 0
+                elem_l2 = jax.vmap(do_l2)(positions, elem_l01)
+                return jnp.where(found_l01, elem_l01, elem_l2)
+            else:
+                elem_l2 = jax.vmap(do_l2)(positions, elem_l0)
+                return jnp.where(found_l0, elem_l0, elem_l2)
 
-    # ---- RK4 step ----
-    @jax.jit
-    def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
-        n_timesteps = velocity_fields_gpu.shape[0]
-        vel_idx = time_idx % n_timesteps
-        velocity_field = velocity_fields_gpu[vel_idx]
+        def _vmap_interp(positions, elem_ids, velocity_field):
+            return jax.vmap(do_interpolate, in_axes=(0, 0, None))(
+                positions, elem_ids, velocity_field)
 
-        # --- Stage 1 ---
-        elem_k1 = _vmap_search(positions_gpu, element_ids_gpu)
-        vel_k1 = _vmap_interpolate(positions_gpu, elem_k1, velocity_field)
-        pos_k1 = positions_gpu + 0.5 * dt * vel_k1
-        if use_bbox_clamp:
-            pos_k1 = jax.vmap(clamp_to_bbox)(pos_k1)
+        @jax.jit
+        def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
+            vel_idx = time_idx % velocity_fields_gpu.shape[0]
+            velocity_field = velocity_fields_gpu[vel_idx]
 
-        # --- Stage 2 ---
-        elem_k2 = _vmap_search(pos_k1, elem_k1)
-        vel_k2 = _vmap_interpolate(pos_k1, elem_k2, velocity_field)
-        if use_last_valid_vel:
-            vel_k2 = jnp.where((elem_k2 >= 0)[:, None], vel_k2, vel_k1)
-        pos_k2 = positions_gpu + 0.5 * dt * vel_k2
-        if use_bbox_clamp:
-            pos_k2 = jax.vmap(clamp_to_bbox)(pos_k2)
+            elem_k1 = _vmap_search(positions_gpu, element_ids_gpu)
+            vel_k1 = _vmap_interp(positions_gpu, elem_k1, velocity_field)
+            pos_k1 = positions_gpu + 0.5 * dt * vel_k1
+            if use_bbox_clamp:
+                pos_k1 = jax.vmap(clamp_to_bbox)(pos_k1)
 
-        # --- Stage 3 ---
-        elem_k3 = _vmap_search(pos_k2, elem_k2)
-        vel_k3 = _vmap_interpolate(pos_k2, elem_k3, velocity_field)
-        if use_last_valid_vel:
-            vel_k3 = jnp.where((elem_k3 >= 0)[:, None], vel_k3, vel_k2)
-        pos_k3 = positions_gpu + dt * vel_k3
-        if use_bbox_clamp:
-            pos_k3 = jax.vmap(clamp_to_bbox)(pos_k3)
+            elem_k2 = _vmap_search(pos_k1, elem_k1)
+            vel_k2 = _vmap_interp(pos_k1, elem_k2, velocity_field)
+            if use_last_valid_vel:
+                vel_k2 = jnp.where((elem_k2 >= 0)[:, None], vel_k2, vel_k1)
+            pos_k2 = positions_gpu + 0.5 * dt * vel_k2
+            if use_bbox_clamp:
+                pos_k2 = jax.vmap(clamp_to_bbox)(pos_k2)
 
-        # --- Stage 4 ---
-        elem_k4 = _vmap_search(pos_k3, elem_k3)
-        vel_k4 = _vmap_interpolate(pos_k3, elem_k4, velocity_field)
-        if use_last_valid_vel:
-            vel_k4 = jnp.where((elem_k4 >= 0)[:, None], vel_k4, vel_k3)
+            elem_k3 = _vmap_search(pos_k2, elem_k2)
+            vel_k3 = _vmap_interp(pos_k2, elem_k3, velocity_field)
+            if use_last_valid_vel:
+                vel_k3 = jnp.where((elem_k3 >= 0)[:, None], vel_k3, vel_k2)
+            pos_k3 = positions_gpu + dt * vel_k3
+            if use_bbox_clamp:
+                pos_k3 = jax.vmap(clamp_to_bbox)(pos_k3)
 
-        # --- Final position & element ---
-        positions_final = positions_gpu + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
-        elem_final = _vmap_search(positions_final, elem_k4)
+            elem_k4 = _vmap_search(pos_k3, elem_k3)
+            vel_k4 = _vmap_interp(pos_k3, elem_k4, velocity_field)
+            if use_last_valid_vel:
+                vel_k4 = jnp.where((elem_k4 >= 0)[:, None], vel_k4, vel_k3)
 
-        # Skip-step policy: discard entire step if any substage failed
-        if use_skip_step_on_fail:
-            any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
-            positions_final = jnp.where(any_failed[:, None], positions_gpu, positions_final)
-            elem_final = jnp.where(any_failed, element_ids_gpu, elem_final)
+            positions_final = positions_gpu + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
+            elem_final = _vmap_search(positions_final, elem_k4)
 
-        # Skip-step policy: discard entire step if any substage is inside tool
-        if use_skip_step_on_tool:
-            any_inside = (
-                jax.vmap(do_check_tool)(positions_gpu, elem_k1) |
-                jax.vmap(do_check_tool)(pos_k1, elem_k2) |
-                jax.vmap(do_check_tool)(pos_k2, elem_k3) |
-                jax.vmap(do_check_tool)(pos_k3, elem_k4)
+            if use_skip_step_on_fail:
+                any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
+                positions_final = jnp.where(any_failed[:, None], positions_gpu, positions_final)
+                elem_final = jnp.where(any_failed, element_ids_gpu, elem_final)
+
+            if use_skip_step_on_tool:
+                any_inside = (
+                    jax.vmap(do_check_tool)(positions_gpu, elem_k1) |
+                    jax.vmap(do_check_tool)(pos_k1, elem_k2) |
+                    jax.vmap(do_check_tool)(pos_k2, elem_k3) |
+                    jax.vmap(do_check_tool)(pos_k3, elem_k4)
+                )
+                positions_final = jnp.where(any_inside[:, None], positions_gpu, positions_final)
+                elem_final = jnp.where(any_inside, element_ids_gpu, elem_final)
+
+            if use_boundary_projection:
+                lost = elem_final < 0
+                pos_clamped = jax.vmap(clamp_to_bbox)(positions_final)
+                pos_search = jnp.where(lost[:, None], pos_clamped, positions_final)
+                hint_elem = jnp.where(lost, elem_k4, elem_final)
+                elem_recovered = _vmap_search(pos_search, hint_elem)
+                positions_final = jnp.where(lost[:, None], pos_clamped, positions_final)
+                elem_final = jnp.where(lost, elem_recovered, elem_final)
+
+            return positions_final, elem_final
+
+    else:
+        # ---- Default: fully-fused vmap(rk4_single) ----
+        # Validated: 100% retention, 188k p·step/s on LUMI MI250X.
+        # All search logic fused per-particle inside rk4_single, then
+        # a single jax.vmap over all particles launches one kernel.
+
+        @jax.jit
+        def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
+            vel_idx = time_idx % velocity_fields_gpu.shape[0]
+            velocity_field = velocity_fields_gpu[vel_idx]
+
+            def rk4_single(pos, elem_id):
+                # Stage 1
+                elem_k1 = search_l0_l1_l2(pos, elem_id)
+                vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+                pos_k1 = pos + 0.5 * dt * vel_k1
+
+                # Stage 2
+                if use_bbox_clamp:
+                    pos_k1 = clamp_to_bbox(pos_k1)
+                elem_k2 = search_l0_l1_l2(pos_k1, elem_k1)
+                vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+                if use_last_valid_vel:
+                    vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
+                pos_k2 = pos + 0.5 * dt * vel_k2
+
+                # Stage 3
+                if use_bbox_clamp:
+                    pos_k2 = clamp_to_bbox(pos_k2)
+                elem_k3 = search_l0_l1_l2(pos_k2, elem_k2)
+                vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+                if use_last_valid_vel:
+                    vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
+                pos_k3 = pos + dt * vel_k3
+
+                # Stage 4
+                if use_bbox_clamp:
+                    pos_k3 = clamp_to_bbox(pos_k3)
+                elem_k4 = search_l0_l1_l2(pos_k3, elem_k3)
+                vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+                if use_last_valid_vel:
+                    vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
+
+                pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
+                elem_final = search_l0_l1_l2(pos_final, elem_k4)
+
+                if use_skip_step_on_fail:
+                    any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
+                    pos_final = jnp.where(any_failed, pos, pos_final)
+                    elem_final = jnp.where(any_failed, elem_id, elem_final)
+
+                if use_skip_step_on_tool:
+                    any_inside = (
+                        check_inside_tool(pos, elem_k1) |
+                        check_inside_tool(pos_k1, elem_k2) |
+                        check_inside_tool(pos_k2, elem_k3) |
+                        check_inside_tool(pos_k3, elem_k4)
+                    )
+                    pos_final = jnp.where(any_inside, pos, pos_final)
+                    elem_final = jnp.where(any_inside, elem_id, elem_final)
+
+                if use_boundary_projection:
+                    lost = elem_final < 0
+                    pos_clamped = clamp_to_bbox(pos_final)
+                    pos_search = jnp.where(lost, pos_clamped, pos_final)
+                    hint_elem = jnp.where(lost, elem_k4, elem_final)
+                    elem_recovered = search_l0_l1_l2(pos_search, hint_elem)
+                    pos_final = jnp.where(lost, pos_clamped, pos_final)
+                    elem_final = jnp.where(lost, elem_recovered, elem_final)
+
+                return pos_final, elem_final
+
+            positions_final, element_ids_final = jax.vmap(rk4_single)(
+                positions_gpu, element_ids_gpu
             )
-            positions_final = jnp.where(any_inside[:, None], positions_gpu, positions_final)
-            elem_final = jnp.where(any_inside, element_ids_gpu, elem_final)
-
-        # Boundary projection: clamp to bbox and re-search ONLY if lost
-        if use_boundary_projection:
-            lost = elem_final < 0
-            pos_clamped = jax.vmap(clamp_to_bbox)(positions_final)
-            pos_search = jnp.where(lost[:, None], pos_clamped, positions_final)
-            hint_elem = jnp.where(lost, elem_k4, elem_final)
-            elem_recovered = _vmap_search(pos_search, hint_elem)
-            positions_final = jnp.where(lost[:, None], pos_clamped, positions_final)
-            elem_final = jnp.where(lost, elem_recovered, elem_final)
-
-        return positions_final, elem_final
+            return positions_final, element_ids_final
 
     return rk4_step
 
@@ -1268,12 +1366,15 @@ def main():
     else:
         config.RK4_BOUNDARY_WALLS = None
 
-    # Apply L1/L2/band CLI flags to module-level config
+    # Apply L1/L2/band/rk4 CLI flags to module-level config
     global L1_METHOD, L2_NEIGHBORHOOD, L0_SKIP_BAND, ENHANCED_SEARCH_BAND
+    global RK4_MODE, L2_VECTORIZED
     L1_METHOD = args.l1_method
     L2_NEIGHBORHOOD = args.l2_neighborhood
     L0_SKIP_BAND = args.l0_skip_band
     ENHANCED_SEARCH_BAND = args.enhanced_search_band
+    RK4_MODE = args.rk4_mode
+    L2_VECTORIZED = args.l2_vectorized
 
     # Resolve pin velocity flag
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
@@ -1301,7 +1402,10 @@ def main():
     print(f"  Velocity range:       {VELOCITY_TIMESTEP_RANGE[0]}-{VELOCITY_TIMESTEP_RANGE[1]}")
     print(f"  L0: {'ON' if ENABLE_L0_SEARCH else 'OFF'}")
     print(f"  L1: {'ON' if ENABLE_L1_SEARCH else 'OFF'} (method: {L1_METHOD})")
-    print(f"  L2 method:            {L2_METHOD} ({L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD})")
+    print(f"  L2 method:            {L2_METHOD} ({L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD})"
+          + (" [vectorized]" if L2_VECTORIZED else ""))
+    print(f"  RK4 mode:             {RK4_MODE}"
+          + (" (EXPERIMENTAL)" if RK4_MODE == 'split' else " (validated)"))
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
     print(f"  Point-in-tet tol:     {config.POINT_IN_TET_TOLERANCE:.0e}")
     print(f"  Interpolation method: {INTERPOLATION_METHOD}")
@@ -1667,6 +1771,8 @@ def main():
         interpolation_method=INTERPOLATION_METHOD,
         M_inv_gpu=M_inv_gpu,
         p0_gpu=p0_gpu,
+        rk4_mode=RK4_MODE,
+        use_l2_vectorized=L2_VECTORIZED,
     )
 
     # Warmup
