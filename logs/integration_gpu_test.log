@@ -1,9 +1,0 @@
-/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
-  from .hdf5_io import H5Series
-W1104 15:49:59.527898 1822008 hlo_rematerialization.cc:3204] Can't reduce memory use below 2.50GiB (2688368788 bytes) by rematerialization; only reduced to 44.71GiB (48007463384 bytes), down from 44.96GiB (48270578416 bytes) originally
-W1104 15:50:09.808099 1822008 bfc_allocator.cc:501] Allocator (GPU_0_bfc) ran out of memory trying to allocate 44.71GiB (rounded to 48007411968)requested by op 
-If the cause is memory fragmentation maybe the environment variable 'TF_GPU_ALLOCATOR=cuda_malloc_async' will improve the situation. 
-Current allocation summary follows.
-Current allocation summary follows.
-W1104 15:50:09.808306 1822008 bfc_allocator.cc:512] **_***______________________________________________________________________________________________
-E1104 15:50:09.808330 1822008 pjrt_stream_executor_client.cc:2974] Execution of replica 0 failed: RESOURCE_EXHAUSTED: Out of memory while trying to allocate 48007411776 bytes. [tf-allocator-allocation-error='']

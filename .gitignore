@@ -67,6 +67,22 @@ archive/output_archives/
 archive/old_implementation/
 archive/memory_reports/
 
+# Excluded from feature/search-optimization and later branches.
+# These are preserved on feature/mesh-aligned-octree (snapshot branch).
+logs/
+docs/
+LUMI_LOW_SPEED.md
+*.meta.json
+debug_l2_failures.py
+benchmark_l2_accuracy.py
+morton_curve_visualize.py
+morton_curve_visualize_modif.py
+morton_search_visualize.py
+morton_search_visualize_modif.py
+mesh_aligned_3x3x3_search_visualize.py
+mesh_aligned_octree_morton_visualize.py
+search_methods_visualize.py
+
 # IDE and editor files
 .vscode/
 .idea/

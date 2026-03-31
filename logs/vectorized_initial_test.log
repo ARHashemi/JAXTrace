@@ -1,8 +1,0 @@
-/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
-  from .hdf5_io import H5Series
-✅ Enhanced VTK I/O available
-✅ HDF5 I/O available
-Traceback (most recent call last):
-  File "/home/arhashemi/Workspace/welding/JAXTrace/test_vectorized_initial_assignment.py", line 10, in <module>
-    from jaxtrace.gpu.forest import create_forest, build_padded_arrays_from_blocks
-ImportError: cannot import name 'create_forest' from 'jaxtrace.gpu.forest' (/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/gpu/forest/__init__.py)
