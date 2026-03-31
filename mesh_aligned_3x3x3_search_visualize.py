@@ -248,12 +248,62 @@ fig_b.update_layout(
     legend=dict(orientation="h",yanchor="top",y=-0.08,xanchor="center",x=0.5,
                 font=dict(size=13),bgcolor="rgba(15,23,42,0.85)",
                 bordercolor="rgba(100,150,200,0.3)",borderwidth=1),
-    width=1400,height=1150,
+    # width=1400,height=1150,
     # paper_bgcolor="#0f172a",plot_bgcolor="#0d1f33",
     margin=dict(t=170,b=150,l=80,r=60),
 )
-img_bytes = fig_b.to_image(format="png", scale=2)
-with open("new_l2_multilevel_3x3.png", "wb") as f_img:
+
+fig_b.update_layout(
+    title=None,
+    paper_bgcolor="white",
+    plot_bgcolor="white",
+    font=dict(family="Arial", size=16, color="black"),
+    margin=dict(l=18, r=18, t=18, b=18, pad=0),
+    showlegend=True,
+    legend=dict(
+        x=0.02, y=0.98,
+        xanchor="left", yanchor="top",
+        orientation="v",
+        bgcolor="rgba(255,255,255,0.90)",
+        bordercolor="rgba(0,0,0,0.25)",
+        borderwidth=1,
+        font=dict(size=15, color="black")
+    )
+)
+
+fig_b.update_xaxes(
+    title_text="x",
+    range=[-0.02, 4.02],
+    showgrid=False,
+    zeroline=False,
+    showline=True,
+    linewidth=1.6,
+    linecolor="black",
+    mirror=True,
+    ticks="outside",
+    tickfont=dict(size=14, color="black"),
+    title_font=dict(size=16, color="black"),
+    scaleanchor="y",
+    constrain="domain"
+)
+
+fig_b.update_yaxes(
+    title_text="y",
+    range=[-0.02, 4.02],
+    showgrid=False,
+    zeroline=False,
+    showline=True,
+    linewidth=1.6,
+    linecolor="black",
+    mirror=True,
+    ticks="outside",
+    tickfont=dict(size=14, color="black"),
+    title_font=dict(size=16, color="black"),
+    constrain="domain"
+)
+
+img_bytes = fig_b.to_image(format="svg", scale=2)
+with open("new_l2_multilevel_3x3.svg", "wb") as f_img:
     f_img.write(img_bytes)
 with open("new_l2_multilevel_3x3.png.meta.json","w") as f:
     json.dump({"caption":

@@ -1,0 +1,129 @@
+python benchmark_l2_accuracy.py --n-particles 10000 --perturbations 0.0 0.1 0.2 0.5 0.7 1.0 --seed-x 0.08 0.38 --seed-y 0.25 0.75 --seed-z 0.5 1.0
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+==========================================================================================
+L2 Search Accuracy Benchmark
+==========================================================================================
+JAX version: 0.9.0.1
+JAX devices: [CudaDevice(id=0)]
+Float dtype: <class 'numpy.float64'>
+
+[1/4] Loading mesh from /media/arhashemi/HDD2TB/Workspace/welding/Edgar/FLA/post/0eule ...
+Loading mesh: /media/arhashemi/HDD2TB/Workspace/welding/Edgar/FLA/post/0eule/cylA_159.pvtu
+  Nodes: 799,104
+  Elements: 3,050,196
+  Loaded field 'Displacement': (799104, 3)
+  Elements: 3,050,196, Nodes: 571,533 (removed 227,571 duplicates)
+  Loaded in 10.2s
+
+[2/4] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,050,196
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 292,818,816 bytes (279.3 MB)
+  Element sizes: min=7.81e-05, mean=1.01e-04, max=5.00e-03
+  Done in 65.9s
+
+[3/4] Building search structures and uploading to GPU...
+  Multi-cell octree: 666,162 cells, 18.3 elem/cell, 4.0 cells/elem
+  Morton structure: 517,309 cells, 5.9 elem/cell
+  Done in 504.3s
+
+  Seeding region:
+    X: [-0.020400, 0.015600] (fraction [0.08, 0.38])
+    Y: [-0.011500, 0.011500] (fraction [0.25, 0.75])
+    Z: [-0.005000, 0.000000] (fraction [0.50, 1.00])
+    Valid elements: 3,036,288 / 3,050,196 (99.5%)
+
+[4/4] Running L2 accuracy benchmark...
+  Particles per scenario: 10,000
+  Batch size: 50,000
+  Point-in-tet tolerance: 1e-06
+
+  Generating particle sets...
+    perturbation=0.0x: mean_displacement=0.00e+00, in_mesh_bbox=10000/10000
+    perturbation=0.1x: mean_displacement=1.53e-05, in_mesh_bbox=9998/10000
+    perturbation=0.2x: mean_displacement=2.99e-05, in_mesh_bbox=9962/10000
+    perturbation=0.5x: mean_displacement=7.70e-05, in_mesh_bbox=9849/10000
+    perturbation=0.7x: mean_displacement=1.06e-04, in_mesh_bbox=9796/10000
+    perturbation=1.0x: mean_displacement=1.51e-04, in_mesh_bbox=9675/10000
+
+  --- radius r=2 ---
+    perturb=0.0x: found=3,067 (30.67%), correct_elem=3,067/3,067 (100.0%), outside_bbox=0, search_fail=6933, time=7.06s
+    perturb=0.1x: found=2,958 (29.58%), correct_elem=2,673/2,958 (90.4%), outside_bbox=2, search_fail=7040, time=6.64s
+    perturb=0.2x: found=2,784 (27.84%), correct_elem=1,309/2,784 (47.0%), outside_bbox=38, search_fail=7178, time=6.68s
+    perturb=0.5x: found=2,396 (23.96%), correct_elem=184/2,396 (7.7%), outside_bbox=151, search_fail=7453, time=6.63s
+    perturb=0.7x: found=2,372 (23.72%), correct_elem=70/2,372 (3.0%), outside_bbox=204, search_fail=7424, time=6.63s
+    perturb=1.0x: found=2,269 (22.69%), correct_elem=25/2,269 (1.1%), outside_bbox=325, search_fail=7406, time=6.92s
+
+  --- radius r=10 ---
+    perturb=0.0x: found=5,802 (58.02%), correct_elem=5,802/5,802 (100.0%), outside_bbox=0, search_fail=4198, time=6.72s
+    perturb=0.1x: found=5,229 (52.29%), correct_elem=4,784/5,229 (91.5%), outside_bbox=2, search_fail=4769, time=6.67s
+    perturb=0.2x: found=5,110 (51.10%), correct_elem=2,423/5,110 (47.4%), outside_bbox=38, search_fail=4852, time=6.57s
+    perturb=0.5x: found=4,893 (48.93%), correct_elem=358/4,893 (7.3%), outside_bbox=151, search_fail=4956, time=6.68s
+    perturb=0.7x: found=4,863 (48.63%), correct_elem=126/4,863 (2.6%), outside_bbox=204, search_fail=4933, time=6.59s
+    perturb=1.0x: found=4,628 (46.28%), correct_elem=56/4,628 (1.2%), outside_bbox=325, search_fail=5047, time=6.62s
+
+  --- 3x3x3 ---
+    perturb=0.0x: found=10,000 (100.00%), correct_elem=10,000/10,000 (100.0%), outside_bbox=0, search_fail=0, time=5.46s
+    perturb=0.1x: found=9,998 (99.98%), correct_elem=9,160/9,998 (91.6%), outside_bbox=2, search_fail=0, time=5.52s
+    perturb=0.2x: found=9,962 (99.62%), correct_elem=4,730/9,962 (47.5%), outside_bbox=38, search_fail=0, time=5.49s
+    perturb=0.5x: found=9,849 (98.49%), correct_elem=693/9,849 (7.0%), outside_bbox=151, search_fail=0, time=5.59s
+    perturb=0.7x: found=9,796 (97.96%), correct_elem=255/9,796 (2.6%), outside_bbox=204, search_fail=0, time=5.61s
+    perturb=1.0x: found=9,675 (96.75%), correct_elem=105/9,675 (1.1%), outside_bbox=325, search_fail=0, time=5.58s
+
+  --- 5x5x5 ---
+    perturb=0.0x: found=10,000 (100.00%), correct_elem=10,000/10,000 (100.0%), outside_bbox=0, search_fail=0, time=6.87s
+    perturb=0.1x: found=9,998 (99.98%), correct_elem=9,160/9,998 (91.6%), outside_bbox=2, search_fail=0, time=6.81s
+    perturb=0.2x: found=9,962 (99.62%), correct_elem=4,730/9,962 (47.5%), outside_bbox=38, search_fail=0, time=6.60s
+    perturb=0.5x: found=9,849 (98.49%), correct_elem=693/9,849 (7.0%), outside_bbox=151, search_fail=0, time=6.84s
+    perturb=0.7x: found=9,796 (97.96%), correct_elem=255/9,796 (2.6%), outside_bbox=204, search_fail=0, time=6.85s
+    perturb=1.0x: found=9,675 (96.75%), correct_elem=105/9,675 (1.1%), outside_bbox=325, search_fail=0, time=6.79s
+
+
+==========================================================================================
+SUMMARY: Percentage of particles FOUND (assigned to any element)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2          30.67%    29.58%    27.84%    23.96%    23.72%    22.69%
+radius r=10         58.02%    52.29%    51.10%    48.93%    48.63%    46.28%
+3x3x3              100.00%    99.98%    99.62%    98.49%    97.96%    96.75%
+5x5x5              100.00%    99.98%    99.62%    98.49%    97.96%    96.75%
+
+==========================================================================================
+ACCURACY: Among FOUND particles, % matching source element
+  (For perturbation < ~0.5x, particles stay near/inside source element,
+   so accuracy should be ~100%. Lower values indicate search error.)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2          100.0%     90.4%     47.0%      7.7%      3.0%      1.1%
+radius r=10         100.0%     91.5%     47.4%      7.3%      2.6%      1.2%
+3x3x3               100.0%     91.6%     47.5%      7.0%      2.6%      1.1%
+5x5x5               100.0%     91.6%     47.5%      7.0%      2.6%      1.1%
+
+==========================================================================================
+UNFOUND ANALYSIS: Search failures (inside bbox but not found)
+  (0 = all unfound particles are outside mesh bbox, no search error)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2           6933     7040     7178     7453     7424     7406
+radius r=10          4198     4769     4852     4956     4933     5047
+3x3x3                   0        0        0        0        0        0
+5x5x5                   0        0        0        0        0        0
+
+==========================================================================================
+TIMING (seconds)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2           7.06s     6.64s     6.68s     6.63s     6.63s     6.92s
+radius r=10          6.72s     6.67s     6.57s     6.68s     6.59s     6.62s
+3x3x3                5.46s     5.52s     5.49s     5.59s     5.61s     5.58s
+5x5x5                6.87s     6.81s     6.60s     6.84s     6.85s     6.79s
+
+Benchmark complete!

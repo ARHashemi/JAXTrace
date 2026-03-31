@@ -1,0 +1,112 @@
+python benchmark_l2_accuracy.py --n-particles 10000 --perturbations 0.0 0.1 0.2 0.5 0.7 1.0 --seed-x 0.35 0.65 --seed-y 0.25 0.75 --seed-z 0.5 1.0
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+==========================================================================================
+L2 Search Accuracy Benchmark
+==========================================================================================
+JAX version: 0.9.0.1
+JAX devices: [CudaDevice(id=0)]
+Float dtype: <class 'numpy.float64'>
+
+[1/4] Loading mesh from /media/arhashemi/HDD2TB/Workspace/welding/Edgar/FLA/post/0eule ...
+Loading mesh: /media/arhashemi/HDD2TB/Workspace/welding/Edgar/FLA/post/0eule/cylA_159.pvtu
+  Nodes: 799,104
+  Elements: 3,050,196
+  Loaded field 'Displacement': (799104, 3)
+  Elements: 3,050,196, Nodes: 571,533 (removed 227,571 duplicates)
+  Loaded in 10.3s
+
+[2/4] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,050,196
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 292,818,816 bytes (279.3 MB)
+  Element sizes: min=7.81e-05, mean=1.01e-04, max=5.00e-03
+  Done in 68.0s
+
+[3/4] Building search structures and uploading to GPU...
+  Multi-cell octree: 666,162 cells, 18.3 elem/cell, 4.0 cells/elem
+  Morton structure: 517,309 cells, 5.9 elem/cell
+  Done in 516.8s
+
+  Seeding region:
+    X: [0.012000, 0.048000] (fraction [0.35, 0.65])
+    Y: [-0.011500, 0.011500] (fraction [0.25, 0.75])
+    Z: [-0.005000, 0.000000] (fraction [0.50, 1.00])
+    Valid elements: 210 / 3,050,196 (0.0%)
+
+[4/4] Running L2 accuracy benchmark...
+  Particles per scenario: 10,000
+  Batch size: 50,000
+  Point-in-tet tolerance: 1e-06
+
+  Generating particle sets...
+    perturbation=0.0x: mean_displacement=0.00e+00, in_mesh_bbox=10000/10000
+    perturbation=0.1x: mean_displacement=7.54e-04, in_mesh_bbox=9979/10000
+    perturbation=0.2x: mean_displacement=1.51e-03, in_mesh_bbox=9565/10000
+    perturbation=0.5x: mean_displacement=3.79e-03, in_mesh_bbox=8153/10000
+    perturbation=0.7x: mean_displacement=5.32e-03, in_mesh_bbox=7227/10000
+    perturbation=1.0x: mean_displacement=7.47e-03, in_mesh_bbox=6138/10000
+
+  --- radius r=2 ---
+    perturb=0.0x: found=3,174 (31.74%), time=6.81s
+    perturb=0.1x: found=2,587 (25.87%), time=6.56s
+    perturb=0.2x: found=2,230 (22.30%), time=6.53s
+    perturb=0.5x: found=1,699 (16.99%), time=6.58s
+    perturb=0.7x: found=1,513 (15.13%), time=6.56s
+    perturb=1.0x: found=1,209 (12.09%), time=6.53s
+
+  --- radius r=10 ---
+    perturb=0.0x: found=4,304 (43.04%), time=6.60s
+    perturb=0.1x: found=3,271 (32.71%), time=6.51s
+    perturb=0.2x: found=2,893 (28.93%), time=6.46s
+    perturb=0.5x: found=2,265 (22.65%), time=6.46s
+    perturb=0.7x: found=2,119 (21.19%), time=6.82s
+    perturb=1.0x: found=1,834 (18.34%), time=6.57s
+
+  --- 3x3x3 ---
+    perturb=0.0x: found=10,000 (100.00%), time=5.29s
+    perturb=0.1x: found=9,979 (99.79%), time=5.22s
+    perturb=0.2x: found=9,565 (95.65%), time=5.28s
+    perturb=0.5x: found=8,153 (81.53%), time=5.32s
+    perturb=0.7x: found=7,227 (72.27%), time=5.40s
+    perturb=1.0x: found=6,138 (61.38%), time=5.33s
+
+  --- 5x5x5 ---
+    perturb=0.0x: found=10,000 (100.00%), time=5.45s
+    perturb=0.1x: found=9,979 (99.79%), time=5.56s
+    perturb=0.2x: found=9,565 (95.65%), time=5.63s
+    perturb=0.5x: found=8,153 (81.53%), time=5.77s
+    perturb=0.7x: found=7,227 (72.27%), time=6.02s
+    perturb=1.0x: found=6,138 (61.38%), time=6.03s
+
+
+==========================================================================================
+SUMMARY: Percentage of particles FOUND (assigned to any element)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2          31.74%    25.87%    22.30%    16.99%    15.13%    12.09%
+radius r=10         43.04%    32.71%    28.93%    22.65%    21.19%    18.34%
+3x3x3              100.00%    99.79%    95.65%    81.53%    72.27%    61.38%
+5x5x5              100.00%    99.79%    95.65%    81.53%    72.27%    61.38%
+
+==========================================================================================
+SUMMARY: Timing (seconds)
+==========================================================================================
+Method            0.0x      0.1x      0.2x      0.5x      0.7x      1.0x
+------------------------------------------------------------------------------------------
+radius r=2           6.81s     6.56s     6.53s     6.58s     6.56s     6.53s
+radius r=10          6.60s     6.51s     6.46s     6.46s     6.82s     6.57s
+3x3x3                5.29s     5.22s     5.28s     5.32s     5.40s     5.33s
+5x5x5                5.45s     5.56s     5.63s     5.77s     6.02s     6.03s
+
+Notes:
+  - 'found' = particle assigned to ANY containing element (the accuracy metric).
+  - At 0.0x perturbation (exact centroids), found should be ~100% for all methods.
+  - With perturbation > 0, particles may leave the mesh domain; 'not found' at high
+    perturbation reflects particles outside the mesh, not search failure.
+
+Benchmark complete!

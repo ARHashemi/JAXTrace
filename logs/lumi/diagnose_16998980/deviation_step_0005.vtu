@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian">
+  <UnstructuredGrid>
+    <Piece NumberOfPoints="4" NumberOfCells="4">
+      <Points>
+        <DataArray type="Float32" NumberOfComponents="3" format="ascii">
+          -1.138950e-02 5.938076e-03 -9.842372e-07
+          -1.494602e-02 9.696347e-03 -9.823685e-07
+          -1.137727e-02 5.940359e-03 -3.373031e-08
+          -1.493451e-02 9.696445e-03 -1.777037e-08
+        </DataArray>
+      </Points>
+      <Cells>
+        <DataArray type="Int32" Name="connectivity" format="ascii">
+          0 1 2 3
+        </DataArray>
+        <DataArray type="Int32" Name="offsets" format="ascii">
+          1 2 3 4
+        </DataArray>
+        <DataArray type="UInt8" Name="types" format="ascii">
+          1 1 1 1
+        </DataArray>
+      </Cells>
+      <PointData>
+        <DataArray type="Int32" Name="ParticleID" format="ascii">
+          29206 94044 29206 94044
+        </DataArray>
+        <DataArray type="Int32" Name="source" format="ascii">
+          0 0 1 1
+        </DataArray>
+        <DataArray type="Float32" Name="error_magnitude" format="ascii">
+          1.2476872e-05 1.1551512e-05 1.2476872e-05 1.1551512e-05
+        </DataArray>
+        <DataArray type="Int32" Name="status" format="ascii">
+          0 0 0 0
+        </DataArray>
+      </PointData>
+    </Piece>
+  </UnstructuredGrid>
+</VTKFile>

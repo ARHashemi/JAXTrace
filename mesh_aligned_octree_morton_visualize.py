@@ -184,8 +184,58 @@ fig_a.update_layout(
     # paper_bgcolor="#0f172a",plot_bgcolor="#0d1f33",
     margin=dict(t=165,b=145,l=80,r=60),
 )
-img_bytes = fig_a.to_image(format="png", scale=2)
-with open("new_l2_multilevel_octree.png", "wb") as f_img:
+
+fig_a.update_layout(
+    title=None,
+    paper_bgcolor="white",
+    plot_bgcolor="white",
+    font=dict(family="Arial", size=18, color="black"),
+    margin=dict(l=18, r=18, t=18, b=18, pad=0),
+    showlegend=True,
+    legend=dict(
+        x=0.02, y=0.98,
+        xanchor="left", yanchor="top",
+        orientation="v",
+        bgcolor="rgba(255,255,255,0.90)",
+        bordercolor="rgba(0,0,0,0.25)",
+        borderwidth=1,
+        font=dict(size=15, color="black")
+    )
+)
+
+fig_a.update_xaxes(
+    title_text="x",
+    range=[-0.02, 4.02],
+    showgrid=False,
+    zeroline=False,
+    showline=True,
+    linewidth=1.6,
+    linecolor="black",
+    mirror=True,
+    ticks="outside",
+    tickfont=dict(size=15, color="black"),
+    title_font=dict(size=18, color="black"),
+    scaleanchor="y",
+    constrain="domain"
+)
+
+fig_a.update_yaxes(
+    title_text="y",
+    range=[-0.02, 4.02],
+    showgrid=False,
+    zeroline=False,
+    showline=True,
+    linewidth=1.6,
+    linecolor="black",
+    mirror=True,
+    ticks="outside",
+    tickfont=dict(size=15, color="black"),
+    title_font=dict(size=18, color="black"),
+    constrain="domain"
+)
+
+img_bytes = fig_a.to_image(format="svg", scale=2)
+with open("new_l2_multilevel_octree.svg", "wb") as f_img:
     f_img.write(img_bytes)
 with open("new_l2_multilevel_octree.png.meta.json","w") as f:
     json.dump({"caption":

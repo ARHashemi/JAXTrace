@@ -1,0 +1,527 @@
+Starting simulation at sáb 14 mar 2026 18:39:17 EET
+Monitor log: /scratch/project_465002752/hashemia/logs/jaxtrace_16730278_monitor.log
+
+✅ Enhanced VTK I/O available
+✅ HDF5 I/O available
+================================================================================
+FEMUSS Particle Tracking Comparison
+================================================================================
+JAX version: 0.5.0
+JAX devices: [RocmDevice(id=0), RocmDevice(id=1), RocmDevice(id=2), RocmDevice(id=3), RocmDevice(id=4), RocmDevice(id=5), RocmDevice(id=6), RocmDevice(id=7)]
+
+Configuration:
+  Input base:           /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post
+  Mesh dir:             /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post/0eule
+  FEMUSS particle dir:  /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post/1part
+  Output dir:           /flash/project_465002752/hashemia/run_16730278
+  FEMUSS start step:    0
+  FEMUSS end step:      2684
+  N_STEPS:              2684
+  DT:                   0.0025
+  Velocity range:       159-159
+  L0: ON
+  L1: ON
+  L2 method:            mesh_aligned_octree_multi_local_where
+  Bbox clamp:           ON
+  Last-valid vel:       ON
+  Boundary projection:  ON (tol=1e-06)
+  Boundary walls:       clamp
+  Precision:            float64
+  Level-set mask:       ON (field: 'LEVEL')
+================================================================================
+  WARNING: RK4_BOUNDARY_WALLS='clamp' is not a dict, treating as None (all clamp)
+
+[1/7] Loading mesh...
+Loading mesh: /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post/0eule/cylA_159.pvtu
+  Nodes: 799,104
+  Elements: 3,050,196
+  Loaded field 'Displacement': (799104, 3)
+  Elements: 3,050,196, Nodes: 799,104
+  Deduplicating...
+  Removed 227,571 duplicates -> 571,533 nodes
+  Mesh bbox: [[-0.03  -0.023 -0.01 ]] → [[0.09  0.023 0.   ]]
+  Level-set loaded: 185,479/571,533 nodes inside tool (32.5%)
+  Stage 1 time: 18.5s
+
+[2/7] Precomputing metadata...
+
+Precomputed inverse matrices:
+  Elements: 3,050,196
+  Degenerate: 0 (0.0000%)
+  Det range: [4.87e-13, 1.28e-07]
+  Memory: 292,818,816 bytes (279.3 MB)
+  Done
+  Stage 2 time: 97.0s
+
+[3/7] Building structures and uploading to GPU...
+  Multi-cell octree: 666,162 cells, 18.3 elem/cell, 4.0 cells/elem
+  Uploaded to GPU
+  Stage 3 time: 581.2s
+
+[4/7] Loading FEMUSS particles...
+  Start: /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post/1part/cylA_pt_0.pvtu
+    Particles: 299,200
+    Left domain: 5,745
+  End:   /scratch/project_465001942/Cases-Edgar/new/cylA.gid/post/1part/cylA_pt_2684.pvtu
+    Particles: 299,200
+    Left domain: 9
+
+  Active at start: 293,455 / 299,200
+  Stage 4 time: 1.0s
+
+[5/7] Initial assignment...
+
+  mesh_aligned_octree_multi_local_where initial assignment
+  Particles: 293,455, batch_size: 50,000
+    Batch 1/6: 50,000 particles  (cumulative found: 50,000/50,000)
+    Batch 2/6: 50,000 particles  (cumulative found: 100,000/100,000)
+    Batch 3/6: 50,000 particles  (cumulative found: 150,000/150,000)
+    Batch 4/6: 50,000 particles  (cumulative found: 200,000/200,000)
+    Batch 5/6: 50,000 particles  (cumulative found: 250,000/250,000)
+    Batch 6/6: 43,455 particles  (cumulative found: 293,455/293,455)
+  Assigned: 293,455/293,455 (100.00%) in 16.75s
+  Assigned: 293,455/293,455 (100.00%)
+  Stage 5 time: 17.1s
+
+[6/7] Building RK4...
+  Compiling...
+  Compilation: 36.5s
+  Stage 6 time: 36.5s (incl. compilation)
+  Exported initial state (step 0)
+
+[7/7] Running 2684 RK4 steps...
+================================================================================
+  Step    10/2684: active=293,455 lost=0 (+0)  [24s elapsed, 0.4 step/s, ETA 6352s]
+  Step    20/2684: active=293,455 lost=0 (+0)  [50s elapsed, 0.4 step/s, ETA 6619s]
+  Step    30/2684: active=293,455 lost=0 (+0)  [76s elapsed, 0.4 step/s, ETA 6701s]
+  Step    40/2684: active=293,455 lost=0 (+0)  [104s elapsed, 0.4 step/s, ETA 6866s]
+  Step    50/2684: active=293,455 lost=0 (+0)  [134s elapsed, 0.4 step/s, ETA 7038s]
+  Step    60/2684: active=293,455 lost=0 (+0)  [164s elapsed, 0.4 step/s, ETA 7169s]
+  Step    70/2684: active=293,455 lost=0 (+0)  [195s elapsed, 0.4 step/s, ETA 7273s]
+  Step    80/2684: active=293,455 lost=0 (+0)  [226s elapsed, 0.4 step/s, ETA 7350s]
+  Step    90/2684: active=293,455 lost=0 (+0)  [257s elapsed, 0.3 step/s, ETA 7412s]
+  Step   100/2684: active=293,455 lost=0 (+0)  [289s elapsed, 0.3 step/s, ETA 7465s]
+  Step   110/2684: active=293,455 lost=0 (+0)  [321s elapsed, 0.3 step/s, ETA 7511s]
+  Step   120/2684: active=293,455 lost=0 (+0)  [354s elapsed, 0.3 step/s, ETA 7553s]
+  Step   130/2684: active=293,455 lost=0 (+0)  [386s elapsed, 0.3 step/s, ETA 7584s]
+  Step   140/2684: active=293,455 lost=0 (+0)  [419s elapsed, 0.3 step/s, ETA 7611s]
+  Step   150/2684: active=293,455 lost=0 (+0)  [453s elapsed, 0.3 step/s, ETA 7644s]
+  Step   160/2684: active=293,455 lost=0 (+0)  [486s elapsed, 0.3 step/s, ETA 7672s]
+  Step   170/2684: active=293,455 lost=0 (+0)  [521s elapsed, 0.3 step/s, ETA 7698s]
+  Step   180/2684: active=293,455 lost=0 (+0)  [555s elapsed, 0.3 step/s, ETA 7722s]
+  Step   190/2684: active=293,455 lost=0 (+0)  [590s elapsed, 0.3 step/s, ETA 7745s]
+  Step   200/2684: active=293,455 lost=0 (+0)  [625s elapsed, 0.3 step/s, ETA 7762s]
+  Step   210/2684: active=293,455 lost=0 (+0)  [660s elapsed, 0.3 step/s, ETA 7780s]
+  Step   220/2684: active=293,455 lost=0 (+0)  [696s elapsed, 0.3 step/s, ETA 7794s]
+  Step   230/2684: active=293,455 lost=0 (+0)  [731s elapsed, 0.3 step/s, ETA 7802s]
+  Step   240/2684: active=293,455 lost=0 (+0)  [767s elapsed, 0.3 step/s, ETA 7809s]
+  Step   250/2684: active=293,455 lost=0 (+0)  [802s elapsed, 0.3 step/s, ETA 7812s]
+  Step   260/2684: active=293,455 lost=0 (+0)  [838s elapsed, 0.3 step/s, ETA 7814s]
+  Step   270/2684: active=293,455 lost=0 (+0)  [874s elapsed, 0.3 step/s, ETA 7811s]
+  Step   280/2684: active=293,455 lost=0 (+0)  [909s elapsed, 0.3 step/s, ETA 7808s]
+  Step   290/2684: active=293,455 lost=0 (+0)  [945s elapsed, 0.3 step/s, ETA 7804s]
+  Step   300/2684: active=293,455 lost=0 (+0)  [982s elapsed, 0.3 step/s, ETA 7800s]
+  Step   310/2684: active=293,455 lost=0 (+0)  [1018s elapsed, 0.3 step/s, ETA 7799s]
+  Step   320/2684: active=293,455 lost=0 (+0)  [1055s elapsed, 0.3 step/s, ETA 7797s]
+  Step   330/2684: active=293,455 lost=0 (+0)  [1093s elapsed, 0.3 step/s, ETA 7795s]
+  Step   340/2684: active=293,455 lost=0 (+0)  [1130s elapsed, 0.3 step/s, ETA 7792s]
+  Step   350/2684: active=293,455 lost=0 (+0)  [1168s elapsed, 0.3 step/s, ETA 7790s]
+  Step   360/2684: active=293,455 lost=0 (+0)  [1207s elapsed, 0.3 step/s, ETA 7791s]
+  Step   370/2684: active=293,455 lost=0 (+0)  [1246s elapsed, 0.3 step/s, ETA 7793s]
+  Step   380/2684: active=293,455 lost=0 (+0)  [1286s elapsed, 0.3 step/s, ETA 7796s]
+  Step   390/2684: active=293,455 lost=0 (+0)  [1326s elapsed, 0.3 step/s, ETA 7799s]
+  Step   400/2684: active=293,455 lost=0 (+0)  [1367s elapsed, 0.3 step/s, ETA 7803s]
+  Step   410/2684: active=293,455 lost=0 (+0)  [1407s elapsed, 0.3 step/s, ETA 7804s]
+  Step   420/2684: active=293,455 lost=0 (+0)  [1448s elapsed, 0.3 step/s, ETA 7806s]
+  Step   430/2684: active=293,455 lost=0 (+0)  [1489s elapsed, 0.3 step/s, ETA 7806s]
+  Step   440/2684: active=293,455 lost=0 (+0)  [1531s elapsed, 0.3 step/s, ETA 7806s]
+  Step   450/2684: active=293,455 lost=0 (+0)  [1572s elapsed, 0.3 step/s, ETA 7804s]
+  Step   460/2684: active=293,455 lost=0 (+0)  [1614s elapsed, 0.3 step/s, ETA 7801s]
+  Step   470/2684: active=293,455 lost=0 (+0)  [1655s elapsed, 0.3 step/s, ETA 7797s]
+  Step   480/2684: active=293,455 lost=0 (+0)  [1697s elapsed, 0.3 step/s, ETA 7791s]
+  Step   490/2684: active=293,455 lost=0 (+0)  [1738s elapsed, 0.3 step/s, ETA 7784s]
+  Step   500/2684: active=293,455 lost=0 (+0)  [1780s elapsed, 0.3 step/s, ETA 7775s]
+  Step   510/2684: active=293,455 lost=0 (+0)  [1822s elapsed, 0.3 step/s, ETA 7768s]
+  Step   520/2684: active=293,455 lost=0 (+0)  [1864s elapsed, 0.3 step/s, ETA 7759s]
+  Step   530/2684: active=293,455 lost=0 (+0)  [1907s elapsed, 0.3 step/s, ETA 7749s]
+  Step   540/2684: active=293,455 lost=0 (+0)  [1949s elapsed, 0.3 step/s, ETA 7739s]
+  Step   550/2684: active=293,455 lost=0 (+0)  [1992s elapsed, 0.3 step/s, ETA 7728s]
+  Step   560/2684: active=293,455 lost=0 (+0)  [2035s elapsed, 0.3 step/s, ETA 7717s]
+  Step   570/2684: active=293,455 lost=0 (+0)  [2077s elapsed, 0.3 step/s, ETA 7704s]
+  Step   580/2684: active=293,455 lost=0 (+0)  [2120s elapsed, 0.3 step/s, ETA 7691s]
+  Step   590/2684: active=293,455 lost=0 (+0)  [2163s elapsed, 0.3 step/s, ETA 7677s]
+  Step   600/2684: active=293,455 lost=0 (+0)  [2206s elapsed, 0.3 step/s, ETA 7662s]
+  Step   610/2684: active=293,455 lost=0 (+0)  [2249s elapsed, 0.3 step/s, ETA 7647s]
+  Step   620/2684: active=293,455 lost=0 (+0)  [2292s elapsed, 0.3 step/s, ETA 7630s]
+  Step   630/2684: active=293,455 lost=0 (+0)  [2335s elapsed, 0.3 step/s, ETA 7613s]
+  Step   640/2684: active=293,455 lost=0 (+0)  [2378s elapsed, 0.3 step/s, ETA 7595s]
+  Step   650/2684: active=293,455 lost=0 (+0)  [2421s elapsed, 0.3 step/s, ETA 7576s]
+  Step   660/2684: active=293,455 lost=0 (+0)  [2464s elapsed, 0.3 step/s, ETA 7556s]
+  Step   670/2684: active=293,455 lost=0 (+0)  [2507s elapsed, 0.3 step/s, ETA 7536s]
+  Step   680/2684: active=293,455 lost=0 (+0)  [2550s elapsed, 0.3 step/s, ETA 7515s]
+  Step   690/2684: active=293,455 lost=0 (+0)  [2593s elapsed, 0.3 step/s, ETA 7494s]
+  Step   700/2684: active=293,455 lost=0 (+0)  [2637s elapsed, 0.3 step/s, ETA 7473s]
+  Step   710/2684: active=293,455 lost=0 (+0)  [2680s elapsed, 0.3 step/s, ETA 7451s]
+  Step   720/2684: active=293,455 lost=0 (+0)  [2724s elapsed, 0.3 step/s, ETA 7429s]
+  Step   730/2684: active=293,455 lost=0 (+0)  [2767s elapsed, 0.3 step/s, ETA 7407s]
+  Step   740/2684: active=293,455 lost=0 (+0)  [2811s elapsed, 0.3 step/s, ETA 7385s]
+  Step   750/2684: active=293,455 lost=0 (+0)  [2855s elapsed, 0.3 step/s, ETA 7361s]
+  Step   760/2684: active=293,455 lost=0 (+0)  [2898s elapsed, 0.3 step/s, ETA 7338s]
+  Step   770/2684: active=293,455 lost=0 (+0)  [2942s elapsed, 0.3 step/s, ETA 7314s]
+  Step   780/2684: active=293,455 lost=0 (+0)  [2986s elapsed, 0.3 step/s, ETA 7290s]
+  Step   790/2684: active=293,455 lost=0 (+0)  [3030s elapsed, 0.3 step/s, ETA 7265s]
+  Step   800/2684: active=293,455 lost=0 (+0)  [3074s elapsed, 0.3 step/s, ETA 7240s]
+  Step   810/2684: active=293,455 lost=0 (+0)  [3119s elapsed, 0.3 step/s, ETA 7215s]
+  Step   820/2684: active=293,455 lost=0 (+0)  [3163s elapsed, 0.3 step/s, ETA 7190s]
+  Step   830/2684: active=293,455 lost=0 (+0)  [3207s elapsed, 0.3 step/s, ETA 7164s]
+  Step   840/2684: active=293,455 lost=0 (+0)  [3252s elapsed, 0.3 step/s, ETA 7138s]
+  Step   850/2684: active=293,455 lost=0 (+0)  [3296s elapsed, 0.3 step/s, ETA 7112s]
+  Step   860/2684: active=293,455 lost=0 (+0)  [3341s elapsed, 0.3 step/s, ETA 7086s]
+  Step   870/2684: active=293,455 lost=0 (+0)  [3385s elapsed, 0.3 step/s, ETA 7059s]
+  Step   880/2684: active=293,455 lost=0 (+0)  [3430s elapsed, 0.3 step/s, ETA 7032s]
+  Step   890/2684: active=293,455 lost=0 (+0)  [3475s elapsed, 0.3 step/s, ETA 7005s]
+  Step   900/2684: active=293,455 lost=0 (+0)  [3520s elapsed, 0.3 step/s, ETA 6977s]
+  Step   910/2684: active=293,455 lost=0 (+0)  [3564s elapsed, 0.3 step/s, ETA 6949s]
+  Step   920/2684: active=293,455 lost=0 (+0)  [3609s elapsed, 0.3 step/s, ETA 6920s]
+  Step   930/2684: active=293,455 lost=0 (+0)  [3654s elapsed, 0.3 step/s, ETA 6891s]
+  Step   940/2684: active=293,455 lost=0 (+0)  [3699s elapsed, 0.3 step/s, ETA 6862s]
+  Step   950/2684: active=293,455 lost=0 (+0)  [3743s elapsed, 0.3 step/s, ETA 6833s]
+  Step   960/2684: active=293,455 lost=0 (+0)  [3788s elapsed, 0.3 step/s, ETA 6803s]
+  Step   970/2684: active=293,455 lost=0 (+0)  [3833s elapsed, 0.3 step/s, ETA 6773s]
+  Step   980/2684: active=293,455 lost=0 (+0)  [3878s elapsed, 0.3 step/s, ETA 6742s]
+  Step   990/2684: active=293,455 lost=0 (+0)  [3923s elapsed, 0.3 step/s, ETA 6713s]
+  Step  1000/2684: active=293,455 lost=0 (+0)  [3968s elapsed, 0.3 step/s, ETA 6682s]
+  Step  1010/2684: active=293,455 lost=0 (+0)  [4012s elapsed, 0.3 step/s, ETA 6650s]
+  Step  1020/2684: active=293,455 lost=0 (+0)  [4057s elapsed, 0.3 step/s, ETA 6618s]
+  Step  1030/2684: active=293,455 lost=0 (+0)  [4101s elapsed, 0.3 step/s, ETA 6586s]
+  Step  1040/2684: active=293,455 lost=0 (+0)  [4146s elapsed, 0.3 step/s, ETA 6554s]
+  Step  1050/2684: active=293,455 lost=0 (+0)  [4190s elapsed, 0.3 step/s, ETA 6521s]
+  Step  1060/2684: active=293,455 lost=0 (+0)  [4235s elapsed, 0.3 step/s, ETA 6488s]
+  Step  1070/2684: active=293,455 lost=0 (+0)  [4279s elapsed, 0.3 step/s, ETA 6455s]
+  Step  1080/2684: active=293,455 lost=0 (+0)  [4324s elapsed, 0.2 step/s, ETA 6422s]
+  Step  1090/2684: active=293,455 lost=0 (+0)  [4368s elapsed, 0.2 step/s, ETA 6388s]
+  Step  1100/2684: active=293,455 lost=0 (+0)  [4412s elapsed, 0.2 step/s, ETA 6354s]
+  Step  1110/2684: active=293,455 lost=0 (+0)  [4457s elapsed, 0.2 step/s, ETA 6320s]
+  Step  1120/2684: active=293,455 lost=0 (+0)  [4501s elapsed, 0.2 step/s, ETA 6285s]
+  Step  1130/2684: active=293,455 lost=0 (+0)  [4545s elapsed, 0.2 step/s, ETA 6251s]
+  Step  1140/2684: active=293,455 lost=0 (+0)  [4590s elapsed, 0.2 step/s, ETA 6216s]
+  Step  1150/2684: active=293,455 lost=0 (+0)  [4634s elapsed, 0.2 step/s, ETA 6181s]
+  Step  1160/2684: active=293,455 lost=0 (+0)  [4678s elapsed, 0.2 step/s, ETA 6146s]
+  Step  1170/2684: active=293,455 lost=0 (+0)  [4723s elapsed, 0.2 step/s, ETA 6111s]
+  Step  1180/2684: active=293,455 lost=0 (+0)  [4767s elapsed, 0.2 step/s, ETA 6076s]
+  Step  1190/2684: active=293,455 lost=0 (+0)  [4811s elapsed, 0.2 step/s, ETA 6040s]
+  Step  1200/2684: active=293,455 lost=0 (+0)  [4856s elapsed, 0.2 step/s, ETA 6005s]
+  Step  1210/2684: active=293,455 lost=0 (+0)  [4900s elapsed, 0.2 step/s, ETA 5969s]
+  Step  1220/2684: active=293,455 lost=0 (+0)  [4945s elapsed, 0.2 step/s, ETA 5933s]
+  Step  1230/2684: active=293,455 lost=0 (+0)  [4989s elapsed, 0.2 step/s, ETA 5898s]
+  Step  1240/2684: active=293,455 lost=0 (+0)  [5034s elapsed, 0.2 step/s, ETA 5862s]
+  Step  1250/2684: active=293,455 lost=0 (+0)  [5078s elapsed, 0.2 step/s, ETA 5825s]
+  Step  1260/2684: active=293,455 lost=0 (+0)  [5123s elapsed, 0.2 step/s, ETA 5789s]
+  Step  1270/2684: active=293,455 lost=0 (+0)  [5167s elapsed, 0.2 step/s, ETA 5753s]
+  Step  1280/2684: active=293,455 lost=0 (+0)  [5212s elapsed, 0.2 step/s, ETA 5717s]
+  Step  1290/2684: active=293,455 lost=0 (+0)  [5256s elapsed, 0.2 step/s, ETA 5680s]
+  Step  1300/2684: active=293,455 lost=0 (+0)  [5301s elapsed, 0.2 step/s, ETA 5643s]
+  Step  1310/2684: active=293,455 lost=0 (+0)  [5346s elapsed, 0.2 step/s, ETA 5607s]
+  Step  1320/2684: active=293,455 lost=0 (+0)  [5390s elapsed, 0.2 step/s, ETA 5570s]
+  Step  1330/2684: active=293,455 lost=0 (+0)  [5435s elapsed, 0.2 step/s, ETA 5533s]
+  Step  1340/2684: active=293,455 lost=0 (+0)  [5479s elapsed, 0.2 step/s, ETA 5495s]
+  Step  1350/2684: active=293,455 lost=0 (+0)  [5524s elapsed, 0.2 step/s, ETA 5458s]
+  Step  1360/2684: active=293,455 lost=0 (+0)  [5568s elapsed, 0.2 step/s, ETA 5421s]
+  Step  1370/2684: active=293,455 lost=0 (+0)  [5612s elapsed, 0.2 step/s, ETA 5383s]
+  Step  1380/2684: active=293,455 lost=0 (+0)  [5656s elapsed, 0.2 step/s, ETA 5345s]
+  Step  1390/2684: active=293,455 lost=0 (+0)  [5700s elapsed, 0.2 step/s, ETA 5307s]
+  Step  1400/2684: active=293,455 lost=0 (+0)  [5744s elapsed, 0.2 step/s, ETA 5268s]
+  Step  1410/2684: active=293,455 lost=0 (+0)  [5788s elapsed, 0.2 step/s, ETA 5230s]
+  Step  1420/2684: active=293,455 lost=0 (+0)  [5832s elapsed, 0.2 step/s, ETA 5191s]
+  Step  1430/2684: active=293,455 lost=0 (+0)  [5876s elapsed, 0.2 step/s, ETA 5152s]
+  Step  1440/2684: active=293,455 lost=0 (+0)  [5919s elapsed, 0.2 step/s, ETA 5114s]
+  Step  1450/2684: active=293,455 lost=0 (+0)  [5963s elapsed, 0.2 step/s, ETA 5075s]
+  Step  1460/2684: active=293,455 lost=0 (+0)  [6007s elapsed, 0.2 step/s, ETA 5036s]
+  Step  1470/2684: active=293,455 lost=0 (+0)  [6050s elapsed, 0.2 step/s, ETA 4997s]
+  Step  1480/2684: active=293,455 lost=0 (+0)  [6094s elapsed, 0.2 step/s, ETA 4957s]
+  Step  1490/2684: active=293,455 lost=0 (+0)  [6137s elapsed, 0.2 step/s, ETA 4918s]
+  Step  1500/2684: active=293,455 lost=0 (+0)  [6181s elapsed, 0.2 step/s, ETA 4879s]
+  Step  1510/2684: active=293,455 lost=0 (+0)  [6224s elapsed, 0.2 step/s, ETA 4839s]
+  Step  1520/2684: active=293,455 lost=0 (+0)  [6267s elapsed, 0.2 step/s, ETA 4799s]
+  Step  1530/2684: active=293,455 lost=0 (+0)  [6311s elapsed, 0.2 step/s, ETA 4760s]
+  Step  1540/2684: active=293,455 lost=0 (+0)  [6354s elapsed, 0.2 step/s, ETA 4720s]
+  Step  1550/2684: active=293,455 lost=0 (+0)  [6396s elapsed, 0.2 step/s, ETA 4680s]
+  Step  1560/2684: active=293,455 lost=0 (+0)  [6439s elapsed, 0.2 step/s, ETA 4640s]
+  Step  1570/2684: active=293,455 lost=0 (+0)  [6482s elapsed, 0.2 step/s, ETA 4599s]
+  Step  1580/2684: active=293,455 lost=0 (+0)  [6525s elapsed, 0.2 step/s, ETA 4559s]
+Warning: Export queue full at step 1588, skipping
+  Step  1590/2684: active=293,455 lost=0 (+0)  [6578s elapsed, 0.2 step/s, ETA 4526s]
+Warning: Export queue full at step 1590, skipping
+Warning: Export queue full at step 1591, skipping
+Warning: Export queue full at step 1592, skipping
+Warning: Export queue full at step 1593, skipping
+Warning: Export queue full at step 1595, skipping
+Warning: Export queue full at step 1596, skipping
+Warning: Export queue full at step 1597, skipping
+Warning: Export queue full at step 1598, skipping
+Warning: Export queue full at step 1599, skipping
+  Step  1600/2684: active=293,455 lost=0 (+0)  [6714s elapsed, 0.2 step/s, ETA 4549s]
+Warning: Export queue full at step 1602, skipping
+  Step  1610/2684: active=293,455 lost=0 (+0)  [6774s elapsed, 0.2 step/s, ETA 4519s]
+  Step  1620/2684: active=293,455 lost=0 (+0)  [6823s elapsed, 0.2 step/s, ETA 4481s]
+  Step  1630/2684: active=293,455 lost=0 (+0)  [6866s elapsed, 0.2 step/s, ETA 4439s]
+  Step  1640/2684: active=293,455 lost=0 (+0)  [6908s elapsed, 0.2 step/s, ETA 4398s]
+  Step  1650/2684: active=293,455 lost=0 (+0)  [6950s elapsed, 0.2 step/s, ETA 4356s]
+  Step  1660/2684: active=293,455 lost=0 (+0)  [6993s elapsed, 0.2 step/s, ETA 4314s]
+Warning: Export queue full at step 1661, skipping
+Warning: Export queue full at step 1662, skipping
+Warning: Export queue full at step 1663, skipping
+Warning: Export queue full at step 1664, skipping
+Warning: Export queue full at step 1665, skipping
+Warning: Export queue full at step 1666, skipping
+Warning: Export queue full at step 1667, skipping
+Warning: Export queue full at step 1668, skipping
+Warning: Export queue full at step 1669, skipping
+  Step  1670/2684: active=293,455 lost=0 (+0)  [7125s elapsed, 0.2 step/s, ETA 4326s]
+Warning: Export queue full at step 1671, skipping
+Warning: Export queue full at step 1672, skipping
+Warning: Export queue full at step 1673, skipping
+Warning: Export queue full at step 1674, skipping
+Warning: Export queue full at step 1675, skipping
+Warning: Export queue full at step 1676, skipping
+Warning: Export queue full at step 1677, skipping
+Warning: Export queue full at step 1678, skipping
+Warning: Export queue full at step 1679, skipping
+  Step  1680/2684: active=293,455 lost=0 (+0)  [7262s elapsed, 0.2 step/s, ETA 4340s]
+Warning: Export queue full at step 1680, skipping
+Warning: Export queue full at step 1681, skipping
+Warning: Export queue full at step 1682, skipping
+Warning: Export queue full at step 1683, skipping
+Warning: Export queue full at step 1684, skipping
+Warning: Export queue full at step 1685, skipping
+Warning: Export queue full at step 1686, skipping
+Warning: Export queue full at step 1687, skipping
+Warning: Export queue full at step 1688, skipping
+Warning: Export queue full at step 1689, skipping
+  Step  1690/2684: active=293,455 lost=0 (+0)  [7404s elapsed, 0.2 step/s, ETA 4355s]
+Warning: Export queue full at step 1690, skipping
+Warning: Export queue full at step 1691, skipping
+Warning: Export queue full at step 1692, skipping
+Warning: Export queue full at step 1693, skipping
+Warning: Export queue full at step 1694, skipping
+Warning: Export queue full at step 1695, skipping
+Warning: Export queue full at step 1696, skipping
+Warning: Export queue full at step 1697, skipping
+Warning: Export queue full at step 1698, skipping
+  Step  1700/2684: active=293,455 lost=0 (+0)  [7536s elapsed, 0.2 step/s, ETA 4362s]
+  Step  1710/2684: active=293,455 lost=0 (+0)  [7578s elapsed, 0.2 step/s, ETA 4316s]
+  Step  1720/2684: active=293,455 lost=0 (+0)  [7620s elapsed, 0.2 step/s, ETA 4271s]
+  Step  1730/2684: active=293,455 lost=0 (+0)  [7663s elapsed, 0.2 step/s, ETA 4226s]
+  Step  1740/2684: active=293,455 lost=0 (+0)  [7705s elapsed, 0.2 step/s, ETA 4180s]
+  Step  1750/2684: active=293,455 lost=0 (+0)  [7747s elapsed, 0.2 step/s, ETA 4135s]
+  Step  1760/2684: active=293,455 lost=0 (+0)  [7789s elapsed, 0.2 step/s, ETA 4089s]
+  Step  1770/2684: active=293,455 lost=0 (+0)  [7832s elapsed, 0.2 step/s, ETA 4044s]
+  Step  1780/2684: active=293,455 lost=0 (+0)  [7874s elapsed, 0.2 step/s, ETA 3999s]
+  Step  1790/2684: active=293,455 lost=0 (+0)  [7916s elapsed, 0.2 step/s, ETA 3953s]
+  Step  1800/2684: active=293,455 lost=0 (+0)  [7957s elapsed, 0.2 step/s, ETA 3908s]
+  Step  1810/2684: active=293,455 lost=0 (+0)  [7999s elapsed, 0.2 step/s, ETA 3862s]
+  Step  1820/2684: active=293,455 lost=0 (+0)  [8040s elapsed, 0.2 step/s, ETA 3817s]
+Warning: Export queue full at step 1827, skipping
+Warning: Export queue full at step 1828, skipping
+Warning: Export queue full at step 1829, skipping
+  Step  1830/2684: active=293,455 lost=0 (+0)  [8111s elapsed, 0.2 step/s, ETA 3785s]
+Warning: Export queue full at step 1830, skipping
+Warning: Export queue full at step 1831, skipping
+  Step  1840/2684: active=293,455 lost=0 (+0)  [8172s elapsed, 0.2 step/s, ETA 3748s]
+Warning: Export queue full at step 1843, skipping
+Warning: Export queue full at step 1845, skipping
+Warning: Export queue full at step 1846, skipping
+Warning: Export queue full at step 1847, skipping
+Warning: Export queue full at step 1848, skipping
+Warning: Export queue full at step 1849, skipping
+  Step  1850/2684: active=293,455 lost=0 (+0)  [8272s elapsed, 0.2 step/s, ETA 3729s]
+Warning: Export queue full at step 1850, skipping
+Warning: Export queue full at step 1851, skipping
+Warning: Export queue full at step 1852, skipping
+Warning: Export queue full at step 1853, skipping
+Warning: Export queue full at step 1854, skipping
+Warning: Export queue full at step 1855, skipping
+Warning: Export queue full at step 1856, skipping
+Warning: Export queue full at step 1857, skipping
+Warning: Export queue full at step 1858, skipping
+Warning: Export queue full at step 1859, skipping
+  Step  1860/2684: active=293,455 lost=0 (+0)  [8413s elapsed, 0.2 step/s, ETA 3727s]
+Warning: Export queue full at step 1860, skipping
+  Step  1870/2684: active=293,455 lost=0 (+0)  [8464s elapsed, 0.2 step/s, ETA 3684s]
+  Step  1880/2684: active=293,455 lost=0 (+0)  [8505s elapsed, 0.2 step/s, ETA 3637s]
+  Step  1890/2684: active=293,455 lost=0 (+0)  [8546s elapsed, 0.2 step/s, ETA 3590s]
+  Step  1900/2684: active=293,455 lost=0 (+0)  [8586s elapsed, 0.2 step/s, ETA 3543s]
+  Step  1910/2684: active=293,455 lost=0 (+0)  [8627s elapsed, 0.2 step/s, ETA 3496s]
+  Step  1920/2684: active=293,455 lost=0 (+0)  [8667s elapsed, 0.2 step/s, ETA 3449s]
+  Step  1930/2684: active=293,455 lost=0 (+0)  [8708s elapsed, 0.2 step/s, ETA 3402s]
+  Step  1940/2684: active=293,455 lost=0 (+0)  [8748s elapsed, 0.2 step/s, ETA 3355s]
+  Step  1950/2684: active=293,455 lost=0 (+0)  [8788s elapsed, 0.2 step/s, ETA 3308s]
+  Step  1960/2684: active=293,455 lost=0 (+0)  [8828s elapsed, 0.2 step/s, ETA 3261s]
+  Step  1970/2684: active=293,455 lost=0 (+0)  [8868s elapsed, 0.2 step/s, ETA 3214s]
+  Step  1980/2684: active=293,455 lost=0 (+0)  [8908s elapsed, 0.2 step/s, ETA 3167s]
+  Step  1990/2684: active=293,455 lost=0 (+0)  [8947s elapsed, 0.2 step/s, ETA 3120s]
+  Step  2000/2684: active=293,455 lost=0 (+0)  [8987s elapsed, 0.2 step/s, ETA 3074s]
+  Step  2010/2684: active=293,455 lost=0 (+0)  [9026s elapsed, 0.2 step/s, ETA 3027s]
+  Step  2020/2684: active=293,455 lost=0 (+0)  [9066s elapsed, 0.2 step/s, ETA 2980s]
+  Step  2030/2684: active=293,455 lost=0 (+0)  [9105s elapsed, 0.2 step/s, ETA 2933s]
+  Step  2040/2684: active=293,455 lost=0 (+0)  [9145s elapsed, 0.2 step/s, ETA 2887s]
+  Step  2050/2684: active=293,455 lost=0 (+0)  [9184s elapsed, 0.2 step/s, ETA 2840s]
+  Step  2060/2684: active=293,455 lost=0 (+0)  [9223s elapsed, 0.2 step/s, ETA 2794s]
+  Step  2070/2684: active=293,455 lost=0 (+0)  [9262s elapsed, 0.2 step/s, ETA 2747s]
+  Step  2080/2684: active=293,455 lost=0 (+0)  [9301s elapsed, 0.2 step/s, ETA 2701s]
+  Step  2090/2684: active=293,455 lost=0 (+0)  [9340s elapsed, 0.2 step/s, ETA 2655s]
+  Step  2100/2684: active=293,455 lost=0 (+0)  [9379s elapsed, 0.2 step/s, ETA 2608s]
+  Step  2110/2684: active=293,455 lost=0 (+0)  [9418s elapsed, 0.2 step/s, ETA 2562s]
+  Step  2120/2684: active=293,455 lost=0 (+0)  [9456s elapsed, 0.2 step/s, ETA 2516s]
+  Step  2130/2684: active=293,455 lost=0 (+0)  [9495s elapsed, 0.2 step/s, ETA 2470s]
+  Step  2140/2684: active=293,455 lost=0 (+0)  [9533s elapsed, 0.2 step/s, ETA 2423s]
+  Step  2150/2684: active=293,455 lost=0 (+0)  [9572s elapsed, 0.2 step/s, ETA 2377s]
+  Step  2160/2684: active=293,455 lost=0 (+0)  [9609s elapsed, 0.2 step/s, ETA 2331s]
+  Step  2170/2684: active=293,455 lost=0 (+0)  [9647s elapsed, 0.2 step/s, ETA 2285s]
+  Step  2180/2684: active=293,455 lost=0 (+0)  [9686s elapsed, 0.2 step/s, ETA 2239s]
+  Step  2190/2684: active=293,455 lost=0 (+0)  [9724s elapsed, 0.2 step/s, ETA 2193s]
+  Step  2200/2684: active=293,455 lost=0 (+0)  [9762s elapsed, 0.2 step/s, ETA 2148s]
+  Step  2210/2684: active=293,455 lost=0 (+0)  [9807s elapsed, 0.2 step/s, ETA 2103s]
+  Step  2220/2684: active=293,455 lost=0 (+0)  [9848s elapsed, 0.2 step/s, ETA 2058s]
+  Step  2230/2684: active=293,455 lost=0 (+0)  [9886s elapsed, 0.2 step/s, ETA 2013s]
+  Step  2240/2684: active=293,455 lost=0 (+0)  [9923s elapsed, 0.2 step/s, ETA 1967s]
+  Step  2250/2684: active=293,455 lost=0 (+0)  [9961s elapsed, 0.2 step/s, ETA 1921s]
+  Step  2260/2684: active=293,455 lost=0 (+0)  [9999s elapsed, 0.2 step/s, ETA 1876s]
+  Step  2270/2684: active=293,455 lost=0 (+0)  [10037s elapsed, 0.2 step/s, ETA 1830s]
+  Step  2280/2684: active=293,455 lost=0 (+0)  [10074s elapsed, 0.2 step/s, ETA 1785s]
+  Step  2290/2684: active=293,455 lost=0 (+0)  [10111s elapsed, 0.2 step/s, ETA 1740s]
+  Step  2300/2684: active=293,455 lost=0 (+0)  [10149s elapsed, 0.2 step/s, ETA 1694s]
+  Step  2310/2684: active=293,455 lost=0 (+0)  [10186s elapsed, 0.2 step/s, ETA 1649s]
+  Step  2320/2684: active=293,455 lost=0 (+0)  [10224s elapsed, 0.2 step/s, ETA 1604s]
+  Step  2330/2684: active=293,455 lost=0 (+0)  [10261s elapsed, 0.2 step/s, ETA 1559s]
+  Step  2340/2684: active=293,455 lost=0 (+0)  [10298s elapsed, 0.2 step/s, ETA 1514s]
+  Step  2350/2684: active=293,455 lost=0 (+0)  [10335s elapsed, 0.2 step/s, ETA 1469s]
+  Step  2360/2684: active=293,455 lost=0 (+0)  [10372s elapsed, 0.2 step/s, ETA 1424s]
+  Step  2370/2684: active=293,455 lost=0 (+0)  [10408s elapsed, 0.2 step/s, ETA 1379s]
+  Step  2380/2684: active=293,455 lost=0 (+0)  [10445s elapsed, 0.2 step/s, ETA 1334s]
+  Step  2390/2684: active=293,455 lost=0 (+0)  [10482s elapsed, 0.2 step/s, ETA 1289s]
+  Step  2400/2684: active=293,455 lost=0 (+0)  [10519s elapsed, 0.2 step/s, ETA 1245s]
+  Step  2410/2684: active=293,455 lost=0 (+0)  [10555s elapsed, 0.2 step/s, ETA 1200s]
+  Step  2420/2684: active=293,455 lost=0 (+0)  [10592s elapsed, 0.2 step/s, ETA 1155s]
+  Step  2430/2684: active=293,455 lost=0 (+0)  [10628s elapsed, 0.2 step/s, ETA 1111s]
+  Step  2440/2684: active=293,455 lost=0 (+0)  [10665s elapsed, 0.2 step/s, ETA 1066s]
+  Step  2450/2684: active=293,455 lost=0 (+0)  [10701s elapsed, 0.2 step/s, ETA 1022s]
+  Step  2460/2684: active=293,455 lost=0 (+0)  [10738s elapsed, 0.2 step/s, ETA 978s]
+  Step  2470/2684: active=293,455 lost=0 (+0)  [10774s elapsed, 0.2 step/s, ETA 933s]
+  Step  2480/2684: active=293,455 lost=0 (+0)  [10810s elapsed, 0.2 step/s, ETA 889s]
+  Step  2490/2684: active=293,455 lost=0 (+0)  [10846s elapsed, 0.2 step/s, ETA 845s]
+  Step  2500/2684: active=293,455 lost=0 (+0)  [10883s elapsed, 0.2 step/s, ETA 801s]
+  Step  2510/2684: active=293,455 lost=0 (+0)  [10919s elapsed, 0.2 step/s, ETA 757s]
+  Step  2520/2684: active=293,455 lost=0 (+0)  [10955s elapsed, 0.2 step/s, ETA 713s]
+  Step  2530/2684: active=293,455 lost=0 (+0)  [10991s elapsed, 0.2 step/s, ETA 669s]
+  Step  2540/2684: active=293,455 lost=0 (+0)  [11027s elapsed, 0.2 step/s, ETA 625s]
+  Step  2550/2684: active=293,455 lost=0 (+0)  [11063s elapsed, 0.2 step/s, ETA 581s]
+  Step  2560/2684: active=293,455 lost=0 (+0)  [11099s elapsed, 0.2 step/s, ETA 538s]
+  Step  2570/2684: active=293,455 lost=0 (+0)  [11135s elapsed, 0.2 step/s, ETA 494s]
+  Step  2580/2684: active=293,455 lost=0 (+0)  [11171s elapsed, 0.2 step/s, ETA 450s]
+  Step  2590/2684: active=293,455 lost=0 (+0)  [11207s elapsed, 0.2 step/s, ETA 407s]
+  Step  2600/2684: active=293,455 lost=0 (+0)  [11243s elapsed, 0.2 step/s, ETA 363s]
+  Step  2610/2684: active=293,454 lost=1 (+1)  [11279s elapsed, 0.2 step/s, ETA 320s]
+  Step  2620/2684: active=293,454 lost=1 (+0)  [11315s elapsed, 0.2 step/s, ETA 276s]
+  Step  2630/2684: active=293,454 lost=1 (+0)  [11350s elapsed, 0.2 step/s, ETA 233s]
+  Step  2640/2684: active=293,454 lost=1 (+0)  [11386s elapsed, 0.2 step/s, ETA 190s]
+  Step  2650/2684: active=293,454 lost=1 (+0)  [11422s elapsed, 0.2 step/s, ETA 147s]
+  Step  2660/2684: active=293,454 lost=1 (+0)  [11458s elapsed, 0.2 step/s, ETA 103s]
+  Step  2670/2684: active=293,454 lost=1 (+0)  [11493s elapsed, 0.2 step/s, ETA 60s]
+  Step  2680/2684: active=293,454 lost=1 (+0)  [11528s elapsed, 0.2 step/s, ETA 17s]
+  Step  2684/2684: active=293,454 lost=1 (+0)  [11543s elapsed, 0.2 step/s, ETA 0s]
+  Exported 2615 VTU files
+  Stage 7 time: 11542.6s
+
+================================================================================
+TRACKING SUMMARY
+================================================================================
+  Particles: 293,455
+  Final active: 293,454 (100.00%)
+  Final lost: 1 (0.00%)
+  Steps: 2684
+  Time: 11542.6s (68,237 p*step/s)
+  Output: /flash/project_465002752/hashemia/run_16730278/femuss_0_to_2684
+
+================================================================================
+JAXTRACE vs FEMUSS COMPARISON
+================================================================================
+  Particles: 293,455
+
+  JAXTrace:  active=293,454 (100.00%), lost=1 (0.00%)
+  FEMUSS:    active=293,455 (100.00%), left_domain=0 (0.00%)
+
+  Position errors (both active, N=293,454):
+    Absolute error:
+      Mean:   4.846171e-04
+      Median: 6.807580e-05
+      Max:    5.337310e-02
+      Std:    2.750503e-03
+      P90.0:  4.877589e-04
+      P95.0:  1.339331e-03
+      P99.0:  8.871979e-03
+      P99.9:  4.177740e-02
+    Relative error (|err| / |displacement|):
+      Mean:   1.298594e-02
+      Median: 1.505866e-03
+      Max:    5.401541e+00
+    Per-axis mean absolute error:
+      X: mean=3.934904e-04, max=5.274677e-02
+      Y: mean=1.966874e-04, max=1.808083e-02
+      Z: mean=1.606571e-05, max=2.120778e-03
+
+    Error magnitude distribution:
+      < 1e-08:        0 (  0.00%)
+      < 1e-07:      204 (  0.07%)
+      < 1e-06:    5,210 (  1.78%)
+      < 1e-05:   66,163 ( 22.55%)
+      < 1e-04:  174,526 ( 59.47%)
+      < 1e-03:  275,318 ( 93.82%)
+      < 1e-02:  290,727 ( 99.07%)
+
+  Retention agreement:
+    Both active:            293,454
+    Both lost/left:         0
+    JAXTrace active, FEMUSS left: 0
+    JAXTrace lost, FEMUSS active: 1
+
+  Top 5 worst-error particles:
+    #1: particle=14383, error=5.337310e-02, rel=9.7926e-01
+         JT:    [-8.82514181e-03, 1.14214386e-03, -1.06829810e-04]
+         FEMUSS:[4.39101805e-02, -7.08339382e-03, -2.24105150e-04]
+    #2: particle=3571, error=5.308212e-02, rel=9.9204e-01
+         JT:    [-8.97851430e-03, 5.94670964e-04, -1.00000000e-06]
+         FEMUSS:[4.35082128e-02, -7.33054929e-03, -2.14358886e-04]
+    #3: particle=25195, error=5.284423e-02, rel=9.5075e-01
+         JT:    [-8.35187248e-03, -3.42199716e-03, -1.00000000e-06]
+         FEMUSS:[4.43949021e-02, -6.62137917e-03, -2.33958758e-04]
+    #4: particle=9181, error=5.280110e-02, rel=9.5822e-01
+         JT:    [-8.51146441e-03, 2.57288085e-03, -1.51453363e-04]
+         FEMUSS:[4.41928778e-02, -6.21268870e-04, -2.31093210e-04]
+    #5: particle=3537, error=5.239508e-02, rel=9.7287e-01
+         JT:    [-6.92482800e-03, 5.57360349e-03, -1.02269621e-04]
+         FEMUSS:[4.38554380e-02, -7.33354553e-03, -2.21365295e-04]
+================================================================================
+
+  Comparison data saved to /flash/project_465002752/hashemia/run_16730278/femuss_0_to_2684/comparison_data.npz
+
+================================================================================
+TIMING SUMMARY
+================================================================================
+  1_load_mesh                   18.5s  (  0.2%)
+  2_precompute                  97.0s  (  0.8%)
+  3_build_upload               581.2s  (  4.7%)
+  4_load_particles               1.0s  (  0.0%)
+  5_initial_assign              17.1s  (  0.1%)
+  6_compile                     36.5s  (  0.3%)
+  6_build_rk4                   36.5s  (  0.3%)
+  7_tracking                 11542.6s  ( 93.9%)
+  ─────────────────────────────────────────────
+  TOTAL                      12295.3s
+================================================================================
+
+Done.
+
+Simulation exited with code 0 at sáb 14 mar 2026 22:04:49 EET
+Moving results to scratch...
+Done. Results in /scratch/project_465002752/hashemia/outputs/run_16730278
