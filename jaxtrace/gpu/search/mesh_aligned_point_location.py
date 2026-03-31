@@ -557,6 +557,15 @@ def search_mesh_aligned_octree_multi_local_where(
 L2_MAX_CANDIDATES = 512
 
 
+# Precomputed 3×3×3 cell offsets — shape (27, 3) int32, module-level constant.
+_CELL_OFFSETS_3x3x3 = jnp.array([
+    [di, dj, dk]
+    for di in [-1, 0, 1]
+    for dj in [-1, 0, 1]
+    for dk in [-1, 0, 1]
+], dtype=jnp.int32)  # (27, 3)
+
+
 def gather_l2_candidates(
     pos: jax.Array,
     octree_gpu: MeshAlignedOctreeGPU,
@@ -579,13 +588,6 @@ def gather_l2_candidates(
     # write_idx tracks next free slot; capped silently at L2_MAX_CANDIDATES-1
     write_idx = jnp.int32(0)
 
-    cell_offsets = jnp.array([
-        [di, dj, dk]
-        for di in [-1, 0, 1]
-        for dj in [-1, 0, 1]
-        for dk in [-1, 0, 1]
-    ], dtype=jnp.int32)  # (27, 3)
-
     def process_level(level_idx, carry):
         cands, widx = carry
         level = jnp.int32(14) - level_idx
@@ -597,9 +599,9 @@ def gather_l2_candidates(
 
         def process_cell(cell_idx, inner_carry):
             cands_inner, widx_inner = inner_carry
-            di = cell_offsets[cell_idx, 0]
-            dj = cell_offsets[cell_idx, 1]
-            dk = cell_offsets[cell_idx, 2]
+            di = _CELL_OFFSETS_3x3x3[cell_idx, 0]
+            dj = _CELL_OFFSETS_3x3x3[cell_idx, 1]
+            dk = _CELL_OFFSETS_3x3x3[cell_idx, 2]
 
             i_off = jnp.clip(i_base + di + octree_gpu.morton_offset,
                              0, octree_gpu.morton_max_coord - 1)

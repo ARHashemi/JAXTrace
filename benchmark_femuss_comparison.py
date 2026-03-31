@@ -65,7 +65,6 @@ from jaxtrace.gpu.search.aa_detection import precompute_aa_metadata, precompute_
 from jaxtrace.gpu.search.point_in_tet_methods import set_corrected_metadata, set_inverse_matrices_gpu
 from jaxtrace.gpu.search.point_in_tet_inverse import precompute_inverse_matrices
 from jaxtrace.gpu.search.mesh_aligned_point_location import (
-    search_mesh_aligned_octree_multi_local_where,
     search_mesh_aligned_octree_5x5x5_where,
     search_l2_vectorized,
 )
