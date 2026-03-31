@@ -547,6 +547,153 @@ def search_mesh_aligned_octree_multi_local_where(
     return final_elem_id, final_n_tests
 
 
+# ---------------------------------------------------------------------------
+# Static candidate count for the vectorized 3×3×3 L2 search.
+# 27 cells × ~20 elems/cell = ~540 typical maximum.
+# Using 512 (power of 2) for alignment; rare overflow silently truncates to
+# the first 512 candidates (safe: the containing element is almost always in
+# the first few cells searched).
+# ---------------------------------------------------------------------------
+L2_MAX_CANDIDATES = 512
+
+
+def gather_l2_candidates(
+    pos: jax.Array,
+    octree_gpu: MeshAlignedOctreeGPU,
+) -> jax.Array:
+    """
+    Gather up to L2_MAX_CANDIDATES element IDs from the 3×3×3 neighbourhood
+    across all 8 refinement levels.
+
+    Returns a (L2_MAX_CANDIDATES,) int32 array of candidate element IDs.
+    Empty slots are filled with -1.  Duplicate IDs across cells are possible
+    but harmless — a duplicate that is the containing element will simply be
+    detected twice and the first hit wins.
+
+    This function contains NO carry-dependent loops: the only loop construct
+    is ``jax.lax.fori_loop`` used to fill a pre-allocated output buffer.
+    When called via ``jax.vmap`` the inner body is fully parallel over the
+    buffer slots.
+    """
+    candidates = jnp.full((L2_MAX_CANDIDATES,), -1, dtype=jnp.int32)
+    # write_idx tracks next free slot; capped silently at L2_MAX_CANDIDATES-1
+    write_idx = jnp.int32(0)
+
+    cell_offsets = jnp.array([
+        [di, dj, dk]
+        for di in [-1, 0, 1]
+        for dj in [-1, 0, 1]
+        for dk in [-1, 0, 1]
+    ], dtype=jnp.int32)  # (27, 3)
+
+    def process_level(level_idx, carry):
+        cands, widx = carry
+        level = jnp.int32(14) - level_idx
+        cell_size = octree_gpu.level_cell_sizes[level]
+
+        i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
+        j_base = jnp.floor(pos[1] / cell_size[1]).astype(jnp.int32)
+        k_base = jnp.floor(pos[2] / cell_size[2]).astype(jnp.int32)
+
+        def process_cell(cell_idx, inner_carry):
+            cands_inner, widx_inner = inner_carry
+            di = cell_offsets[cell_idx, 0]
+            dj = cell_offsets[cell_idx, 1]
+            dk = cell_offsets[cell_idx, 2]
+
+            i_off = jnp.clip(i_base + di + octree_gpu.morton_offset,
+                             0, octree_gpu.morton_max_coord - 1)
+            j_off = jnp.clip(j_base + dj + octree_gpu.morton_offset,
+                             0, octree_gpu.morton_max_coord - 1)
+            k_off = jnp.clip(k_base + dk + octree_gpu.morton_offset,
+                             0, octree_gpu.morton_max_coord - 1)
+
+            morton_code = encode_morton_3d_jax(i_off, j_off, k_off)
+            found_cell = find_cell_by_morton_and_level(
+                morton_code, jnp.uint8(level),
+                octree_gpu.cell_morton_codes, octree_gpu.cell_levels
+            )
+
+            safe_cell = jnp.maximum(found_cell, 0)
+            elem_start = octree_gpu.cell_to_elements_offsets[safe_cell]
+            elem_end   = octree_gpu.cell_to_elements_offsets[safe_cell + 1]
+            n_in_cell  = jnp.where(found_cell >= 0, elem_end - elem_start, jnp.int32(0))
+
+            # Copy elements from this cell into the flat buffer
+            def copy_elem(e_off, buf_carry):
+                buf, w = buf_carry
+                src_id = octree_gpu.cell_to_elements_data[elem_start + e_off]
+                # clamp write index so we never go out of bounds
+                safe_w = jnp.minimum(w, jnp.int32(L2_MAX_CANDIDATES - 1))
+                buf = buf.at[safe_w].set(
+                    jnp.where(w < L2_MAX_CANDIDATES, src_id, buf[safe_w])
+                )
+                new_w = jnp.where(w < L2_MAX_CANDIDATES, w + 1, w)
+                return buf, new_w
+
+            cands_after, widx_after = jax.lax.fori_loop(
+                0, n_in_cell, copy_elem, (cands_inner, widx_inner)
+            )
+            return cands_after, widx_after
+
+        cands_out, widx_out = jax.lax.fori_loop(
+            0, 27, process_cell, (cands, widx)
+        )
+        return cands_out, widx_out
+
+    candidates, _ = jax.lax.fori_loop(
+        0, 8, process_level, (candidates, write_idx)
+    )
+    return candidates
+
+
+def search_l2_vectorized(
+    pos: jax.Array,
+    octree_gpu: MeshAlignedOctreeGPU,
+) -> jnp.int32:
+    """
+    Vectorized 3×3×3 L2 search (Option B / Priority 2).
+
+    Replaces the carry-dependent ``fori_loop`` search with two steps:
+      1. ``gather_l2_candidates`` — fills a (L2_MAX_CANDIDATES,) int32 buffer
+         with candidate element IDs using nested fori_loops that only *copy*
+         IDs; no carry-dependent early-exit, so each iteration is independent.
+      2. A single ``jax.vmap`` (or equivalently ``jnp.vectorize``) over all
+         candidates that runs point_in_tet in parallel.
+
+    When this function is itself called inside an outer ``jax.vmap`` over
+    particles (Option B architecture), the two steps become:
+      - Outer gather: N_particles × L2_MAX_CANDIDATES buffer fill
+      - Outer vmap of inner vmap: effectively a 2-D parallel map over
+        (N_particles, L2_MAX_CANDIDATES) — exactly what GPU SIMT excels at.
+
+    Returns: elem_id (int32), -1 if not found.
+    """
+    candidates = gather_l2_candidates(pos, octree_gpu)  # (L2_MAX_CANDIDATES,)
+
+    # Test all candidates in parallel — no loop, no carry dependency
+    def test_one(elem_id):
+        valid = elem_id >= 0
+        inside = jnp.where(
+            valid,
+            point_in_tet_dispatcher(
+                pos, elem_id,
+                octree_gpu.connectivity, octree_gpu.node_positions,
+                config.POINT_IN_TET_METHOD
+            ),
+            False
+        )
+        # Return elem_id if inside, -1 otherwise
+        return jnp.where(inside, elem_id, jnp.int32(-1))
+
+    results = jax.vmap(test_one)(candidates)  # (L2_MAX_CANDIDATES,)
+
+    # Pick the first positive result
+    any_found = jnp.any(results >= 0)
+    first_hit = results[jnp.argmax(results >= 0)]
+    return jnp.where(any_found, first_hit, jnp.int32(-1))
+
+
 def search_mesh_aligned_octree_1x1x1_where(
     pos: jax.Array,
     octree_gpu: MeshAlignedOctreeGPU,
