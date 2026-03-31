@@ -34,7 +34,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Parse --precision BEFORE importing config (which sets jax_enable_x64 at import time)
+_precision_arg = 'float32'  # default
+for i, arg in enumerate(sys.argv):
+    if arg == '--precision' and i + 1 < len(sys.argv):
+        _precision_arg = sys.argv[i + 1]
+        break
+    elif arg.startswith('--precision='):
+        _precision_arg = arg.split('=', 1)[1]
+        break
+
 import jaxtrace.config as config
+config.set_precision(_precision_arg == 'float64')
 import jax
 import jax.numpy as jnp
 
@@ -72,6 +83,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="FEMUSS–JAXTrace Trajectory Deviation Diagnostic",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    # --- Precision ---
+    parser.add_argument(
+        "--precision", type=str, default="float32", choices=["float32", "float64"],
+        help="Floating-point precision (parsed early from sys.argv before config import).",
     )
     # --- I/O ---
     parser.add_argument(
@@ -143,6 +159,13 @@ def parse_args():
     # --- Tolerances (same as benchmark) ---
     parser.add_argument("--point-in-tet-tol", type=float, default=1e-6)
     parser.add_argument("--interpolation-det-min", type=float, default=None)
+    parser.add_argument(
+        "--interpolation-method", type=str, default="direct_inverse",
+        choices=["direct_inverse", "gram_matrix"],
+        help="Velocity interpolation method. "
+             "'direct_inverse' uses precomputed M_inv (FEMUSS-equivalent). "
+             "'gram_matrix' uses Gram matrix normal equations (legacy).",
+    )
     parser.add_argument("--boundary-proj-tol", type=float, default=1e-6)
     # --- RK4 substep policies ---
     parser.add_argument("--bbox-clamp", action="store_true", default=False)
@@ -616,6 +639,9 @@ def main():
         l2_neighborhood=L2_NEIGHBORHOOD,
         enhanced_elements_gpu=enhanced_elements_gpu,
         element_neighbors_node_gpu=element_neighbors_node_gpu,
+        interpolation_method=getattr(args, 'interpolation_method', 'direct_inverse'),
+        M_inv_gpu=M_inv_gpu,
+        p0_gpu=p0_gpu,
     )
 
     # Warmup/compile

@@ -16,7 +16,7 @@ import jax
 # Floating-Point Precision
 # ============================================================================
 
-USE_FLOAT64 = True
+USE_FLOAT64 = False
 """
 Use float64 (double precision) for all floating-point computations.
 
@@ -25,22 +25,21 @@ When True:
     - All mesh coordinates, velocities, particle positions use float64
     - GPU memory roughly doubles (~465 MB → ~930 MB for FLA mesh)
     - Better numerical accuracy for small domains and long tracking runs
+    - ~1.7× slower due to doubled memory bandwidth
 
 When False:
     - JAX default float32 precision
-    - Lower GPU memory usage
-    - Sufficient for short runs or large-scale domains
+    - Lower GPU memory usage, ~1.7× faster
+    - Sufficient with direct_inverse interpolation method
 
-Default: True (recommended for welding simulations with mm-scale domains)
+Default: False (float32, use --precision float64 for double precision)
 """
-
-if USE_FLOAT64:
-    jax.config.update("jax_enable_x64", True)
 
 # The numpy/jnp dtype to use throughout JAXTrace
 import numpy as np
 import jax.numpy as jnp
 
+# Initialize with current USE_FLOAT64 value
 FLOAT_DTYPE_NP = np.float64 if USE_FLOAT64 else np.float32
 FLOAT_DTYPE_JNP = jnp.float64 if USE_FLOAT64 else jnp.float32
 
@@ -74,6 +73,26 @@ If |det| < threshold, det is clamped to avoid division by zero.
 float32: 1e-12
 float64: 1e-14
 """
+
+
+def set_precision(use_float64: bool):
+    """Set floating-point precision. Must be called before any JAX array creation.
+
+    Updates USE_FLOAT64, dtype constants, tolerances, and enables jax_enable_x64.
+    """
+    global USE_FLOAT64, FLOAT_DTYPE_NP, FLOAT_DTYPE_JNP
+    global POINT_IN_TET_TOLERANCE, DEGENERATE_ELEMENT_THRESHOLD, INTERPOLATION_DET_MIN
+
+    USE_FLOAT64 = use_float64
+
+    if USE_FLOAT64:
+        jax.config.update("jax_enable_x64", True)
+
+    FLOAT_DTYPE_NP = np.float64 if USE_FLOAT64 else np.float32
+    FLOAT_DTYPE_JNP = jnp.float64 if USE_FLOAT64 else jnp.float32
+    POINT_IN_TET_TOLERANCE = 1e-10 if USE_FLOAT64 else 1e-6
+    DEGENERATE_ELEMENT_THRESHOLD = 1e-14 if USE_FLOAT64 else 1e-12
+    INTERPOLATION_DET_MIN = 1e-14 if USE_FLOAT64 else 1e-12
 
 # ============================================================================
 # Point-in-Tetrahedron Method Selection

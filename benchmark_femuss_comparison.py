@@ -33,7 +33,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import jaxtrace.config as config  # Must be imported before JAX array creation (sets jax_enable_x64)
+# Parse --precision BEFORE importing config (which sets jax_enable_x64 at import time)
+_precision_arg = 'float32'  # default
+for i, arg in enumerate(sys.argv):
+    if arg == '--precision' and i + 1 < len(sys.argv):
+        _precision_arg = sys.argv[i + 1]
+        break
+    elif arg.startswith('--precision='):
+        _precision_arg = arg.split('=', 1)[1]
+        break
+
+import jaxtrace.config as config
+config.set_precision(_precision_arg == 'float64')  # Must be called before any JAX array creation
 import jax
 import jax.numpy as jnp
 
@@ -90,6 +101,14 @@ def parse_args():
         "--femuss-pattern", type=str, default="cylA_pt_{timestep}.pvtu",
         help="FEMUSS particle PVTU file pattern with {timestep} placeholder",
     )
+    # --- Precision ---
+    parser.add_argument(
+        "--precision", type=str, default="float32", choices=["float32", "float64"],
+        help="Floating-point precision for all computations. "
+             "'float32' is 1.7x faster (lower memory bandwidth). "
+             "'float64' for maximum numerical accuracy. "
+             "Note: parsed early from sys.argv before config import.",
+    )
     # --- Simulation parameters ---
     parser.add_argument(
         "--vel-range", type=int, nargs=2, default=[159, 159], metavar=("START", "END"),
@@ -115,6 +134,20 @@ def parse_args():
         "--log-interval", type=int, default=10,
         help="Print progress every N steps",
     )
+    # --- VTU export options ---
+    parser.add_argument(
+        "--export-element-ids", action="store_true", default=False,
+        help="Include element IDs in VTU export (default: off, saves space)",
+    )
+    parser.add_argument(
+        "--n-groups", type=int, default=5,
+        help="Number of particle groups by initial X position (0 to disable). "
+             "Exported as uint8 'Group' field in VTU (default: 5).",
+    )
+    parser.add_argument(
+        "--no-groups", action="store_true", default=False,
+        help="Disable particle group export",
+    )
     # --- Tolerances ---
     parser.add_argument(
         "--point-in-tet-tol", type=float, default=1e-6,
@@ -123,6 +156,13 @@ def parse_args():
     parser.add_argument(
         "--interpolation-det-min", type=float, default=None,
         help="Minimum determinant for barycentric interpolation (default: 1e-14 for float64)",
+    )
+    parser.add_argument(
+        "--interpolation-method", type=str, default="direct_inverse",
+        choices=["direct_inverse", "gram_matrix"],
+        help="Velocity interpolation method. "
+             "'direct_inverse' uses precomputed M_inv (FEMUSS-equivalent, κ(M)). "
+             "'gram_matrix' uses Gram matrix normal equations (legacy, κ(M)²).",
     )
     parser.add_argument(
         "--boundary-proj-tol", type=float, default=1e-6,
@@ -153,6 +193,15 @@ def parse_args():
     parser.add_argument(
         "--no-boundary-proj", action="store_true",
         help="Disable boundary projection recovery",
+    )
+    parser.add_argument(
+        "--boundary-walls", type=str, default=None,
+        help="Per-wall boundary projection control. Format: 'wall=mode,...' where "
+             "wall is x_min/x_max/y_min/y_max/z_min/z_max and mode is clamp/outlet. "
+             "Walls not listed default to 'clamp'. "
+             "Examples: 'x_max=outlet' (open +X, clamp rest), "
+             "'x_min=outlet,x_max=outlet' (open both X, clamp Y/Z). "
+             "FEMUSS equivalent: all clamp (KEEP PARTICLES: BOUNDING_BOX).",
     )
     # --- Level-set ---
     parser.add_argument(
@@ -427,76 +476,126 @@ def reconstruct_pin_velocity(
 
 
 # =============================================================================
-# VTU Export (background thread, same pattern as benchmark_rk4_diagnostic.py)
+# VTU Export (binary appended-raw format, background thread)
 # =============================================================================
 
-def write_vtu_simple(filename, positions, particle_ids=None, element_ids=None,
-                     extra_scalars=None):
-    """Write VTU file (simple ASCII format, no VTK dependency)."""
-    n_points = len(positions)
+import struct
 
-    xml_lines = [
+
+def write_vtu_binary(filename, positions, particle_ids=None, element_ids=None,
+                     extra_scalars=None):
+    """Write VTU file in binary appended-raw format.
+
+    Uses VTK's "appended" mode with raw (unencoded) binary data.
+    ~10-20× faster and ~2.5× smaller than ASCII format.
+    """
+    n_points = len(positions)
+    positions_f32 = np.ascontiguousarray(positions, dtype=np.float32)
+
+    # Pre-build cell arrays (vertex cells: one point per cell)
+    connectivity = np.arange(n_points, dtype=np.int32)
+    offsets = np.arange(1, n_points + 1, dtype=np.int32)
+    types = np.ones(n_points, dtype=np.uint8)  # VTK_VERTEX = 1
+
+    # Collect all data arrays for appended section
+    # Each entry: (bytes_data,)
+    appended_arrays = []
+
+    # 0: Points (Float32, 3 components)
+    appended_arrays.append(positions_f32.tobytes())
+    # 1: Connectivity
+    appended_arrays.append(connectivity.tobytes())
+    # 2: Offsets
+    appended_arrays.append(offsets.tobytes())
+    # 3: Types
+    appended_arrays.append(types.tobytes())
+
+    # PointData arrays
+    pd_entries = []  # (name, vtk_type, data_bytes)
+    if particle_ids is not None:
+        pid = np.ascontiguousarray(particle_ids, dtype=np.int32)
+        pd_entries.append(('ParticleID', 'Int32', pid.tobytes()))
+    if element_ids is not None:
+        eid = np.ascontiguousarray(element_ids, dtype=np.int32)
+        pd_entries.append(('ElementID', 'Int32', eid.tobytes()))
+    if extra_scalars:
+        for name, arr in extra_scalars.items():
+            if arr.dtype == np.uint8:
+                vtk_type = 'UInt8'
+            elif arr.dtype in (np.int32, np.int64):
+                arr = np.ascontiguousarray(arr, dtype=np.int32)
+                vtk_type = 'Int32'
+            else:
+                arr = np.ascontiguousarray(arr, dtype=np.float32)
+                vtk_type = 'Float32'
+            pd_entries.append((name, vtk_type, arr.tobytes()))
+
+    for _, _, data_bytes in pd_entries:
+        appended_arrays.append(data_bytes)
+
+    # Compute offsets into appended data (each block prefixed by 4-byte length)
+    xml_offsets = []
+    current_offset = 0
+    for data_bytes in appended_arrays:
+        xml_offsets.append(current_offset)
+        current_offset += 4 + len(data_bytes)  # 4 bytes for length prefix
+
+    # Build XML header
+    pd_idx = 4  # first PointData array index in appended_arrays
+    lines = [
         '<?xml version="1.0"?>',
-        '<VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian">',
+        '<VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian"'
+        ' header_type="UInt32">',
         '  <UnstructuredGrid>',
         f'    <Piece NumberOfPoints="{n_points}" NumberOfCells="{n_points}">',
         '      <Points>',
-        '        <DataArray type="Float32" NumberOfComponents="3" format="ascii">',
-    ]
-    for pos in positions:
-        xml_lines.append(f'          {pos[0]:.6e} {pos[1]:.6e} {pos[2]:.6e}')
-    xml_lines.extend([
-        '        </DataArray>',
+        f'        <DataArray type="Float32" NumberOfComponents="3" format="appended" offset="{xml_offsets[0]}"/>',
         '      </Points>',
         '      <Cells>',
-        '        <DataArray type="Int32" Name="connectivity" format="ascii">',
-        '          ' + ' '.join(str(i) for i in range(n_points)),
-        '        </DataArray>',
-        '        <DataArray type="Int32" Name="offsets" format="ascii">',
-        '          ' + ' '.join(str(i + 1) for i in range(n_points)),
-        '        </DataArray>',
-        '        <DataArray type="UInt8" Name="types" format="ascii">',
-        '          ' + ' '.join('1' for _ in range(n_points)),
-        '        </DataArray>',
+        f'        <DataArray type="Int32" Name="connectivity" format="appended" offset="{xml_offsets[1]}"/>',
+        f'        <DataArray type="Int32" Name="offsets" format="appended" offset="{xml_offsets[2]}"/>',
+        f'        <DataArray type="UInt8" Name="types" format="appended" offset="{xml_offsets[3]}"/>',
         '      </Cells>',
-    ])
-
-    has_pd = (particle_ids is not None or element_ids is not None or extra_scalars)
-    if has_pd:
-        xml_lines.append('      <PointData>')
-        if particle_ids is not None:
-            xml_lines.append('        <DataArray type="Int32" Name="ParticleID" format="ascii">')
-            xml_lines.append('          ' + ' '.join(str(int(p)) for p in particle_ids))
-            xml_lines.append('        </DataArray>')
-        if element_ids is not None:
-            xml_lines.append('        <DataArray type="Int32" Name="ElementID" format="ascii">')
-            xml_lines.append('          ' + ' '.join(str(int(e)) for e in element_ids))
-            xml_lines.append('        </DataArray>')
-        if extra_scalars:
-            for name, arr in extra_scalars.items():
-                dtype_str = 'Int32' if arr.dtype in (np.int32, np.int64) else 'Float32'
-                xml_lines.append(f'        <DataArray type="{dtype_str}" Name="{name}" format="ascii">')
-                xml_lines.append('          ' + ' '.join(str(v) for v in arr))
-                xml_lines.append('        </DataArray>')
-        xml_lines.append('      </PointData>')
-
-    xml_lines.extend([
+    ]
+    if pd_entries:
+        lines.append('      <PointData>')
+        for i, (name, vtk_type, _) in enumerate(pd_entries):
+            lines.append(
+                f'        <DataArray type="{vtk_type}" Name="{name}" format="appended"'
+                f' offset="{xml_offsets[pd_idx + i]}"/>'
+            )
+        lines.append('      </PointData>')
+    lines.extend([
         '    </Piece>',
         '  </UnstructuredGrid>',
-        '</VTKFile>',
+        '  <AppendedData encoding="raw">',
     ])
+    header_text = '\n'.join(lines) + '\n_'
 
-    with open(filename, 'w') as f:
-        f.write('\n'.join(xml_lines) + '\n')
+    # Write file: XML header + binary appended data + closing tags
+    with open(filename, 'wb') as f:
+        f.write(header_text.encode('ascii'))
+        for data_bytes in appended_arrays:
+            f.write(struct.pack('<I', len(data_bytes)))  # 4-byte length prefix
+            f.write(data_bytes)
+        f.write(b'\n  </AppendedData>\n</VTKFile>\n')
+
+
+# Keep legacy ASCII writer available for diagnose scripts that import it
+def write_vtu_simple(filename, positions, particle_ids=None, element_ids=None,
+                     extra_scalars=None):
+    """Write VTU file. Delegates to binary appended-raw format."""
+    write_vtu_binary(filename, positions, particle_ids=particle_ids,
+                     element_ids=element_ids, extra_scalars=extra_scalars)
 
 
 class VTKExportThread:
-    """Background thread for VTK export."""
+    """Background thread for VTK binary export."""
 
-    def __init__(self, output_dir: Path):
+    def __init__(self, output_dir: Path, queue_size=20):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.export_queue = queue.Queue(maxsize=5)
+        self.export_queue = queue.Queue(maxsize=queue_size)
         self.worker_thread = threading.Thread(target=self._export_worker, daemon=True)
         self.stop_event = threading.Event()
         self.n_exported = 0
@@ -504,12 +603,12 @@ class VTKExportThread:
     def start(self):
         self.worker_thread.start()
 
-    def enqueue_export(self, step, positions, element_ids, particle_ids=None,
+    def enqueue_export(self, step, positions, particle_ids=None, element_ids=None,
                        extra_scalars=None):
         try:
             self.export_queue.put(
-                (step, positions, element_ids, particle_ids, extra_scalars),
-                timeout=10.0
+                (step, positions, particle_ids, element_ids, extra_scalars),
+                timeout=30.0
             )
         except queue.Full:
             print(f"Warning: Export queue full at step {step}, skipping")
@@ -520,10 +619,10 @@ class VTKExportThread:
                 data = self.export_queue.get(timeout=1.0)
                 if data is None:
                     break
-                step, positions, element_ids, particle_ids, extra_scalars = data
+                step, positions, particle_ids, element_ids, extra_scalars = data
 
                 output_file = self.output_dir / f"particles_step_{step:06d}.vtu"
-                write_vtu_simple(
+                write_vtu_binary(
                     str(output_file),
                     positions=positions,
                     particle_ids=particle_ids,
@@ -541,7 +640,7 @@ class VTKExportThread:
         self.export_queue.put(None)
         self.stop_event.set()
         if self.worker_thread:
-            self.worker_thread.join(timeout=30.0)
+            self.worker_thread.join(timeout=60.0)
 
 
 # =============================================================================
@@ -568,6 +667,9 @@ def create_rk4_comparison(
     l2_neighborhood=3,
     enhanced_elements_gpu=None,
     element_neighbors_node_gpu=None,
+    interpolation_method="direct_inverse",
+    M_inv_gpu=None,
+    p0_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -789,29 +891,41 @@ def create_rk4_comparison(
         return elem_final
 
     # ---- Velocity interpolation ----
+    use_direct_inverse = (interpolation_method == "direct_inverse") and M_inv_gpu is not None
+
     def interpolate_velocity_single(pos, elem_id, velocity_field):
         valid = (elem_id >= 0) & (elem_id < len(connectivity))
         nodes_idx = connectivity[elem_id]
-        nodes = node_positions[nodes_idx]
         node_vels = velocity_field[nodes_idx]
 
-        v0 = nodes[1] - nodes[0]
-        v1 = nodes[2] - nodes[0]
-        v2 = nodes[3] - nodes[0]
-        vp = pos - nodes[0]
+        if use_direct_inverse:
+            # Direct Jacobian inverse (FEMUSS-equivalent): bary = M_inv @ (pos - p0)
+            # Condition number: κ(M), numerically superior to Gram matrix approach
+            M_inv = M_inv_gpu[elem_id]  # (3, 3)
+            local = pos - p0_gpu[elem_id]  # (3,)
+            bary = M_inv @ local  # (3,) = (λ1, λ2, λ3)
+            b1, b2, b3 = bary[0], bary[1], bary[2]
+            b0 = 1.0 - b1 - b2 - b3
+        else:
+            # Gram matrix / normal equations (legacy): κ(M^T M) = κ(M)²
+            nodes = node_positions[nodes_idx]
+            v0 = nodes[1] - nodes[0]
+            v1 = nodes[2] - nodes[0]
+            v2 = nodes[3] - nodes[0]
+            vp = pos - nodes[0]
 
-        d00, d01, d02 = jnp.dot(v0, v0), jnp.dot(v0, v1), jnp.dot(v0, v2)
-        d11, d12 = jnp.dot(v1, v1), jnp.dot(v1, v2)
-        d22 = jnp.dot(v2, v2)
-        dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
+            d00, d01, d02 = jnp.dot(v0, v0), jnp.dot(v0, v1), jnp.dot(v0, v2)
+            d11, d12 = jnp.dot(v1, v1), jnp.dot(v1, v2)
+            d22 = jnp.dot(v2, v2)
+            dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
 
-        det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+            det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+            det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
-        b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
-        b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
-        b3 = (d00*(d11*dp2-d12*dp1) - d01*(d01*dp2-d02*dp1) + dp0*(d01*d12-d02*d11)) / det
-        b0 = 1.0 - b1 - b2 - b3
+            b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
+            b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
+            b3 = (d00*(d11*dp2-d12*dp1) - d01*(d01*dp2-d02*dp1) + dp0*(d01*d12-d02*d11)) / det
+            b0 = 1.0 - b1 - b2 - b3
 
         vel = b0*node_vels[0] + b1*node_vels[1] + b2*node_vels[2] + b3*node_vels[3]
 
@@ -828,31 +942,38 @@ def create_rk4_comparison(
         """Returns True if position is inside tool (level-set < 0)."""
         valid = (elem_id >= 0) & (elem_id < len(connectivity))
         nodes_idx = connectivity[elem_id]
-        nodes = node_positions[nodes_idx]
         node_ls = levelset_gpu[nodes_idx]
 
-        v0 = nodes[1] - nodes[0]
-        v1 = nodes[2] - nodes[0]
-        v2 = nodes[3] - nodes[0]
-        vp = pos - nodes[0]
+        if use_direct_inverse:
+            M_inv = M_inv_gpu[elem_id]
+            local = pos - p0_gpu[elem_id]
+            bary = M_inv @ local
+            b1, b2, b3 = bary[0], bary[1], bary[2]
+            b0 = 1.0 - b1 - b2 - b3
+        else:
+            nodes = node_positions[nodes_idx]
+            v0 = nodes[1] - nodes[0]
+            v1 = nodes[2] - nodes[0]
+            v2 = nodes[3] - nodes[0]
+            vp = pos - nodes[0]
 
-        d00 = jnp.dot(v0, v0)
-        d01 = jnp.dot(v0, v1)
-        d02 = jnp.dot(v0, v2)
-        d11 = jnp.dot(v1, v1)
-        d12 = jnp.dot(v1, v2)
-        d22 = jnp.dot(v2, v2)
-        dp0 = jnp.dot(vp, v0)
-        dp1 = jnp.dot(vp, v1)
-        dp2 = jnp.dot(vp, v2)
+            d00 = jnp.dot(v0, v0)
+            d01 = jnp.dot(v0, v1)
+            d02 = jnp.dot(v0, v2)
+            d11 = jnp.dot(v1, v1)
+            d12 = jnp.dot(v1, v2)
+            d22 = jnp.dot(v2, v2)
+            dp0 = jnp.dot(vp, v0)
+            dp1 = jnp.dot(vp, v1)
+            dp2 = jnp.dot(vp, v2)
 
-        det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
-        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+            det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+            det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
 
-        b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
-        b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
-        b3 = (d00 * (d11*dp2 - d12*dp1) - d01 * (d01*dp2 - d02*dp1) + dp0 * (d01*d12 - d02*d11)) / det
-        b0 = 1.0 - b1 - b2 - b3
+            b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
+            b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
+            b3 = (d00 * (d11*dp2 - d12*dp1) - d01 * (d01*dp2 - d02*dp1) + dp0 * (d01*d12 - d02*d11)) / det
+            b0 = 1.0 - b1 - b2 - b3
 
         ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
         return valid & (ls_val < 0.0)
@@ -916,13 +1037,21 @@ def create_rk4_comparison(
                 pos_final = jnp.where(any_inside, pos, pos_final)
                 elem_final = jnp.where(any_inside, elem_id, elem_final)
 
-            # Boundary projection: clamp to bbox and re-search if lost
+            # Boundary projection: clamp to bbox and re-search ONLY if lost
+            # Optimization: feed pos_final through search only when elem_final < 0.
+            # We pass pos_final (unchanged) when found, pos_clamped when lost.
+            # This way the search input is identical to pos_final for found particles,
+            # so L0 cache hit is guaranteed → no expensive L1/L2 search.
             if use_boundary_projection:
-                pos_clamped = clamp_to_bbox(pos_final)
-                elem_clamped = search_l0_l1_l2(pos_clamped, elem_k4)
                 lost = elem_final < 0
+                pos_clamped = clamp_to_bbox(pos_final)
+                # When found: search(pos_final, elem_final) → L0 cache hit (trivial)
+                # When lost:  search(pos_clamped, elem_k4) → actual search
+                pos_search = jnp.where(lost, pos_clamped, pos_final)
+                hint_elem = jnp.where(lost, elem_k4, elem_final)
+                elem_recovered = search_l0_l1_l2(pos_search, hint_elem)
                 pos_final = jnp.where(lost, pos_clamped, pos_final)
-                elem_final = jnp.where(lost, elem_clamped, elem_final)
+                elem_final = jnp.where(lost, elem_recovered, elem_final)
 
             return pos_final, elem_final
 
@@ -1093,6 +1222,20 @@ def main():
     if args.interpolation_det_min is not None:
         config.INTERPOLATION_DET_MIN = args.interpolation_det_min
 
+    INTERPOLATION_METHOD = args.interpolation_method
+
+    # Parse --boundary-walls into config dict
+    if args.boundary_walls is not None:
+        wall_dict = {}
+        for pair in args.boundary_walls.split(','):
+            pair = pair.strip()
+            if '=' in pair:
+                wall, mode = pair.split('=', 1)
+                wall_dict[wall.strip()] = mode.strip()
+        config.RK4_BOUNDARY_WALLS = wall_dict if wall_dict else None
+    else:
+        config.RK4_BOUNDARY_WALLS = None
+
     # Apply L1/L2/band CLI flags to module-level config
     global L1_METHOD, L2_NEIGHBORHOOD, L0_SKIP_BAND, ENHANCED_SEARCH_BAND
     L1_METHOD = args.l1_method
@@ -1129,6 +1272,7 @@ def main():
     print(f"  L2 method:            {L2_METHOD} ({L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD}x{L2_NEIGHBORHOOD})")
     print(f"  Precision:            {'float64' if config.USE_FLOAT64 else 'float32'}")
     print(f"  Point-in-tet tol:     {config.POINT_IN_TET_TOLERANCE:.0e}")
+    print(f"  Interpolation method: {INTERPOLATION_METHOD}")
     print(f"  Interpolation det min:{config.INTERPOLATION_DET_MIN:.0e}")
     print(f"  Bbox clamp:           {'ON' if config.RK4_SUBSTEP_BBOX_CLAMP else 'OFF'}")
     print(f"  Failed substage:      {config.RK4_FAILED_SUBSTAGE_POLICY}")
@@ -1144,6 +1288,10 @@ def main():
         print(f"  Pin velocity:         ON (RPM={args.pin_rpm}, center={args.pin_center}, {pin_axis_str})")
     else:
         print(f"  Pin velocity:         OFF")
+    n_groups_val = args.n_groups if not args.no_groups else 0
+    print(f"  VTU format:           binary (appended-raw)")
+    print(f"  Export element IDs:   {'ON' if args.export_element_ids else 'OFF'}")
+    print(f"  Particle groups:      {n_groups_val if n_groups_val > 0 else 'OFF'}")
     print("=" * 80)
 
     # Build per-wall clamp masks from config
@@ -1484,6 +1632,9 @@ def main():
         l2_neighborhood=L2_NEIGHBORHOOD,
         enhanced_elements_gpu=enhanced_elements_gpu,
         element_neighbors_node_gpu=element_neighbors_node_gpu,
+        interpolation_method=INTERPOLATION_METHOD,
+        M_inv_gpu=M_inv_gpu,
+        p0_gpu=p0_gpu,
     )
 
     # Warmup
@@ -1508,6 +1659,9 @@ def main():
     stats_csv.write("step,n_active,n_lost,new_lost\n")
 
     # Setup VTU export
+    EXPORT_ELEMENT_IDS = args.export_element_ids
+    N_GROUPS = args.n_groups if not args.no_groups else 0
+
     exporter = VTKExportThread(output_subdir)
     exporter.start()
 
@@ -1515,10 +1669,36 @@ def main():
     positions_gpu = jax.device_put(particle_positions)
     element_ids_gpu = element_ids_initial
 
+    # Compute particle groups by initial X position (equal-width bins)
+    particle_groups = None
+    if N_GROUPS > 0:
+        initial_x = particle_positions[:, 0]
+        x_min, x_max = float(initial_x.min()), float(initial_x.max())
+        x_range = x_max - x_min
+        if x_range > 0:
+            # Bin into [0, N_GROUPS-1], clamped
+            group_float = (initial_x - x_min) / x_range * N_GROUPS
+            particle_groups = np.clip(group_float.astype(np.int32), 0, N_GROUPS - 1).astype(np.uint8)
+        else:
+            particle_groups = np.zeros(n_particles, dtype=np.uint8)
+        print(f"  Particle groups: {N_GROUPS} bins by initial X [{x_min:.6f}, {x_max:.6f}]")
+        for g in range(N_GROUPS):
+            n_in_group = int(np.sum(particle_groups == g))
+            print(f"    Group {g}: {n_in_group:,} particles")
+
+    def _build_extra_scalars():
+        extra = {}
+        if particle_groups is not None:
+            extra['Group'] = particle_groups
+        return extra if extra else None
+
+    extra_scalars = _build_extra_scalars()
+
     # Export initial state
     pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
-    eid_cpu = np.array(element_ids_initial, dtype=np.int32)
-    exporter.enqueue_export(0, pos_cpu, eid_cpu, particle_ids)
+    eid_cpu = np.array(element_ids_initial, dtype=np.int32) if EXPORT_ELEMENT_IDS else None
+    exporter.enqueue_export(0, pos_cpu, particle_ids=particle_ids,
+                            element_ids=eid_cpu, extra_scalars=extra_scalars)
     print(f"  Exported initial state (step 0)")
 
     print(f"\n[7/7] Running {N_STEPS} RK4 steps...")
@@ -1533,33 +1713,41 @@ def main():
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
 
-        if step % LOG_INTERVAL == 0 or step == N_STEPS:
-            eid_cpu = np.array(element_ids_gpu, dtype=np.int32)
-            n_active = int(np.sum(eid_cpu >= 0))
-            n_lost = n_particles - n_active
-            new_lost = n_lost - prev_lost
+        do_log = (step % LOG_INTERVAL == 0) or (step == N_STEPS)
+        do_export = (step % EXPORT_FREQUENCY == 0) or (step == N_STEPS)
 
-            stats_csv.write(f"{step},{n_active},{n_lost},{new_lost}\n")
-
-            elapsed = time.time() - t_start
-            steps_per_sec = step / elapsed if elapsed > 0 else 0
-            eta = (N_STEPS - step) / steps_per_sec if steps_per_sec > 0 else 0
-            print(f"  Step {step:5d}/{N_STEPS}: active={n_active:,} lost={n_lost:,} (+{new_lost})"
-                  f"  [{elapsed:.0f}s elapsed, {steps_per_sec:.1f} step/s, ETA {eta:.0f}s]")
-
-            prev_lost = n_lost
-
-        # Export VTU
-        if step % EXPORT_FREQUENCY == 0 or step == N_STEPS or new_lost > 0:
+        if do_log or do_export:
+            # Single GPU→CPU transfer for both logging and export
             pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
-            eid_cpu = np.array(element_ids_gpu, dtype=np.int32)
-            exporter.enqueue_export(step, pos_cpu, eid_cpu, particle_ids)
+            eid_cpu_raw = np.array(element_ids_gpu, dtype=np.int32)
+
+            if do_log:
+                n_active = int(np.sum(eid_cpu_raw >= 0))
+                n_lost = n_particles - n_active
+                new_lost = n_lost - prev_lost
+                stats_csv.write(f"{step},{n_active},{n_lost},{new_lost}\n")
+
+                elapsed = time.time() - t_start
+                steps_per_sec = step / elapsed if elapsed > 0 else 0
+                eta = (N_STEPS - step) / steps_per_sec if steps_per_sec > 0 else 0
+                print(f"  Step {step:5d}/{N_STEPS}: active={n_active:,} lost={n_lost:,} (+{new_lost})"
+                      f"  [{elapsed:.0f}s elapsed, {steps_per_sec:.1f} step/s, ETA {eta:.0f}s]")
+                prev_lost = n_lost
+
+                # Also export on new lost events
+                if new_lost > 0:
+                    do_export = True
+
+            if do_export:
+                eid_export = eid_cpu_raw if EXPORT_ELEMENT_IDS else None
+                exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
+                                        element_ids=eid_export, extra_scalars=extra_scalars)
 
     t_elapsed = time.time() - t_start
     stage_times['7_tracking'] = t_elapsed
     stats_csv.close()
     exporter.stop()
-    print(f"  Exported {exporter.n_exported} VTU files")
+    print(f"  Exported {exporter.n_exported} VTU files (binary)")
     print(f"  Stage 7 time: {t_elapsed:.1f}s")
 
     # ==================================================================
