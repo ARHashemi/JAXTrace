@@ -129,8 +129,6 @@ srun --gpus-per-task=1 \
     --input  $INPUT \
     --output $FLASH_OUT \
     --precision float32 \
-    --l0-skip-band 1e-3 \
-    --enhanced-search-band 2e-3 \
     --boundary-walls "x_max=outlet,y_min=outlet" \
     --n-groups 5
 
