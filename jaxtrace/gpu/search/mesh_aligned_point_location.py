@@ -35,6 +35,23 @@ from .mesh_aligned_octree_gpu import (
 
 
 # ============================================================================
+# Module-level constants
+# ============================================================================
+
+# 3×3×3 cell offsets — shape (27, 3) int32.
+# Defined at module level so they are not re-created inside traced fori_loop bodies.
+_CELL_OFFSETS_3x3x3 = jnp.array([
+    [di, dj, dk]
+    for di in [-1, 0, 1]
+    for dj in [-1, 0, 1]
+    for dk in [-1, 0, 1]
+], dtype=jnp.int32)  # (27, 3)
+
+# Maximum candidate buffer size for vectorized L2 search
+L2_MAX_CANDIDATES = 512
+
+
+# ============================================================================
 # Helper: Compute cell size for a given octree level
 # ============================================================================
 
@@ -51,6 +68,99 @@ def level_to_cell_size(level: jnp.int32, base_size: jnp.float32 = 1.0) -> jnp.fl
     """
     # cell_size = base_size / 2^level
     return base_size / (2.0 ** level)
+
+
+# ============================================================================
+# Vectorized L2 search (experimental — for testing inside fused mode)
+# ============================================================================
+
+def gather_l2_candidates(
+    pos: jax.Array,
+    octree_gpu,
+) -> jax.Array:
+    """
+    Gather up to L2_MAX_CANDIDATES element IDs from the 3x3x3 neighbourhood
+    across all 8 refinement levels into a flat (L2_MAX_CANDIDATES,) int32 buffer.
+    Uses _CELL_OFFSETS_3x3x3 module-level constant (not re-created at trace time).
+    """
+    from jaxtrace.gpu.search.morton_octree_builder import encode_morton_3d_jax
+    from jaxtrace.gpu.search.mesh_aligned_octree_gpu import find_cell_by_morton_and_level
+
+    candidates = jnp.full((L2_MAX_CANDIDATES,), -1, dtype=jnp.int32)
+    write_idx = jnp.int32(0)
+
+    def process_level(level_idx, carry):
+        cands, widx = carry
+        level = jnp.int32(14) - level_idx
+        cell_size = octree_gpu.level_cell_sizes[level]
+        i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
+        j_base = jnp.floor(pos[1] / cell_size[1]).astype(jnp.int32)
+        k_base = jnp.floor(pos[2] / cell_size[2]).astype(jnp.int32)
+
+        def process_cell(cell_idx, inner_carry):
+            cands_inner, widx_inner = inner_carry
+            di = _CELL_OFFSETS_3x3x3[cell_idx, 0]
+            dj = _CELL_OFFSETS_3x3x3[cell_idx, 1]
+            dk = _CELL_OFFSETS_3x3x3[cell_idx, 2]
+            i_off = jnp.clip(i_base + di + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            j_off = jnp.clip(j_base + dj + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            k_off = jnp.clip(k_base + dk + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            morton_code = encode_morton_3d_jax(i_off, j_off, k_off)
+            found_cell = find_cell_by_morton_and_level(
+                morton_code, jnp.uint8(level),
+                octree_gpu.cell_morton_codes, octree_gpu.cell_levels
+            )
+            safe_cell = jnp.maximum(found_cell, 0)
+            elem_start = octree_gpu.cell_to_elements_offsets[safe_cell]
+            elem_end   = octree_gpu.cell_to_elements_offsets[safe_cell + 1]
+            n_in_cell  = jnp.where(found_cell >= 0, elem_end - elem_start, jnp.int32(0))
+
+            def copy_elem(e_off, buf_carry):
+                buf, w = buf_carry
+                src_id = octree_gpu.cell_to_elements_data[elem_start + e_off]
+                safe_w = jnp.minimum(w, jnp.int32(L2_MAX_CANDIDATES - 1))
+                buf = buf.at[safe_w].set(jnp.where(w < L2_MAX_CANDIDATES, src_id, buf[safe_w]))
+                new_w = jnp.where(w < L2_MAX_CANDIDATES, w + 1, w)
+                return buf, new_w
+
+            cands_after, widx_after = jax.lax.fori_loop(0, n_in_cell, copy_elem, (cands_inner, widx_inner))
+            return cands_after, widx_after
+
+        cands_out, widx_out = jax.lax.fori_loop(0, 27, process_cell, (cands, widx))
+        return cands_out, widx_out
+
+    candidates, _ = jax.lax.fori_loop(0, 8, process_level, (candidates, write_idx))
+    return candidates
+
+
+def search_l2_vectorized(
+    pos: jax.Array,
+    octree_gpu,
+) -> jnp.int32:
+    """
+    Vectorized L2 search: gather candidates then test all in parallel via vmap.
+    Experimental — replaces the carry-dependent fori_loop early-exit with a
+    flat parallel scan. Intended for use inside the fully-fused kernel only.
+    """
+    candidates = gather_l2_candidates(pos, octree_gpu)
+
+    def test_one(elem_id):
+        valid = elem_id >= 0
+        inside = jnp.where(
+            valid,
+            point_in_tet_dispatcher(
+                pos, elem_id,
+                octree_gpu.connectivity, octree_gpu.node_positions,
+                config.POINT_IN_TET_METHOD
+            ),
+            False
+        )
+        return jnp.where(inside, elem_id, jnp.int32(-1))
+
+    results = jax.vmap(test_one)(candidates)
+    any_found = jnp.any(results >= 0)
+    first_hit = results[jnp.argmax(results >= 0)]
+    return jnp.where(any_found, first_hit, jnp.int32(-1))
 
 
 # ============================================================================
