@@ -274,6 +274,56 @@ When to enable:
 Default: False (use single-cell registration)
 """
 
+OCTREE_REGISTRATION_METHOD = "parent_cube"
+"""
+Octree cell-to-element registration strategy for the mesh-aligned octree.
+
+Options:
+    "parent_cube" - Each element is registered in its ONE parent cube only.
+                    The parent cube is the Kuhn hexahedral cell whose octree
+                    subdivision produced this tetrahedron.
+                    Elements per cell: 5-6 (Kuhn tets per cube), max ~8.
+                    Non-Kuhn elements are assigned to their Kuhn neighbour's
+                    cell, adding at most +1-2 per cell.
+                    Combined with 3x3x3 neighbourhood search, this gives
+                    100% found rate on Kuhn meshes.
+                    Inner search loop is fully static (MAX_ELEMS_PER_CELL),
+                    enabling XLA unrolling — critical for GPU performance.
+
+    "vertex_multi" - Each element is registered in ALL cells its 4 vertices
+                     touch (~4 cells per element).
+                     Elements per cell: mean ~18, median 16, max ~129.
+                     Inner search loop has dynamic bounds (CSR offsets),
+                     preventing XLA unrolling — slower on AMD MI250X.
+                     This was the original approach; retained for comparison.
+
+Performance impact:
+    parent_cube:  8 levels x 27 cells x 8 max_elems = 1,728 static iterations
+    vertex_multi: 8 levels x 27 cells x dynamic(4-129) = up to 27,864, dynamic
+
+Default: "parent_cube" (static inner loop, best GPU performance)
+"""
+
+MAX_ELEMS_PER_CELL = 8
+"""
+Maximum elements per cell for the static-bound inner search loop.
+
+Only used when OCTREE_REGISTRATION_METHOD = "parent_cube".
+The inner fori_loop in the 3x3x3 search uses this as a compile-time
+constant upper bound, enabling XLA to unroll the loop.
+
+Guidelines:
+    - For Kuhn meshes with parent_cube registration: 8 is sufficient
+      (96% of cells have exactly 6 elements, max observed is 8).
+    - With non-Kuhn elements assigned to neighbour cells: 10-12 provides
+      headroom for cells in refinement transition zones.
+    - Higher values increase the unrolled loop size but reduce risk of
+      truncation (missed elements). Total iterations per query per level:
+      27 cells x MAX_ELEMS_PER_CELL.
+
+Default: 8 (matches observed max for pure Kuhn parent-cube registration)
+"""
+
 # ============================================================================
 # RK4 Sub-Step Boundary Recovery
 # ============================================================================

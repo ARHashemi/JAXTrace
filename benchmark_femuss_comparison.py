@@ -56,6 +56,7 @@ from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_octree_single_cell import extract_octree_cells_single
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
+from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.tracking.initial_assignment_cascading import (
     initial_assignment_cascading_fallback,
@@ -66,6 +67,7 @@ from jaxtrace.gpu.search.point_in_tet_methods import set_corrected_metadata, set
 from jaxtrace.gpu.search.point_in_tet_inverse import precompute_inverse_matrices
 from jaxtrace.gpu.search.mesh_aligned_point_location import (
     search_mesh_aligned_octree_multi_local_where,
+    search_mesh_aligned_octree_static_where,
     search_mesh_aligned_octree_5x5x5_where,
     search_l2_vectorized,
 )
@@ -868,8 +870,15 @@ def create_rk4_comparison(
         if use_l2_vectorized:
             # Experimental: gather candidates then parallel PIT tests.
             return search_l2_vectorized(pos, mesh_aligned_octree)
+        elif config.OCTREE_REGISTRATION_METHOD == "parent_cube":
+            # Static inner loop — all bounds are Python ints, XLA can unroll.
+            elem_id, _ = search_mesh_aligned_octree_static_where(
+                pos, mesh_aligned_octree,
+                max_elems_per_cell=config.MAX_ELEMS_PER_CELL
+            )
+            return elem_id
         else:
-            # Default (validated): fori_loop with carry-dependent early exit.
+            # Dynamic inner loop (vertex-multi registration).
             elem_id, _ = search_mesh_aligned_octree_multi_local_where(
                 pos, mesh_aligned_octree, max_tests=jnp.int32(600)
             )
@@ -1567,12 +1576,20 @@ def main():
         leaf_capacity=256, max_depth=21, verbose=False
     )
 
-    mesh_octree_cells_multi = extract_octree_cells_vertex_multi(
-        node_positions, connectivity, tolerance=1e-6, verbose=False
-    )
-    print(f"  Multi-cell octree: {mesh_octree_cells_multi.n_cells:,} cells, "
-          f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
-          f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
+    if config.OCTREE_REGISTRATION_METHOD == "parent_cube":
+        mesh_octree_cells = extract_octree_cells_parent_cube(
+            node_positions, connectivity, tolerance=1e-6, verbose=True
+        )
+        print(f"  Parent-cube octree: {mesh_octree_cells.n_cells:,} cells, "
+              f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell (max {mesh_octree_cells.max_elements_per_cell}), "
+              f"static loop bound = {config.MAX_ELEMS_PER_CELL}")
+    else:
+        mesh_octree_cells = extract_octree_cells_vertex_multi(
+            node_positions, connectivity, tolerance=1e-6, verbose=False
+        )
+        print(f"  Vertex-multi octree: {mesh_octree_cells.n_cells:,} cells, "
+              f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell, "
+              f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
 
     # Build face neighbors (always needed as baseline)
     element_neighbors_face = build_element_neighbors_array(connectivity, method='face', verbose=False)
@@ -1598,7 +1615,7 @@ def main():
     morton_gpu = upload_global_morton_to_gpu(octree_struct, connectivity, node_positions)
 
     mesh_aligned_octree_multi_gpu = upload_mesh_aligned_octree_to_gpu(
-        connectivity, node_positions, mesh_octree_cells_multi, verbose=False
+        connectivity, node_positions, mesh_octree_cells, verbose=False
     )
 
     from jaxtrace.gpu.search.aa_detection import AxisAlignedMetadata

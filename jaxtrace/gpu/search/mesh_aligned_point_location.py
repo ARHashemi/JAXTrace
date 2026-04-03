@@ -1155,3 +1155,148 @@ search_mesh_aligned_octree_multi_local_where_jit = jax.jit(
     search_mesh_aligned_octree_multi_local_where,
     static_argnames=('max_tests',)
 )
+
+
+# ============================================================================
+# Static-Bound 3×3×3 Search (Parent-Cube Registration)
+# ============================================================================
+
+def search_mesh_aligned_octree_static_where(
+    pos: jax.Array,
+    octree_gpu: MeshAlignedOctreeGPU,
+    max_elems_per_cell: int = 8,
+) -> Tuple[jnp.int32, jnp.int32]:
+    """
+    Find containing element using 3×3×3 local neighbourhood search with
+    a **static** inner loop bound.
+
+    Designed for parent-cube octree registration where elements per cell
+    is tightly bounded (typically 5–8).  The inner fori_loop uses a
+    compile-time Python int as the upper bound, enabling XLA to unroll it
+    completely.  This eliminates the dynamic while-loop that hurts AMD
+    MI250X performance.
+
+    All three loops are fully static:
+        outer:  fori_loop(0, 8)                    — 8 refinement levels
+        middle: fori_loop(0, 27)                   — 27 cells in 3×3×3
+        inner:  fori_loop(0, max_elems_per_cell)   — static Python int
+
+    Uses jnp.where (not lax.cond) throughout for vmap compatibility.
+
+    Args:
+        pos: (3,) float32 — query position
+        octree_gpu: GPU octree structure (parent-cube registration)
+        max_elems_per_cell: Compile-time max elements per cell
+                            (must be a Python int, not JAX array).
+                            Set via config.MAX_ELEMS_PER_CELL.
+
+    Returns:
+        (elem_id, n_tests):
+            elem_id: Element ID (-1 if not found)
+            n_tests: Total number of point-in-tet tests performed
+    """
+
+    def try_level(level_idx, carry):
+        """Try searching 3×3×3 neighbourhood at one refinement level."""
+        found_elem, total_tests = carry
+
+        level = 14 - level_idx
+
+        cell_size = octree_gpu.level_cell_sizes[level]
+
+        i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
+        j_base = jnp.floor(pos[1] / cell_size[1]).astype(jnp.int32)
+        k_base = jnp.floor(pos[2] / cell_size[2]).astype(jnp.int32)
+
+        def try_cell(cell_offset, inner_carry):
+            """Try searching one cell in the 3×3×3 neighbourhood."""
+            inner_found_elem, inner_tests = inner_carry
+            di, dj, dk = cell_offset[0], cell_offset[1], cell_offset[2]
+
+            i = i_base + di
+            j = j_base + dj
+            k = k_base + dk
+
+            i_offset = jnp.clip(i + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            j_offset = jnp.clip(j + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+            k_offset = jnp.clip(k + octree_gpu.morton_offset, 0, octree_gpu.morton_max_coord - 1)
+
+            morton_code = encode_morton_3d_jax(i_offset, j_offset, k_offset)
+
+            cell_idx = find_cell_by_morton_and_level(
+                morton_code,
+                jnp.uint8(level),
+                octree_gpu.cell_morton_codes,
+                octree_gpu.cell_levels
+            )
+
+            safe_cell_idx = jnp.maximum(cell_idx, 0)
+            elem_start_idx = octree_gpu.cell_to_elements_offsets[safe_cell_idx]
+            elem_end_idx = octree_gpu.cell_to_elements_offsets[safe_cell_idx + 1]
+            n_elems_in_cell = elem_end_idx - elem_start_idx
+
+            should_search = jnp.logical_and(inner_found_elem < 0, cell_idx >= 0)
+
+            def test_element(elem_offset, test_carry):
+                test_found_elem, test_n_tests = test_carry
+
+                # Validity mask: within actual cell range AND cell exists
+                valid = jnp.logical_and(
+                    should_search,
+                    elem_offset < n_elems_in_cell
+                )
+
+                # Safe index: clamp to avoid out-of-bounds read
+                safe_offset = jnp.minimum(
+                    elem_offset,
+                    jnp.maximum(n_elems_in_cell - 1, jnp.int32(0))
+                )
+                elem_idx_in_data = elem_start_idx + safe_offset
+                elem_id = octree_gpu.cell_to_elements_data[elem_idx_in_data]
+
+                is_inside = point_in_tet_dispatcher(
+                    pos,
+                    elem_id,
+                    octree_gpu.connectivity,
+                    octree_gpu.node_positions,
+                    config.POINT_IN_TET_METHOD
+                )
+
+                new_found = jnp.where(
+                    jnp.logical_and(valid, jnp.logical_and(test_found_elem < 0, is_inside)),
+                    elem_id,
+                    test_found_elem
+                )
+                new_tests = test_n_tests + jnp.where(valid, jnp.int32(1), jnp.int32(0))
+
+                return new_found, new_tests
+
+            # STATIC inner loop — max_elems_per_cell is a Python int
+            cell_found_elem, cell_tests = jax.lax.fori_loop(
+                0, max_elems_per_cell,
+                test_element,
+                (inner_found_elem, inner_tests)
+            )
+
+            return cell_found_elem, cell_tests
+
+        # Scan over 27 cells using module-level constant
+        level_found_elem, level_tests = jax.lax.fori_loop(
+            0, 27,
+            lambda i, c: try_cell(_CELL_OFFSETS_3x3x3[i], c),
+            (found_elem, total_tests)
+        )
+
+        out_elem = jnp.where(found_elem >= 0, found_elem, level_found_elem)
+        out_tests = jnp.where(found_elem >= 0, total_tests, level_tests)
+
+        return out_elem, out_tests
+
+    n_levels = 8
+    final_elem_id, final_n_tests = jax.lax.fori_loop(
+        0, n_levels,
+        try_level,
+        (jnp.int32(-1), jnp.int32(0))
+    )
+
+    return final_elem_id, final_n_tests
