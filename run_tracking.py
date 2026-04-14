@@ -120,18 +120,29 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     # --- I/O ---
+    # Convention: FEMUSS cases live in <case>.gid/post with mesh PVTU in
+    # post/0eule/<case>_*.pvtu and particle PVTU in post/1part/<case>_pt_*.pvtu.
+    # Pass --input as either the <case>.gid folder OR the post folder;
+    # patterns auto-derive from the case stem unless explicitly overridden.
     parser.add_argument("--input", type=Path, default=Path("data/FLA/post"),
-                        help="Base input directory containing 0eule/ (mesh) and 1part/ (FEMUSS particles)")
+                        help="FEMUSS case folder. Either '.../<case>.gid' or "
+                             "'.../<case>.gid/post'. Patterns auto-derive from "
+                             "the case stem (e.g. 'cylA.gid' -> 'cylA_*.pvtu').")
     parser.add_argument("--output", type=Path, default=Path("output/tracking"),
                         help="Output directory for VTU files and artifacts")
     parser.add_argument("--mesh-subdir", type=str, default="0eule",
                         help="Subdirectory under --input containing mesh PVTU files")
-    parser.add_argument("--mesh-pattern", type=str, default="cylA_{timestep}.pvtu",
-                        help="Mesh PVTU file pattern with {timestep} placeholder")
+    parser.add_argument("--mesh-pattern", type=str, default=None,
+                        help="Override mesh PVTU pattern with {timestep} placeholder "
+                             "(default: auto '<case>_{timestep}.pvtu').")
     parser.add_argument("--femuss-subdir", type=str, default="1part",
                         help="Subdirectory under --input containing FEMUSS particle PVTU files")
-    parser.add_argument("--femuss-pattern", type=str, default="cylA_pt_{timestep}.pvtu",
-                        help="FEMUSS particle PVTU file pattern with {timestep} placeholder")
+    parser.add_argument("--femuss-pattern", type=str, default=None,
+                        help="Override FEMUSS particle PVTU pattern with {timestep} placeholder "
+                             "(default: auto '<case>_pt_{timestep}.pvtu').")
+    parser.add_argument("--case-stem", type=str, default=None,
+                        help="Override auto-detected case stem (derived from "
+                             "'<case>.gid' folder name). Used to build default patterns.")
     parser.add_argument("--run-tag", type=str, default=None,
                         help="Optional subfolder name under --output (defaults to auto-generated)")
 
@@ -336,8 +347,51 @@ def seed_from_file(args):
 # MAIN
 # =============================================================================
 
+def _resolve_case_paths(args):
+    """Auto-derive case stem and PVTU file patterns from --input.
+
+    Supports --input given as either '<case>.gid' or '<case>.gid/post'.
+    Normalises args.input to point at the 'post' directory and fills in
+    args.mesh_pattern / args.femuss_pattern when the user did not override.
+    """
+    in_path = Path(args.input).resolve()
+
+    # Normalise: if user passed '<case>.gid', descend into its 'post/' child.
+    if in_path.name.endswith('.gid') and (in_path / 'post').is_dir():
+        case_dir = in_path
+        post_dir = in_path / 'post'
+    elif in_path.name == 'post' and in_path.parent.name.endswith('.gid'):
+        case_dir = in_path.parent
+        post_dir = in_path
+    else:
+        # Fallback: treat --input as the 'post' directory itself.
+        case_dir = in_path.parent if in_path.parent.name.endswith('.gid') else in_path
+        post_dir = in_path
+
+    # Derive case stem: 'cylA.gid' -> 'cylA'
+    if args.case_stem is not None:
+        stem = args.case_stem
+    elif case_dir.name.endswith('.gid'):
+        stem = case_dir.name[:-4]
+    else:
+        stem = case_dir.name
+
+    # Fill in patterns only if the user did not override
+    if args.mesh_pattern is None:
+        args.mesh_pattern = f"{stem}_{{timestep}}.pvtu"
+    if args.femuss_pattern is None:
+        args.femuss_pattern = f"{stem}_pt_{{timestep}}.pvtu"
+
+    args.input = post_dir
+    return stem
+
+
 def main():
     args = parse_args()
+    case_stem = _resolve_case_paths(args)
+    print(f"[case] stem='{case_stem}'  post_dir={args.input}")
+    print(f"[case] mesh_pattern='{args.mesh_pattern}'  "
+          f"femuss_pattern='{args.femuss_pattern}'")
 
     # Paths / params
     MESH_BASE_PATH = args.input / args.mesh_subdir

@@ -18,13 +18,16 @@
 
 # ── [1] Paths ────────────────────────────────────────────────────────────────
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
-JAXTRACE=/project/project_465002752/hashemia/JAXTrace
+JAXTRACE=/project/project_465002752/hashemia/JAXTrace_stable
 PKGS=/project/project_465002752/hashemia/required-packages
-INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid/post
-MESH_SUBDIR=0eule             # subfolder under INPUT with mesh PVTU
-MESH_PATTERN="cylA_{timestep}.pvtu"
-FEMUSS_SUBDIR=1part           # subfolder under INPUT with FEMUSS particles
-FEMUSS_PATTERN="cylA_pt_{timestep}.pvtu"
+# INPUT: point at the FEMUSS case folder. Either '<case>.gid' or '<case>.gid/post'.
+# Mesh / particle file patterns auto-derive from the '<case>.gid' stem.
+INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid
+MESH_SUBDIR=0eule             # subfolder under post/ with mesh PVTU
+FEMUSS_SUBDIR=1part           # subfolder under post/ with FEMUSS particles
+CASE_STEM=""                  # override auto-detected case stem (empty = auto)
+MESH_PATTERN=""               # override, e.g. "cylA_{timestep}.pvtu"  (empty = auto)
+FEMUSS_PATTERN=""             # override, e.g. "cylA_pt_{timestep}.pvtu" (empty = auto)
 RUN_TAG=""                    # optional custom subfolder; empty = auto
 
 # ── [2] Precision & velocity field ───────────────────────────────────────────
@@ -137,9 +140,7 @@ ARGS=(
   --input  "$INPUT"
   --output "$FLASH_OUT"
   --mesh-subdir   "$MESH_SUBDIR"
-  --mesh-pattern  "$MESH_PATTERN"
   --femuss-subdir "$FEMUSS_SUBDIR"
-  --femuss-pattern "$FEMUSS_PATTERN"
   --precision      "$PRECISION"
   --vel-range      "$VEL_START" "$VEL_END"
   --velocity-field "$VELOCITY_FIELD"
@@ -168,6 +169,9 @@ ARGS=(
 )
 
 # Optional / conditional flags
+[ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
+[ -n "$MESH_PATTERN" ]    && ARGS+=( --mesh-pattern "$MESH_PATTERN" )
+[ -n "$FEMUSS_PATTERN" ]  && ARGS+=( --femuss-pattern "$FEMUSS_PATTERN" )
 [ -n "$RUN_TAG" ]         && ARGS+=( --run-tag "$RUN_TAG" )
 [ -n "$BOUNDARY_WALLS" ]  && ARGS+=( --boundary-walls "$BOUNDARY_WALLS" )
 [ -n "$REGISTRATION" ]    && ARGS+=( --registration "$REGISTRATION" )
