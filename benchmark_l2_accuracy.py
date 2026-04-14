@@ -32,9 +32,29 @@ import jaxtrace.config as config
 import jax
 import jax.numpy as jnp
 
+# Optional NVTX markers for nsys / Nsight Systems kernel breakdown.
+# Wrap stages and per-method timing in named ranges so the resulting
+# nsys timeline can be grouped by stage and by method.
+try:
+    import nvtx as _nvtx  # type: ignore
+    _HAS_NVTX = True
+    def nvtx_range(name):
+        return _nvtx.annotate(message=name, color="blue")
+    def nvtx_mark(name):
+        _nvtx.mark(message=name, color="red")
+except Exception:
+    _HAS_NVTX = False
+    from contextlib import contextmanager
+    @contextmanager
+    def nvtx_range(name):
+        yield
+    def nvtx_mark(name):
+        pass
+
 from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
 from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
+from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_morton_builder import build_mesh_aligned_morton_structure
 from jaxtrace.gpu.search.mesh_aligned_morton_search import (
@@ -49,6 +69,7 @@ from jaxtrace.gpu.search.mesh_aligned_point_location import (
     search_mesh_aligned_octree_multi_local_where,
     search_mesh_aligned_octree_5x5x5_where,
     search_mesh_aligned_octree_3x3x3_with_stats,
+    search_mesh_aligned_octree_static_where,
 )
 from jaxtrace.gpu.search.mesh_aligned_octree_single_cell import extract_octree_cells_single
 
@@ -150,6 +171,24 @@ def parse_args():
     parser.add_argument(
         "--skip-failure-analysis", action="store_true",
         help="Skip 1x1x1 failure analysis (faster run)",
+    )
+    parser.add_argument(
+        "--registration", type=str, default="both",
+        choices=["vertex", "parent_cube", "both"],
+        help="Registration method: vertex (vertex-multi), parent_cube, or both",
+    )
+    parser.add_argument(
+        "--cost-analysis", action="store_true", default=True,
+        help="Run XLA HLO cost analysis (FLOPs, bytes, arithmetic intensity) per method",
+    )
+    parser.add_argument(
+        "--no-cost-analysis", dest="cost_analysis", action="store_false",
+        help="Disable XLA HLO cost analysis",
+    )
+    parser.add_argument(
+        "--float64", action="store_true",
+        help="Use IEEE-754 double precision (calls config.set_precision(True)). "
+             "Must be passed on the command line; the USE_FLOAT64 env var is NOT read.",
     )
     return parser.parse_args()
 
@@ -290,6 +329,32 @@ def search_radius_batch(positions_gpu, morton_gpu, search_radius, batch_size=500
         all_eids[start:end] = np.array(eids, dtype=np.int32)
 
     return all_eids
+
+
+def search_3x3x3_pc_batch(positions_gpu, octree_gpu, batch_size=50000, max_elems_per_cell=8):
+    """Search using 3x3x3 mesh-aligned octree with parent-cube (static inner loop)."""
+    n = positions_gpu.shape[0]
+
+    @jax.jit
+    def _batch(pos_batch):
+        def single(pos):
+            elem_id, n_tests = search_mesh_aligned_octree_static_where(
+                pos, octree_gpu, max_elems_per_cell=max_elems_per_cell
+            )
+            return elem_id, n_tests
+        return jax.vmap(single)(pos_batch)
+
+    all_eids = np.full(n, -1, dtype=np.int32)
+    all_tests = np.zeros(n, dtype=np.int32)
+
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        eids, tests = _batch(positions_gpu[start:end])
+        eids = jax.block_until_ready(eids)
+        all_eids[start:end] = np.array(eids, dtype=np.int32)
+        all_tests[start:end] = np.array(tests, dtype=np.int32)
+
+    return all_eids, all_tests
 
 
 # =============================================================================
@@ -488,11 +553,103 @@ def print_gpu_info():
 
 
 # =============================================================================
+# HLO cost analysis (FLOPs, bytes, arithmetic intensity)
+# =============================================================================
+
+def hlo_cost_analysis(jit_fn, sample_input):
+    """
+    Run XLA HLO cost analysis on a jitted batched search function.
+
+    Returns dict with: flops, bytes_accessed, optimal_seconds,
+    n_hlo_ops, n_fusions, hlo_text_lines, transcendentals.
+    Returns None on failure (older JAX without cost_analysis).
+    """
+    try:
+        lowered = jit_fn.lower(sample_input)
+        compiled = lowered.compile()
+        ca = compiled.cost_analysis()
+        if isinstance(ca, list):
+            ca = ca[0] if ca else {}
+
+        # HLO text — count ops and fusions
+        try:
+            hlo_text = compiled.as_text()
+        except Exception:
+            hlo_text = ""
+        hlo_lines = [ln for ln in hlo_text.split("\n") if " = " in ln and not ln.strip().startswith("//")]
+        n_hlo_ops = len(hlo_lines)
+        n_fusions = sum(1 for ln in hlo_lines if "fusion" in ln)
+
+        return {
+            "flops": float(ca.get("flops", 0.0)),
+            "bytes_accessed": float(ca.get("bytes accessed", 0.0)),
+            "optimal_seconds": float(ca.get("optimal_seconds", 0.0)),
+            "transcendentals": float(ca.get("transcendentals", 0.0)),
+            "n_hlo_ops": n_hlo_ops,
+            "n_fusions": n_fusions,
+            "hlo_text_chars": len(hlo_text),
+        }
+    except Exception as e:
+        print(f"    [cost_analysis failed: {e}]")
+        return None
+
+
+def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu, radius=None):
+    """Build a jitted vmapped batch function for cost analysis on a single batch."""
+    if method_type == '1x1x1':
+        max_tests = jnp.int32(150)
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_mesh_aligned_octree_1x1x1_where(pos, octree_gpu_vertex, max_tests=max_tests)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    elif method_type == '3x3x3':
+        max_tests = jnp.int32(600)
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_mesh_aligned_octree_multi_local_where(pos, octree_gpu_vertex, max_tests=max_tests)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    elif method_type == '5x5x5':
+        max_tests = jnp.int32(1500)
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_mesh_aligned_octree_5x5x5_where(pos, octree_gpu_vertex, max_tests=max_tests)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    elif method_type == '3x3x3_pc':
+        max_per_cell = config.MAX_ELEMS_PER_CELL
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_mesh_aligned_octree_static_where(pos, octree_gpu_pc, max_elems_per_cell=max_per_cell)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    elif method_type == 'radius':
+        radius_jax = jnp.int32(radius)
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_L2_mesh_aligned_morton_single(pos, morton_gpu, search_radius=radius_jax)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    else:
+        raise ValueError(method_type)
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
 def main():
     args = parse_args()
+
+    # Must happen before any JAX array is created.
+    if args.float64:
+        config.set_precision(True)
 
     print("=" * 90)
     print("L2 Search Accuracy & Performance Benchmark")
@@ -504,25 +661,39 @@ def main():
     print(f"Warmup runs: {args.warmup_runs}, Timing runs: {args.timing_runs}")
     print()
 
+    # ---- Build-stage timing dict (filled in stages [1/5], [2/5], [3/5]) ----
+    build_times = {}
+    build_meta = {}
+
     # ---- Load mesh ----
     MESH_BASE_PATH = args.input / args.mesh_subdir
     print(f"[1/5] Loading mesh from {MESH_BASE_PATH} ...")
     t0 = time.time()
 
-    node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
-        base_path=MESH_BASE_PATH,
-        file_pattern=args.mesh_pattern,
-        timestep_range=tuple(args.vel_range),
-        field_name=args.vel_field,
-        verbose=False,
-    )
-    node_positions, connectivity, n_dup, velocity_sequence = deduplicate_nodes(
-        node_positions, connectivity, velocity_sequence=velocity_sequence, verbose=False
-    )
-    connectivity = connectivity.astype(np.int32)
+    with nvtx_range("stage1.mesh_io_pvtu_load"):
+        t_io_0 = time.time()
+        node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
+            base_path=MESH_BASE_PATH,
+            file_pattern=args.mesh_pattern,
+            timestep_range=tuple(args.vel_range),
+            field_name=args.vel_field,
+            verbose=False,
+        )
+        build_times['mesh_io_pvtu_load'] = time.time() - t_io_0
+
+    with nvtx_range("stage1.mesh_node_deduplication"):
+        t_dedup_0 = time.time()
+        node_positions, connectivity, n_dup, velocity_sequence = deduplicate_nodes(
+            node_positions, connectivity, velocity_sequence=velocity_sequence, verbose=False
+        )
+        connectivity = connectivity.astype(np.int32)
+        build_times['mesh_node_deduplication'] = time.time() - t_dedup_0
 
     n_elements = connectivity.shape[0]
     n_nodes = node_positions.shape[0]
+    build_meta['n_elements'] = n_elements
+    build_meta['n_nodes'] = n_nodes
+    build_meta['n_duplicates_removed'] = n_dup
     print(f"  Elements: {n_elements:,}, Nodes: {n_nodes:,} (removed {n_dup:,} duplicates)")
     print(f"  Loaded in {time.time() - t0:.1f}s")
 
@@ -533,55 +704,111 @@ def main():
     config.POINT_IN_TET_METHOD = 'inverse'
     config.POINT_IN_TET_TOLERANCE = args.point_in_tet_tol
 
-    aa_metadata = precompute_aa_metadata(connectivity, node_positions, verbose=False)
-    element_vertices = precompute_element_vertices(connectivity, node_positions, verbose=False)
-    M_inv_array, p0_array = precompute_inverse_matrices(connectivity, node_positions)
+    with nvtx_range("stage2.aa_metadata_precompute"):
+        t_aa_0 = time.time()
+        aa_metadata = precompute_aa_metadata(connectivity, node_positions, verbose=False)
+        element_vertices = precompute_element_vertices(connectivity, node_positions, verbose=False)
+        build_times['aa_metadata_precompute'] = time.time() - t_aa_0
+
+    with nvtx_range("stage2.inverse_matrices_precompute"):
+        t_inv_0 = time.time()
+        M_inv_array, p0_array = precompute_inverse_matrices(connectivity, node_positions)
+        build_times['inverse_matrices_precompute'] = time.time() - t_inv_0
 
     element_sizes = compute_element_sizes(connectivity, node_positions)
+    build_meta['inv_matrices_bytes'] = int(M_inv_array.nbytes + p0_array.nbytes)
     print(f"  Element sizes: min={element_sizes.min():.2e}, "
           f"mean={element_sizes.mean():.2e}, max={element_sizes.max():.2e}")
     print(f"  Done in {time.time() - t0:.1f}s")
 
     # ---- Build structures & upload to GPU ----
+    registration = args.registration
+    use_vertex = registration in ("vertex", "both")
+    use_parent_cube = registration in ("parent_cube", "both")
+
     print(f"\n[3/5] Building search structures and uploading to GPU...")
+    print(f"  Registration mode: {registration}")
     t0 = time.time()
 
-    # Mesh-aligned multi-cell octree (for 3x3x3 and 5x5x5)
-    mesh_octree_cells_multi = extract_octree_cells_vertex_multi(
-        node_positions, connectivity, tolerance=1e-6, verbose=False
-    )
-    print(f"  Multi-cell octree: {mesh_octree_cells_multi.n_cells:,} cells, "
-          f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
-          f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
+    # Vertex-multi octree (for 1x1x1, 3x3x3, 5x5x5)
+    octree_gpu_vertex = None
+    if use_vertex:
+        with nvtx_range("stage3.octree_extract_vertex_multi"):
+            t_v_extract_0 = time.time()
+            mesh_octree_cells_multi = extract_octree_cells_vertex_multi(
+                node_positions, connectivity, tolerance=1e-6, verbose=False
+            )
+            build_times['octree_extract_vertex_multi'] = time.time() - t_v_extract_0
 
-    # --- Non-Kuhn element count ---
-    cells_per_elem = np.diff(mesh_octree_cells_multi.element_to_cells_offsets)
-    n_unregistered = int(np.sum(cells_per_elem == 0))
-    n_registered = n_elements - n_unregistered
-    print(f"  Registered elements: {n_registered:,} / {n_elements:,} "
-          f"({100*n_registered/n_elements:.2f}%)")
-    if n_unregistered > 0:
-        print(f"  Unregistered (non-Kuhn, no Kuhn neighbor): {n_unregistered:,}")
+        print(f"  Vertex-multi octree: {mesh_octree_cells_multi.n_cells:,} cells, "
+              f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
+              f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
 
-    octree_gpu = upload_mesh_aligned_octree_to_gpu(
-        connectivity, node_positions, mesh_octree_cells_multi, verbose=False
-    )
+        cells_per_elem = np.diff(mesh_octree_cells_multi.element_to_cells_offsets)
+        n_unregistered = int(np.sum(cells_per_elem == 0))
+        n_registered = n_elements - n_unregistered
+        build_meta['vertex_n_cells'] = int(mesh_octree_cells_multi.n_cells)
+        build_meta['vertex_mean_elem_per_cell'] = float(mesh_octree_cells_multi.elements_per_cell_mean)
+        build_meta['vertex_mean_cells_per_elem'] = float(mesh_octree_cells_multi.cells_per_element_mean)
+        build_meta['vertex_n_unregistered'] = n_unregistered
+        print(f"  Registered elements: {n_registered:,} / {n_elements:,} "
+              f"({100*n_registered/n_elements:.2f}%)")
+        if n_unregistered > 0:
+            print(f"  Unregistered (non-Kuhn, no Kuhn neighbor): {n_unregistered:,}")
 
-    # Mesh-aligned Morton structure (for radius search)
-    mesh_octree_cells_single = extract_octree_cells_single(
-        node_positions, connectivity, tolerance=1e-6, verbose=False
-    )
-    morton_struct = build_mesh_aligned_morton_structure(
-        node_positions, connectivity, mesh_octree_cells=mesh_octree_cells_single, verbose=False
-    )
-    morton_gpu = upload_mesh_aligned_morton_to_gpu(
-        node_positions, connectivity, morton_struct, verbose=False
-    )
-    print(f"  Morton structure: {morton_struct.n_cells:,} cells, "
-          f"{morton_struct.elements_per_cell_mean:.1f} elem/cell")
+        with nvtx_range("stage3.octree_upload_vertex_multi"):
+            t_v_upload_0 = time.time()
+            octree_gpu_vertex = upload_mesh_aligned_octree_to_gpu(
+                connectivity, node_positions, mesh_octree_cells_multi, verbose=False
+            )
+            build_times['octree_upload_vertex_multi'] = time.time() - t_v_upload_0
+
+    # Parent-cube octree (for 3x3x3^PC)
+    octree_gpu_pc = None
+    if use_parent_cube:
+        with nvtx_range("stage3.octree_extract_parent_cube"):
+            t_pc_extract_0 = time.time()
+            mesh_octree_cells_pc = extract_octree_cells_parent_cube(
+                node_positions, connectivity, tolerance=1e-6, verbose=False
+            )
+            build_times['octree_extract_parent_cube'] = time.time() - t_pc_extract_0
+
+        print(f"  Parent-cube octree: {mesh_octree_cells_pc.n_cells:,} cells, "
+              f"{mesh_octree_cells_pc.elements_per_cell_mean:.1f} elem/cell "
+              f"(max {mesh_octree_cells_pc.max_elements_per_cell}), "
+              f"static loop bound = {config.MAX_ELEMS_PER_CELL}")
+
+        build_meta['pc_n_cells'] = int(mesh_octree_cells_pc.n_cells)
+        build_meta['pc_mean_elem_per_cell'] = float(mesh_octree_cells_pc.elements_per_cell_mean)
+        build_meta['pc_max_elem_per_cell'] = int(mesh_octree_cells_pc.max_elements_per_cell)
+
+        with nvtx_range("stage3.octree_upload_parent_cube"):
+            t_pc_upload_0 = time.time()
+            octree_gpu_pc = upload_mesh_aligned_octree_to_gpu(
+                connectivity, node_positions, mesh_octree_cells_pc, verbose=False
+            )
+            build_times['octree_upload_parent_cube'] = time.time() - t_pc_upload_0
+
+    # Mesh-aligned Morton structure (for radius search) — only with vertex
+    morton_gpu = None
+    if use_vertex:
+        t_m_0 = time.time()
+        mesh_octree_cells_single = extract_octree_cells_single(
+            node_positions, connectivity, tolerance=1e-6, verbose=False
+        )
+        morton_struct = build_mesh_aligned_morton_structure(
+            node_positions, connectivity, mesh_octree_cells=mesh_octree_cells_single, verbose=False
+        )
+        morton_gpu = upload_mesh_aligned_morton_to_gpu(
+            node_positions, connectivity, morton_struct, verbose=False
+        )
+        build_times['morton_structure_build_upload'] = time.time() - t_m_0
+        print(f"  Morton structure: {morton_struct.n_cells:,} cells, "
+              f"{morton_struct.elements_per_cell_mean:.1f} elem/cell")
 
     # --- Level distribution of octree cells ---
-    cell_levels = mesh_octree_cells_multi.cell_levels
+    ref_cells = mesh_octree_cells_multi if use_vertex else mesh_octree_cells_pc
+    cell_levels = ref_cells.cell_levels
     unique_levels, level_counts = np.unique(cell_levels, return_counts=True)
     print(f"\n  Octree level distribution:")
     for lev, cnt in zip(unique_levels, level_counts):
@@ -602,12 +829,12 @@ def main():
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
 
     # --- Memory footprint ---
-    morton_codes_bytes = mesh_octree_cells_multi.cell_morton_codes.nbytes
-    levels_bytes = mesh_octree_cells_multi.cell_levels.nbytes
-    csr_offsets_bytes = mesh_octree_cells_multi.cell_to_elements_offsets.nbytes
-    csr_data_bytes = mesh_octree_cells_multi.cell_to_elements_data.nbytes
-    grid_indices_bytes = mesh_octree_cells_multi.cell_grid_indices.nbytes
-    cell_sizes_bytes = mesh_octree_cells_multi.cell_sizes.nbytes
+    morton_codes_bytes = ref_cells.cell_morton_codes.nbytes
+    levels_bytes = ref_cells.cell_levels.nbytes
+    csr_offsets_bytes = ref_cells.cell_to_elements_offsets.nbytes
+    csr_data_bytes = ref_cells.cell_to_elements_data.nbytes
+    grid_indices_bytes = ref_cells.cell_grid_indices.nbytes
+    cell_sizes_bytes = ref_cells.cell_sizes.nbytes
     total_octree_bytes = (morton_codes_bytes + levels_bytes + csr_offsets_bytes +
                           csr_data_bytes + grid_indices_bytes + cell_sizes_bytes)
     hot_working_set = morton_codes_bytes + levels_bytes
@@ -620,6 +847,14 @@ def main():
     print(f"    Hot working set:  {hot_working_set / 1e6:.1f} MB (codes + levels)")
     print(f"    Total octree:     {total_octree_bytes / 1e6:.1f} MB")
 
+    build_meta['octree_total_bytes'] = int(total_octree_bytes)
+    build_meta['octree_hot_set_bytes'] = int(hot_working_set)
+    build_meta['octree_csr_data_bytes'] = int(csr_data_bytes)
+    build_meta['octree_csr_offsets_bytes'] = int(csr_offsets_bytes)
+    build_meta['octree_morton_codes_bytes'] = int(morton_codes_bytes)
+    build_meta['octree_levels_bytes'] = int(levels_bytes)
+
+    build_times['stage3_total_build_upload'] = time.time() - t0
     print(f"  Done in {time.time() - t0:.1f}s")
 
     # ---- Filter seeding region ----
@@ -657,13 +892,19 @@ def main():
 
     perturbation_factors = args.perturbations
 
-    l2_methods = [
-        ('radius r=2',  'radius',  2),
-        ('radius r=10', 'radius', 10),
-        ('1x1x1',       '1x1x1', None),
-        ('3x3x3',       '3x3x3', None),
-        ('5x5x5',       '5x5x5', None),
-    ]
+    l2_methods = []
+    if use_vertex:
+        l2_methods += [
+            ('radius r=2',  'radius',  2),
+            ('radius r=10', 'radius', 10),
+            ('1x1x1',       '1x1x1', None),
+            ('3x3x3',       '3x3x3', None),
+            ('5x5x5',       '5x5x5', None),
+        ]
+    if use_parent_cube:
+        l2_methods += [
+            ('3x3x3^PC',    '3x3x3_pc', None),
+        ]
 
     rng = np.random.default_rng(args.seed)
 
@@ -700,6 +941,7 @@ def main():
     for method_name, method_type, radius in l2_methods:
         results[method_name] = {}
         print(f"  --- {method_name} ---")
+        nvtx_mark(f"method.start.{method_name}")
 
         for pf in perturbation_factors:
             positions, source_elems = particle_sets[pf]
@@ -708,19 +950,24 @@ def main():
 
             # Define search function
             if method_type == '1x1x1':
-                search_fn = lambda p: search_1x1x1_batch(p, octree_gpu, args.batch_size)
+                search_fn = lambda p: search_1x1x1_batch(p, octree_gpu_vertex, args.batch_size)
             elif method_type == '3x3x3':
-                search_fn = lambda p: search_3x3x3_batch(p, octree_gpu, args.batch_size)
+                search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_vertex, args.batch_size)
             elif method_type == '5x5x5':
-                search_fn = lambda p: search_5x5x5_batch(p, octree_gpu, args.batch_size)
+                search_fn = lambda p: search_5x5x5_batch(p, octree_gpu_vertex, args.batch_size)
+            elif method_type == '3x3x3_pc':
+                search_fn = lambda p: search_3x3x3_pc_batch(
+                    p, octree_gpu_pc, args.batch_size, config.MAX_ELEMS_PER_CELL
+                )
             elif method_type == 'radius':
                 _r = radius  # capture
                 search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
             else:
                 raise ValueError(method_type)
 
-            # Timed search
-            raw_result, times = timed_search(search_fn, positions_gpu, n_warmup, n_runs)
+            # Timed search (NVTX-wrapped so nsys can isolate per-method kernels)
+            with nvtx_range(f"timed_search.{method_name}.pf={pf}"):
+                raw_result, times = timed_search(search_fn, positions_gpu, n_warmup, n_runs)
 
             # Extract results
             if method_type == 'radius':
@@ -854,7 +1101,9 @@ def main():
     print("-" * 90)
     # Use first perturbation factor for the performance summary
     pf0 = perturbation_factors[0]
-    ref_time = np.mean(results['1x1x1'][pf0]['times'])
+    # Reference: 1x1x1 if available, otherwise first method
+    ref_method = '1x1x1' if '1x1x1' in results else l2_methods[0][0]
+    ref_time = np.mean(results[ref_method][pf0]['times'])
     for method_name, _, _ in l2_methods:
         r = results[method_name][pf0]
         t_mean = np.mean(r['times'])
@@ -863,6 +1112,116 @@ def main():
         rel = t_mean / ref_time if ref_time > 0 else 0
         pps_str = f"{pps:.0f}" if not np.isnan(pps) else "n/a"
         print(f"{method_name:<16s}  {qps:>12,.0f}  {pps_str:>14s}  {t_mean:>14.4f}  {rel:>7.2f}x")
+
+    # ========================================================================
+    # PREPROCESSING / BUILD STATISTICS (one-time cost amortisation)
+    # ========================================================================
+    print()
+    print("=" * 90)
+    print("PREPROCESSING / BUILD STATISTICS")
+    print("  One-time cost incurred before any query is issued.")
+    print("  Amortisation = build_time / (queries_per_sec * t_query) per query.")
+    print("=" * 90)
+
+    total_build = sum(build_times.values())
+    print(f"{'Stage':<40s}  {'Time (s)':>10s}  {'% of build':>12s}")
+    print("-" * 90)
+    for stage_name in [
+        'mesh_io_pvtu_load',
+        'mesh_node_deduplication',
+        'aa_metadata_precompute',
+        'inverse_matrices_precompute',
+        'octree_extract_vertex_multi',
+        'octree_upload_vertex_multi',
+        'octree_extract_parent_cube',
+        'octree_upload_parent_cube',
+        'morton_structure_build_upload',
+    ]:
+        if stage_name in build_times:
+            t_st = build_times[stage_name]
+            pct = 100.0 * t_st / total_build if total_build > 0 else 0.0
+            print(f"{stage_name:<40s}  {t_st:>10.3f}  {pct:>11.2f}%")
+    print("-" * 90)
+    print(f"{'TOTAL build (preprocessing + structures)':<40s}  {total_build:>10.3f}  {'100.00':>11s}%")
+
+    # Per-element / per-cell normalised costs
+    print()
+    print(f"  Mesh size: {build_meta.get('n_elements', 0):,} elements, "
+          f"{build_meta.get('n_nodes', 0):,} nodes")
+    if 'vertex_n_cells' in build_meta:
+        print(f"  Vertex-multi octree:  {build_meta['vertex_n_cells']:,} cells, "
+              f"{build_meta['vertex_mean_elem_per_cell']:.1f} elem/cell, "
+              f"{build_meta['vertex_mean_cells_per_elem']:.2f} cells/elem")
+    if 'pc_n_cells' in build_meta:
+        print(f"  Parent-cube octree:   {build_meta['pc_n_cells']:,} cells, "
+              f"{build_meta['pc_mean_elem_per_cell']:.1f} elem/cell "
+              f"(max {build_meta['pc_max_elem_per_cell']})")
+    print(f"  Octree GPU footprint: {build_meta.get('octree_total_bytes', 0)/1e6:.1f} MB total, "
+          f"{build_meta.get('octree_hot_set_bytes', 0)/1e6:.1f} MB hot working set")
+    print(f"  Inverse-matrix table: {build_meta.get('inv_matrices_bytes', 0)/1e6:.1f} MB")
+
+    # Amortisation: how many queries does it take to "pay back" the build?
+    pf0_amort = perturbation_factors[0]
+    print()
+    print(f"  Amortisation (queries needed to pay back build, using {pf0_amort:.1f}x perturb):")
+    print(f"  {'Method':<16s}  {'queries/s':>12s}  {'t_query (s)':>12s}  {'breakeven (queries)':>20s}")
+    print("  " + "-" * 86)
+    for method_name, _, _ in l2_methods:
+        r = results[method_name][pf0_amort]
+        qps = r['queries_per_sec']
+        t_q = 1.0 / qps if qps > 0 else float('inf')
+        # breakeven in queries: build_time / t_query
+        breakeven = total_build / t_q if t_q > 0 and t_q != float('inf') else float('inf')
+        print(f"  {method_name:<16s}  {qps:>12,.0f}  {t_q:>12.3e}  {breakeven:>20,.0f}")
+
+    # ========================================================================
+    # HLO COST ANALYSIS (FLOPs, bytes, arithmetic intensity, op counts)
+    # ========================================================================
+    if args.cost_analysis:
+        print()
+        print("=" * 90)
+        print("XLA HLO COST ANALYSIS (per batch of {:,} particles)".format(args.batch_size))
+        print("  flops/query and bytes/query are normalized by batch size.")
+        print("  Arithmetic intensity (AI) = FLOPs / bytes_accessed (FLOP/B).")
+        print("=" * 90)
+
+        # Build a single representative batch
+        pf0_ca = perturbation_factors[0]
+        pos_ca, _ = particle_sets[pf0_ca]
+        # Use exactly batch_size particles (pad/truncate)
+        bs = min(args.batch_size, pos_ca.shape[0])
+        sample_batch = jax.device_put(pos_ca[:bs].astype(config.FLOAT_DTYPE_NP))
+
+        cost_results = {}
+        for method_name, method_type, radius in l2_methods:
+            jit_fn = build_jit_for_method(
+                method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu, radius=radius
+            )
+            ca = hlo_cost_analysis(jit_fn, sample_batch)
+            cost_results[method_name] = ca
+
+        # NOTE: JAX 0.9 cost_analysis reports HLO-level flop counts that
+        # under-count unrolled inner loops and returns optimal_seconds=0,
+        # so we relabel the "flops" column as "HLO ops (flop-counted)"
+        # and drop the roofline-efficiency table. Bytes/query is reliable
+        # and is the primary memory-traffic signal reported in the paper.
+        header_ca = (f"{'Method':<16s}  {'Bytes/query':>14s}  "
+                     f"{'HLO flop-ops':>14s}  {'HLO ops':>9s}  {'fusions':>8s}")
+        print(header_ca)
+        print("-" * 75)
+        for method_name, _, _ in l2_methods:
+            ca = cost_results[method_name]
+            if ca is None:
+                print(f"{method_name:<16s}  {'n/a':>14s}  {'n/a':>14s}  {'n/a':>9s}  {'n/a':>8s}")
+                continue
+            flops_per_q = ca['flops'] / bs if bs > 0 else 0.0
+            bytes_per_q = ca['bytes_accessed'] / bs if bs > 0 else 0.0
+            print(f"{method_name:<16s}  {bytes_per_q:>14,.0f}  "
+                  f"{flops_per_q:>14,.0f}  {ca['n_hlo_ops']:>9,}  {ca['n_fusions']:>8,}")
+        print()
+        print("  Note: 'HLO flop-ops' is XLA's top-level HLO flop count and")
+        print("  undercounts unrolled inner loops; 'Bytes/query' is the reliable")
+        print("  device-memory traffic estimate used for efficiency comparisons.")
 
     # ========================================================================
     # LEVEL DISTRIBUTION (3×3×3 with stats)
@@ -877,8 +1236,10 @@ def main():
     positions_lvl, _ = particle_sets[pf_for_levels]
     positions_lvl_gpu = jax.device_put(positions_lvl.astype(config.FLOAT_DTYPE_NP))
 
+    # Use vertex octree for stats (has the with_stats variant); skip if not built
+    octree_for_stats = octree_gpu_vertex if octree_gpu_vertex is not None else octree_gpu_pc
     eids_lvl, tests_lvl, levels_lvl = search_3x3x3_with_stats_batch(
-        positions_lvl_gpu, octree_gpu, args.batch_size
+        positions_lvl_gpu, octree_for_stats, args.batch_size
     )
 
     found_mask_lvl = eids_lvl >= 0
@@ -927,13 +1288,19 @@ def main():
             print(f"  {pt:>12s}: generated {args.n_particles:,} particles")
         print()
 
-        intra_methods = [
-            ('radius r=2',  'radius',  2),
-            ('radius r=10', 'radius', 10),
-            ('1x1x1',       '1x1x1', None),
-            ('3x3x3',       '3x3x3', None),
-            ('5x5x5',       '5x5x5', None),
-        ]
+        intra_methods = []
+        if use_vertex:
+            intra_methods += [
+                ('radius r=2',  'radius',  2),
+                ('radius r=10', 'radius', 10),
+                ('1x1x1',       '1x1x1', None),
+                ('3x3x3',       '3x3x3', None),
+                ('5x5x5',       '5x5x5', None),
+            ]
+        if use_parent_cube:
+            intra_methods += [
+                ('3x3x3^PC',    '3x3x3_pc', None),
+            ]
 
         intra_results = {}
         for method_name, method_type, radius in intra_methods:
@@ -945,11 +1312,15 @@ def main():
                 positions_gpu = jax.device_put(positions.astype(config.FLOAT_DTYPE_NP))
 
                 if method_type == '1x1x1':
-                    search_fn = lambda p: search_1x1x1_batch(p, octree_gpu, args.batch_size)
+                    search_fn = lambda p: search_1x1x1_batch(p, octree_gpu_vertex, args.batch_size)
                 elif method_type == '3x3x3':
-                    search_fn = lambda p: search_3x3x3_batch(p, octree_gpu, args.batch_size)
+                    search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_vertex, args.batch_size)
                 elif method_type == '5x5x5':
-                    search_fn = lambda p: search_5x5x5_batch(p, octree_gpu, args.batch_size)
+                    search_fn = lambda p: search_5x5x5_batch(p, octree_gpu_vertex, args.batch_size)
+                elif method_type == '3x3x3_pc':
+                    search_fn = lambda p: search_3x3x3_pc_batch(
+                        p, octree_gpu_pc, args.batch_size, config.MAX_ELEMS_PER_CELL
+                    )
                 elif method_type == 'radius':
                     _r = radius
                     search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
@@ -1016,7 +1387,7 @@ def main():
     # ========================================================================
     # 1×1×1 FAILURE ANALYSIS
     # ========================================================================
-    if not args.skip_failure_analysis and not args.skip_intra:
+    if not args.skip_failure_analysis and not args.skip_intra and use_vertex:
         if '1x1x1' in intra_results and '3x3x3' in intra_results:
             print()
             print("=" * 90)
@@ -1030,8 +1401,8 @@ def main():
             positions_ana, source_elems_ana = intra_sets[analysis_pt]
 
             positions_gpu_ana = jax.device_put(positions_ana.astype(config.FLOAT_DTYPE_NP))
-            eids_1x1, _ = search_1x1x1_batch(positions_gpu_ana, octree_gpu, args.batch_size)
-            eids_3x3, _ = search_3x3x3_batch(positions_gpu_ana, octree_gpu, args.batch_size)
+            eids_1x1, _ = search_1x1x1_batch(positions_gpu_ana, octree_gpu_vertex, args.batch_size)
+            eids_3x3, _ = search_3x3x3_batch(positions_gpu_ana, octree_gpu_vertex, args.batch_size)
 
             missed_by_1x1 = (eids_1x1 < 0) & (eids_3x3 >= 0)
             n_missed = int(missed_by_1x1.sum())
@@ -1187,8 +1558,12 @@ def main():
             # Search with timing
             batch_sz = min(args.batch_size, n_p)
 
-            def search_fn(p, _bs=batch_sz):
-                return search_3x3x3_batch(p, octree_gpu, _bs)
+            if use_parent_cube:
+                def search_fn(p, _bs=batch_sz):
+                    return search_3x3x3_pc_batch(p, octree_gpu_pc, _bs, config.MAX_ELEMS_PER_CELL)
+            else:
+                def search_fn(p, _bs=batch_sz):
+                    return search_3x3x3_batch(p, octree_gpu_vertex, _bs)
 
             raw_result, times = timed_search(search_fn, positions_s_gpu, n_warmup, n_runs)
 

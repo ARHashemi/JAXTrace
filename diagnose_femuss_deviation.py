@@ -66,6 +66,7 @@ from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
+from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.tracking.initial_assignment_cascading import (
     initial_assignment_mesh_aligned_multi_local,
@@ -190,6 +191,14 @@ def parse_args():
     # --- L1/L2 ---
     parser.add_argument("--l1-method", type=str, default="face", choices=["face", "node"])
     parser.add_argument("--l2-neighborhood", type=int, default=3, choices=[3, 5])
+    # --- Registration / RK4 mode ---
+    parser.add_argument(
+        "--registration", type=str, default=None,
+        choices=["vertex_multi", "parent_cube"],
+        help="Override octree registration method (default: use config value)",
+    )
+    parser.add_argument("--rk4-mode", type=str, default="fused", choices=["fused", "split"])
+    parser.add_argument("--l2-vectorized", action="store_true", default=False)
     # --- Pin velocity ---
     parser.add_argument("--pin-velocity", action="store_true", default=True)
     parser.add_argument("--no-pin-velocity", action="store_true", default=False)
@@ -346,6 +355,9 @@ def main():
     L0_SKIP_BAND = args.l0_skip_band
     ENHANCED_SEARCH_BAND = args.enhanced_search_band
 
+    if args.registration is not None:
+        config.OCTREE_REGISTRATION_METHOD = args.registration
+
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
 
     # Output directory
@@ -480,10 +492,17 @@ def main():
         connectivity=connectivity,
         leaf_capacity=256, max_depth=21, verbose=False
     )
-    mesh_octree_cells_multi = extract_octree_cells_vertex_multi(
-        node_positions, connectivity, tolerance=1e-6, verbose=False
-    )
-    print(f"  Multi-cell octree: {mesh_octree_cells_multi.n_cells:,} cells")
+    if config.OCTREE_REGISTRATION_METHOD == "parent_cube":
+        mesh_octree_cells_multi = extract_octree_cells_parent_cube(
+            node_positions, connectivity, tolerance=1e-6, verbose=True
+        )
+        print(f"  Parent-cube octree: {mesh_octree_cells_multi.n_cells:,} cells, "
+              f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell")
+    else:
+        mesh_octree_cells_multi = extract_octree_cells_vertex_multi(
+            node_positions, connectivity, tolerance=1e-6, verbose=False
+        )
+        print(f"  Vertex-multi octree: {mesh_octree_cells_multi.n_cells:,} cells")
 
     element_neighbors_face = build_element_neighbors_array(connectivity, method='face', verbose=False)
     use_enhanced_band = (ENHANCED_SEARCH_BAND > 0 and levelset_cpu is not None)
@@ -642,6 +661,8 @@ def main():
         interpolation_method=getattr(args, 'interpolation_method', 'direct_inverse'),
         M_inv_gpu=M_inv_gpu,
         p0_gpu=p0_gpu,
+        rk4_mode=args.rk4_mode,
+        use_l2_vectorized=args.l2_vectorized,
     )
 
     # Warmup/compile

@@ -296,6 +296,11 @@ def parse_args():
         help="Use vectorized L2 (gather+parallel PIT) instead of fori_loop. "
              "Only active inside 'fused' mode. Experimental.",
     )
+    parser.add_argument(
+        "--registration", type=str, default=None,
+        choices=["vertex_multi", "parent_cube"],
+        help="Override octree registration method (default: use config value)",
+    )
     return parser.parse_args()
 
 
@@ -1367,6 +1372,10 @@ def main():
     ENHANCED_SEARCH_BAND = args.enhanced_search_band
     RK4_MODE = args.rk4_mode
     L2_VECTORIZED = args.l2_vectorized
+
+    # Override registration method if specified
+    if args.registration is not None:
+        config.OCTREE_REGISTRATION_METHOD = args.registration
 
     # Resolve pin velocity flag
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
