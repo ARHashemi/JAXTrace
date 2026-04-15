@@ -53,11 +53,21 @@ def load_mesh_from_pvtu(
 
     print(f"Loading mesh: {mesh_file}")
 
+    # Fail early and clearly if the file is missing rather than letting VTK
+    # return a null output that crashes later with 'NoneType has no GetData'.
+    if not Path(mesh_file).exists():
+        raise FileNotFoundError(f"PVTU file not found: {mesh_file}")
+
     # Load with VTK
     reader = vtk.vtkXMLPUnstructuredGridReader()
     reader.SetFileName(str(mesh_file))
     reader.Update()
     output = reader.GetOutput()
+    if output is None or output.GetPoints() is None:
+        raise RuntimeError(
+            f"VTK failed to read {mesh_file}: got empty output. "
+            f"Check that the file and its linked .vtu pieces are present and readable."
+        )
 
     # Extract positions
     positions = numpy_support.vtk_to_numpy(output.GetPoints().GetData())
