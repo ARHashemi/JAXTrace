@@ -38,8 +38,9 @@ python run_tracking.py \\
 from __future__ import annotations
 
 import os
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# Use setdefault so the caller (e.g. run_lumi.sh BENCHMARK_MODE) can override.
+os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')
+os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
 os.environ.setdefault('JAX_PLATFORMS', 'cuda,rocm,cpu')
 
 import sys

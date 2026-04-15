@@ -85,6 +85,18 @@ PIN_TILT=0.0
 N_GROUPS=5                    # 0 disables group export
 EXPORT_ELEMENT_IDS=0          # 1 = include ElementID field
 
+# ── [10] Performance / benchmark tuning ──────────────────────────────────────
+# BENCHMARK_MODE=1: disables the background monitor and flips XLA to
+# preallocating allocator (faster but reserves ~75% of HBM up-front).
+# Use for pure timing runs; leave 0 for normal production.
+BENCHMARK_MODE=0
+# XLA_PREALLOC=1 forces XLA_PYTHON_CLIENT_PREALLOCATE=true regardless of mode.
+# 0 keeps the on-demand allocator (safer; matches validated runs).
+XLA_PREALLOC=0
+# Background monitor interval (seconds). Set high (e.g. 300) or 0 to disable
+# in production mode. BENCHMARK_MODE=1 forces monitor off regardless.
+MONITOR_INTERVAL=30
+
 # =============================================================================
 # END USER CONFIGURATION — below this line is infrastructure.
 # =============================================================================
@@ -105,35 +117,48 @@ mkdir -p $MIOPEN_USER_DB_PATH
 export JAX_PLATFORMS=rocm
 export ROCR_VISIBLE_DEVICES=0
 export XLA_FLAGS="--xla_gpu_autotune_level=4 --xla_gpu_enable_latency_hiding_scheduler=true"
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
-export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+# Memory allocator: default = on-demand (platform). BENCHMARK_MODE or
+# XLA_PREALLOC=1 switches to pooled preallocation (faster kernel launches,
+# but reserves ~75% HBM up-front and can OOM if HBM is shared).
+if [ "$BENCHMARK_MODE" = "1" ] || [ "$XLA_PREALLOC" = "1" ]; then
+  export XLA_PYTHON_CLIENT_PREALLOCATE=true
+  unset  XLA_PYTHON_CLIENT_ALLOCATOR
+  echo "[perf] XLA preallocating allocator ENABLED"
+else
+  export XLA_PYTHON_CLIENT_PREALLOCATE=false
+  export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+fi
 export MIOPEN_FIND_MODE=1
 export TF_CPP_MIN_LOG_LEVEL=2
+# HSA SDMA: leaving disabled (validated on MI250X; enable via local edit to test).
 export HSA_ENABLE_SDMA=0
 
 # ── GPU & Memory Monitor (background) ───────────────────────────────────────
-(
-  echo "=== GPU & Memory Monitor === Job $SLURM_JOB_ID === $(date) ==="
-  echo ""
-  while true; do
-    echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
-    if command -v rocm-smi &>/dev/null; then
-      rocm-smi --showuse --showmemuse --showtemp 2>/dev/null | grep -E 'GPU|%|MiB|Temperature' || \
-      rocm-smi 2>/dev/null | tail -n +3
-    fi
+# BENCHMARK_MODE disables the monitor entirely. Otherwise the monitor logs
+# rocm-smi + free at $MONITOR_INTERVAL seconds. We deliberately do NOT run
+# find / du on the output dir every tick -- that becomes O(N) per tick with
+# many VTU files and hurts timing on large runs.
+MONITOR_PID=""
+if [ "$BENCHMARK_MODE" != "1" ] && [ "$MONITOR_INTERVAL" -gt 0 ] 2>/dev/null; then
+  (
+    echo "=== GPU & Memory Monitor === Job $SLURM_JOB_ID === $(date) ==="
+    echo "Interval: ${MONITOR_INTERVAL}s"
     echo ""
-    free -h | head -2
-    echo ""
-    if [ -d "$FLASH_OUT" ]; then
-      N_VTU=$(find $FLASH_OUT -name '*.vtu' 2>/dev/null | wc -l)
-      DISK_USAGE=$(du -sh $FLASH_OUT 2>/dev/null | cut -f1)
-      echo "Output: $N_VTU VTU files, $DISK_USAGE on flash"
-    fi
-    echo ""
-    sleep 30
-  done
-) > $MONITOR_LOG 2>&1 &
-MONITOR_PID=$!
+    while true; do
+      echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
+      if command -v rocm-smi &>/dev/null; then
+        rocm-smi --showuse --showmemuse --showtemp 2>/dev/null \
+          | grep -E 'GPU|%|MiB|Temperature' \
+          || rocm-smi 2>/dev/null | tail -n +3
+      fi
+      echo ""
+      free -h | head -2
+      echo ""
+      sleep "$MONITOR_INTERVAL"
+    done
+  ) > $MONITOR_LOG 2>&1 &
+  MONITOR_PID=$!
+fi
 
 # ── Build CLI argument list from user config ────────────────────────────────
 ARGS=(
@@ -201,6 +226,12 @@ echo "Seed source: $SEED_SOURCE"
 echo "CLI args:    ${ARGS[*]}"
 echo ""
 
+# Only forward XLA_PYTHON_CLIENT_ALLOCATOR when it is set (prealloc mode unsets it).
+ALLOC_ENV=()
+if [ -n "${XLA_PYTHON_CLIENT_ALLOCATOR:-}" ]; then
+  ALLOC_ENV=( --env "XLA_PYTHON_CLIENT_ALLOCATOR=$XLA_PYTHON_CLIENT_ALLOCATOR" )
+fi
+
 srun --gpus-per-task=1 \
   singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
@@ -208,7 +239,7 @@ srun --gpus-per-task=1 \
   --env ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES \
   --env XLA_FLAGS="$XLA_FLAGS" \
   --env XLA_PYTHON_CLIENT_PREALLOCATE=$XLA_PYTHON_CLIENT_PREALLOCATE \
-  --env XLA_PYTHON_CLIENT_ALLOCATOR=$XLA_PYTHON_CLIENT_ALLOCATOR \
+  "${ALLOC_ENV[@]}" \
   --env MIOPEN_USER_DB_PATH=$MIOPEN_USER_DB_PATH \
   --env MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_CUSTOM_CACHE_DIR \
   --env MIOPEN_FIND_MODE=$MIOPEN_FIND_MODE \
@@ -220,8 +251,10 @@ srun --gpus-per-task=1 \
 SIM_EXIT=$?
 
 # ── Stop monitor ─────────────────────────────────────────────────────────────
-kill $MONITOR_PID 2>/dev/null
-wait $MONITOR_PID 2>/dev/null
+if [ -n "$MONITOR_PID" ]; then
+  kill $MONITOR_PID 2>/dev/null
+  wait $MONITOR_PID 2>/dev/null
+fi
 
 echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
