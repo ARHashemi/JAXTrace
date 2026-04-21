@@ -138,6 +138,10 @@ def parse_args():
                              "(default: auto '<case>_{timestep}.pvtu').")
     parser.add_argument("--femuss-subdir", type=str, default="1part",
                         help="Subdirectory under --input containing FEMUSS particle PVTU files")
+    parser.add_argument("--mesh-dir", type=Path, default=None,
+                        help="Direct path to mesh PVTU folder, bypassing --input/--mesh-subdir")
+    parser.add_argument("--femuss-dir", type=Path, default=None,
+                        help="Direct path to FEMUSS particle PVTU folder, bypassing --input/--femuss-subdir")
     parser.add_argument("--femuss-pattern", type=str, default=None,
                         help="Override FEMUSS particle PVTU pattern with {timestep} placeholder "
                              "(default: auto '<case>_pt_{timestep}.pvtu').")
@@ -287,7 +291,7 @@ def parse_args():
 
 def seed_from_femuss(args):
     """Load particle positions from a FEMUSS PVTU file."""
-    femuss_dir = args.input / args.femuss_subdir
+    femuss_dir = args._femuss_dir
     start_file = femuss_dir / args.femuss_pattern.format(timestep=args.femuss_start)
     if not start_file.exists():
         raise FileNotFoundError(f"FEMUSS seed file not found: {start_file}")
@@ -384,6 +388,13 @@ def _resolve_case_paths(args):
         args.femuss_pattern = f"{stem}_pt_{{timestep}}.pvtu"
 
     args.input = post_dir
+
+    # Resolve mesh / FEMUSS directories: direct override or standard layout
+    args._mesh_dir = (Path(args.mesh_dir).resolve() if args.mesh_dir
+                      else post_dir / args.mesh_subdir)
+    args._femuss_dir = (Path(args.femuss_dir).resolve() if args.femuss_dir
+                        else post_dir / args.femuss_subdir)
+
     return stem
 
 
@@ -391,11 +402,12 @@ def main():
     args = parse_args()
     case_stem = _resolve_case_paths(args)
     print(f"[case] stem='{case_stem}'  post_dir={args.input}")
+    print(f"[case] mesh_dir='{args._mesh_dir}'  femuss_dir='{args._femuss_dir}'")
     print(f"[case] mesh_pattern='{args.mesh_pattern}'  "
           f"femuss_pattern='{args.femuss_pattern}'")
 
     # Paths / params
-    MESH_BASE_PATH = args.input / args.mesh_subdir
+    MESH_BASE_PATH = args._mesh_dir
     VELOCITY_TIMESTEP_RANGE = tuple(args.vel_range)
     N_STEPS = args.n_steps
     DT = args.dt
@@ -880,7 +892,7 @@ def main():
     # ==================================================================
     if args.femuss_compare and femuss_start_data is not None:
         femuss_end_step = args.femuss_start + N_STEPS
-        femuss_dir = args.input / args.femuss_subdir
+        femuss_dir = args._femuss_dir
         end_file = femuss_dir / args.femuss_pattern.format(timestep=femuss_end_step)
         if end_file.exists():
             print(f"\n  Loading FEMUSS end-state: {end_file}")

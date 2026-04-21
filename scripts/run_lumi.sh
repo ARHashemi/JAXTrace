@@ -22,12 +22,17 @@ JAXTRACE=/project/project_465002752/hashemia/JAXTrace_stable
 PKGS=/project/project_465002752/hashemia/required-packages
 # INPUT: point at the FEMUSS case folder. Either '<case>.gid' or '<case>.gid/post'.
 # Mesh / particle file patterns auto-derive from the '<case>.gid' stem.
+# To override completely, set MESH_DIR and/or FEMUSS_DIR below.
 INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid
 MESH_SUBDIR=0eule             # subfolder under post/ with mesh PVTU
 FEMUSS_SUBDIR=1part           # subfolder under post/ with FEMUSS particles
 CASE_STEM=""                  # override auto-detected case stem (empty = auto)
 MESH_PATTERN=""               # override, e.g. "cylA_{timestep}.pvtu"  (empty = auto)
 FEMUSS_PATTERN=""             # override, e.g. "cylA_pt_{timestep}.pvtu" (empty = auto)
+# Direct path overrides — bypass INPUT/<case>.gid/post/<subdir> convention entirely.
+# When set, MESH_SUBDIR / FEMUSS_SUBDIR are ignored for the corresponding path.
+MESH_DIR=""                   # e.g. "/scratch/.../my_mesh_files"
+FEMUSS_DIR=""                 # e.g. "/scratch/.../my_particle_files"
 RUN_TAG=""                    # optional custom subfolder; empty = auto
 
 # ── [2] Precision & velocity field ───────────────────────────────────────────
@@ -101,10 +106,26 @@ MONITOR_INTERVAL=30
 # END USER CONFIGURATION — below this line is infrastructure.
 # =============================================================================
 
+# ── Derive case name (needed for default output folder) ─────────────────────
+if [ -n "$CASE_STEM" ]; then
+  _CASE="$CASE_STEM"
+else
+  _CASE=$(basename "$INPUT" .gid)
+  _CASE=$(basename "$_CASE" /post)   # strip trailing /post if present
+fi
+
 # ── Output paths (flash for active IO, scratch for long-term) ───────────────
 FLASH_OUT=/flash/project_465002752/hashemia/run_$SLURM_JOB_ID
-SCRATCH_OUT=/scratch/project_465002752/hashemia/outputs/run_$SLURM_JOB_ID
-MONITOR_LOG=/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_monitor.log
+# SCRATCH_BASE: parent directory on scratch where the results folder is created.
+SCRATCH_BASE=/scratch/project_465002752/hashemia/outputs
+# SCRATCH_FOLDER: name of the results folder inside SCRATCH_BASE.
+# Default: <case>_jaxtrace_<jobid>. Override to use a custom name.
+SCRATCH_FOLDER=""             # empty = auto: "${_CASE}_jaxtrace_${SLURM_JOB_ID}"
+if [ -z "$SCRATCH_FOLDER" ]; then
+  SCRATCH_FOLDER="${_CASE}_jaxtrace_${SLURM_JOB_ID}"
+fi
+SCRATCH_OUT="${SCRATCH_BASE}/${SCRATCH_FOLDER}"
+MONITOR_LOG="${SCRATCH_BASE}/${SCRATCH_FOLDER}_monitor.log"
 
 mkdir -p $FLASH_OUT $SCRATCH_OUT
 
@@ -197,6 +218,8 @@ ARGS=(
 [ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
 [ -n "$MESH_PATTERN" ]    && ARGS+=( --mesh-pattern "$MESH_PATTERN" )
 [ -n "$FEMUSS_PATTERN" ]  && ARGS+=( --femuss-pattern "$FEMUSS_PATTERN" )
+[ -n "$MESH_DIR" ]        && ARGS+=( --mesh-dir "$MESH_DIR" )
+[ -n "$FEMUSS_DIR" ]      && ARGS+=( --femuss-dir "$FEMUSS_DIR" )
 [ -n "$RUN_TAG" ]         && ARGS+=( --run-tag "$RUN_TAG" )
 [ -n "$BOUNDARY_WALLS" ]  && ARGS+=( --boundary-walls "$BOUNDARY_WALLS" )
 [ -n "$REGISTRATION" ]    && ARGS+=( --registration "$REGISTRATION" )
@@ -260,7 +283,17 @@ echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
 
 # ── Move results to Scratch after job ───────────────────────────────────────
-echo "Moving results to scratch..."
+echo "Moving results from flash to scratch..."
 mv $FLASH_OUT/* $SCRATCH_OUT/ 2>/dev/null
 rmdir $FLASH_OUT 2>/dev/null
-echo "Done. Results in $SCRATCH_OUT"
+
+# Copy SLURM stdout/stderr and monitor log into the results folder
+SLURM_OUT="/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+SLURM_ERR="/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err"
+mkdir -p "$SCRATCH_OUT/logs"
+[ -f "$SLURM_OUT" ]   && cp "$SLURM_OUT" "$SCRATCH_OUT/logs/"
+[ -f "$SLURM_ERR" ]   && cp "$SLURM_ERR" "$SCRATCH_OUT/logs/"
+[ -f "$MONITOR_LOG" ] && mv "$MONITOR_LOG" "$SCRATCH_OUT/logs/"
+
+echo "Done. All results, logs and monitoring in:"
+echo "  $SCRATCH_OUT"
