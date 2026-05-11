@@ -50,12 +50,26 @@ EXPORT_FREQ=1                 # every N steps; set 0 with NO_EXPORT=1 to disable
 NO_EXPORT=0                   # 1 = disable all VTU output (timing run)
 
 # ── [4] Particle seeding ─────────────────────────────────────────────────────
-# SEED_SOURCE: femuss | box | file
+# SEED_SOURCE: femuss | box | grid | box-frac | grid-frac | file
+#   femuss     — load initial positions from a FEMUSS particle PVTU
+#   box        — uniform random inside an absolute box (SEED_BOX, N_PARTICLES)
+#   grid       — uniform grid inside an absolute box (SEED_BOX, SEED_GRID)
+#   box-frac   — uniform random inside a fractional sub-box of the mesh bbox
+#                (SEED_FRACTION, N_PARTICLES)
+#   grid-frac  — uniform grid inside a fractional sub-box of the mesh bbox
+#                (SEED_FRACTION, SEED_GRID)
+#   file       — load positions from a .npy / .npz (SEED_FILE)
 SEED_SOURCE=femuss
 FEMUSS_START=0                # used when SEED_SOURCE=femuss
-# Box seeding (used when SEED_SOURCE=box). Order: XMIN XMAX YMIN YMAX ZMIN ZMAX
+# Absolute box bounds (used by box / grid). Order: XMIN XMAX YMIN YMAX ZMIN ZMAX
 SEED_BOX="-0.01 0.01 -0.01 0.01 0.0 0.002"
-N_PARTICLES=100000            # used when SEED_SOURCE=box
+# Per-axis fractions of the mesh bbox (used by box-frac / grid-frac).
+# Order: XLO XHI YLO YHI ZLO ZHI, each in [0, 1] with lo < hi.
+# Example: "0.0 0.2 0.0 1.0 0.0 1.0" = first 20% of X, full Y/Z.
+SEED_FRACTION="0.0 0.2 0.0 1.0 0.0 1.0"
+# Grid resolution (used by grid / grid-frac). Particle count = NX*NY*NZ.
+SEED_GRID="50 70 30"
+N_PARTICLES=100000            # used by box / box-frac (ignored by grid modes)
 SEED_FILE=""                  # used when SEED_SOURCE=file
 SEED=42
 
@@ -236,8 +250,21 @@ case "$SEED_SOURCE" in
   box)
     ARGS+=( --seed-box $SEED_BOX --n-particles "$N_PARTICLES" )
     ;;
+  grid)
+    ARGS+=( --seed-box $SEED_BOX --seed-grid $SEED_GRID )
+    ;;
+  box-frac)
+    ARGS+=( --seed-fraction $SEED_FRACTION --n-particles "$N_PARTICLES" )
+    ;;
+  grid-frac)
+    ARGS+=( --seed-fraction $SEED_FRACTION --seed-grid $SEED_GRID )
+    ;;
   file)
     ARGS+=( --seed-file "$SEED_FILE" )
+    ;;
+  *)
+    echo "ERROR: unknown SEED_SOURCE='$SEED_SOURCE' (expected femuss|box|grid|box-frac|grid-frac|file)" >&2
+    exit 2
     ;;
 esac
 
