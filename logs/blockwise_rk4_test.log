@@ -1,8 +1,0 @@
-/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
-  from .hdf5_io import H5Series
-✅ Enhanced VTK I/O available
-✅ HDF5 I/O available
-Traceback (most recent call last):
-  File "/home/arhashemi/Workspace/welding/JAXTrace/test_blockwise_rk4.py", line 22, in <module>
-    from jaxtrace.mesh import load_mesh
-ModuleNotFoundError: No module named 'jaxtrace.mesh'

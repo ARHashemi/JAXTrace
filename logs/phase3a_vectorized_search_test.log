@@ -1,2 +1,0 @@
-/home/arhashemi/Workspace/welding/JAXTrace/jaxtrace/io/registry.py:41: UserWarning: h5py not available. HDF5 I/O will be disabled
-  from .hdf5_io import H5Series

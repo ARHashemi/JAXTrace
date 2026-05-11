@@ -1,1 +1,0 @@
-{"caption": "Fig A \u2013 Morton (Z-order) curve threading triangle centroids on a 2-D mesh with a refined region (red dashed box). Yellow dots are sorted centroids; orange labels show Morton codes.", "description": "2D triangulated mesh with coarse and refined regions. The Morton curve traverses all triangle centroids in Z-order, illustrated by a dotted yellow line."}
