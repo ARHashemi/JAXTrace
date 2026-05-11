@@ -87,8 +87,17 @@ ENHANCED_SEARCH_BAND=0.0
 REGISTRATION=""
 
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
-BOUNDARY_WALLS="x_max=outlet,y_min=outlet"
-BOUNDARY_PROJ_TOL=1e-6
+# Per-wall semantics for BOUNDARY_WALLS (comma-separated "wall=mode" pairs):
+#   <wall>=clamp   particles are pulled back inside (default for every wall)
+#   <wall>=outlet  the wall does NOT clamp; particles pass through and are
+#                  treated as escaped (their element_id becomes -1)
+# Any wall not listed uses the default 'clamp'. To clamp every wall, set "".
+#
+# Default for this case: only x_max is an outlet; everything else clamps,
+# including z_max (so particles leaving through the top get projected back
+# inside via the boundary-projection mechanism).
+BOUNDARY_WALLS="x_max=outlet"
+BOUNDARY_PROJ_TOL=1e-6                  # inward tolerance for boundary projection
 POINT_IN_TET_TOL=1e-6
 LEVELSET_MODE=zero_vel     # zero_vel | skip_step
 FAILED_SUBSTAGE=zero_vel   # zero_vel | last_valid_vel | skip_step
@@ -104,6 +113,14 @@ PIN_TILT=0.0
 # ── [9] VTU export options ────────────────────────────────────────────────────
 N_GROUPS=5
 EXPORT_ELEMENT_IDS=0       # 1 = include ElementID field
+EXPORT_ESCAPED_FLAG=0      # 1 = add 'Escaped' (0/1) per-particle flag set
+                           # when element_id<0 at any step; useful as a
+                           # Paraview Threshold filter to remove escapees
+TRACK_MAX_TEMPERATURE=0    # 1 = track per-particle max of TEMPERATURE_FIELD
+                           # over the trajectory (exported as 'MaxTemperature').
+                           # Adds ~1-3% per RK4 step and ~1.3 GB GPU memory
+                           # for the extra (n_timesteps, n_nodes) scalar stack.
+TEMPERATURE_FIELD=Temperature  # PVTU field name when TRACK_MAX_TEMPERATURE=1
 
 # ── [10] JAX memory & performance ────────────────────────────────────────────
 #
@@ -272,6 +289,8 @@ ARGS=(
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
 [ "$NO_EXPORT"          = "1" ] && ARGS+=( --no-export           )
 [ "$EXPORT_ELEMENT_IDS" = "1" ] && ARGS+=( --export-element-ids  )
+[ "$EXPORT_ESCAPED_FLAG" = "1" ] && ARGS+=( --export-escaped-flag )
+[ "$TRACK_MAX_TEMPERATURE" = "1" ] && ARGS+=( --track-max-temperature --temperature-field "$TEMPERATURE_FIELD" )
 [ "$PIN_VELOCITY"       = "0" ] && ARGS+=( --no-pin-velocity      )
 
 case "$SEED_SOURCE" in
