@@ -10,7 +10,7 @@ solutions: given a sequence of node-centred velocity snapshots on the
 same mesh, integrate large batches of passive tracers through the
 domain.
 
-[![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE)
+[![License: EUPL-1.2 with Additional Terms](https://img.shields.io/badge/license-EUPL--1.2%20with%20Additional%20Terms-blue.svg)](LICENSE)
 
 ---
 
@@ -177,7 +177,7 @@ argument and validation.
 
 ## License
 
-EUPL-1.2 — see [LICENSE](LICENSE).
+EUPL-1.2 (with Additional Terms) — see [LICENSE](LICENSE).
 
 ---
 
