@@ -102,7 +102,10 @@ from benchmark_femuss_comparison import (
     POINT_IN_TET_METHOD,
 )
 
-from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
+from jaxtrace.gpu.mesh_loader_timedep import (
+    load_velocity_sequence_from_pvtu,
+    load_scalar_sequence_from_pvtu,
+)
 from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes
 from jaxtrace.gpu.tracking.mesh_data_gpu import upload_mesh_to_gpu
 from jaxtrace.gpu.forest import build_element_neighbors_array
@@ -245,6 +248,21 @@ def parse_args():
                         help="Disable particle group export")
     parser.add_argument("--no-export", action="store_true", default=False,
                         help="Disable all VTU export (timing/statistics only)")
+    parser.add_argument("--export-escaped-flag", action="store_true", default=False,
+                        help="Add a per-particle 'Escaped' UInt8 field (0/1) to VTU output: "
+                             "1 if the particle has ever had element_id<0 (escaped the domain "
+                             "at any point during its trajectory). Use this in Paraview's "
+                             "Threshold filter to remove escaped particles.")
+    parser.add_argument("--track-max-temperature", action="store_true", default=False,
+                        help="Track the maximum value of the temperature field experienced "
+                             "by each particle over its trajectory and export as 'MaxTemperature'. "
+                             "Default off. Requires the temperature field to be present in the "
+                             "PVTU files (name set by --temperature-field). Loads an extra "
+                             "(n_timesteps, n_nodes) scalar stack on GPU; per-step overhead is "
+                             "one scalar P1 interpolation per particle (~1-3%% of RK4 step).")
+    parser.add_argument("--temperature-field", type=str, default="Temperature",
+                        help="Name of the per-node temperature field in PVTU files "
+                             "(used only when --track-max-temperature is set).")
 
     # --- Tolerances ---
     parser.add_argument("--point-in-tet-tol", type=float, default=1e-6,
@@ -634,10 +652,30 @@ def main():
     )
     print(f"  Elements: {connectivity.shape[0]:,}, Nodes: {node_positions.shape[0]:,}")
 
+    # Optional: load temperature sequence (for --track-max-temperature)
+    temperature_sequence = None
+    if args.track_max_temperature:
+        print(f"  Loading temperature field '{args.temperature_field}'...")
+        temperature_sequence = load_scalar_sequence_from_pvtu(
+            base_path=MESH_BASE_PATH,
+            file_pattern=args.mesh_pattern,
+            timestep_range=VELOCITY_TIMESTEP_RANGE,
+            field_name=args.temperature_field,
+            verbose=False,
+        )
+        print(f"    Temperature: {temperature_sequence.shape}  "
+              f"({temperature_sequence.nbytes / (1024**2):.1f} MB)")
+
     print("  Deduplicating...")
+    scalar_seqs = {'Temperature': temperature_sequence} if temperature_sequence is not None else None
     node_positions, connectivity, n_dup, velocity_sequence = deduplicate_nodes(
-        node_positions, connectivity, velocity_sequence=velocity_sequence, verbose=False
+        node_positions, connectivity,
+        velocity_sequence=velocity_sequence,
+        scalar_sequences=scalar_seqs,
+        verbose=False,
     )
+    if scalar_seqs is not None:
+        temperature_sequence = scalar_seqs['Temperature']
     connectivity = connectivity.astype(np.int32)
     print(f"  Removed {n_dup:,} duplicates -> {node_positions.shape[0]:,} nodes")
 
@@ -785,6 +823,14 @@ def main():
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
 
     velocity_sequence_gpu = jax.device_put(velocity_sequence)
+
+    # Optional temperature stack (one extra (n_timesteps, n_nodes) scalar field).
+    temperature_sequence_gpu = None
+    if temperature_sequence is not None:
+        temperature_sequence_gpu = jax.device_put(temperature_sequence)
+        print(f"  Temperature stack on GPU: {temperature_sequence.shape}  "
+              f"({temperature_sequence.nbytes / (1024**2):.1f} MB)")
+
     mesh_bbox_min_gpu = jax.device_put(mesh_bbox_min_cpu)
     mesh_bbox_max_gpu = jax.device_put(mesh_bbox_max_cpu)
     levelset_gpu = jax.device_put(levelset_cpu) if levelset_cpu is not None else None
@@ -892,6 +938,59 @@ def main():
     print(f"  Compilation: {stage_times['6_compile']:.1f}s")
     stage_times['6_build_rk4'] = time.time() - t_stage
 
+    # Build the per-step max-temperature update kernel (only when requested).
+    # The host element id and the new position from rk4_step are already known,
+    # so this is a single P1 scalar interpolation per particle — no fresh
+    # spatial search. Compiles once, runs each step.
+    update_max_temperature = None
+    if args.track_max_temperature:
+        conn_gpu = jax.device_put(connectivity)
+        node_pos_gpu = jax.device_put(node_positions.astype(config.FLOAT_DTYPE_NP))
+
+        @jax.jit
+        def update_max_temperature(positions, element_ids, time_idx, max_so_far):
+            """For each particle, P1-interpolate temperature at the new position
+            in the cyclically-indexed temperature field, then take the elementwise
+            max against the running maximum. Particles with element_id<0 are
+            skipped (their max_so_far is unchanged)."""
+            n_t = temperature_sequence_gpu.shape[0]
+            T_field = temperature_sequence_gpu[time_idx % n_t]    # (n_nodes,)
+
+            def per_particle(pos, eid, prev_max):
+                valid = (eid >= 0) & (eid < conn_gpu.shape[0])
+                safe_eid = jnp.where(valid, eid, 0)
+                nodes_idx = conn_gpu[safe_eid]                    # (4,)
+                nodes = node_pos_gpu[nodes_idx]                   # (4, 3)
+                node_T = T_field[nodes_idx]                       # (4,)
+
+                # Barycentric weights from the tet's local frame.
+                v0 = nodes[1] - nodes[0]
+                v1 = nodes[2] - nodes[0]
+                v2 = nodes[3] - nodes[0]
+                vp = pos - nodes[0]
+                d00 = jnp.dot(v0, v0); d01 = jnp.dot(v0, v1); d02 = jnp.dot(v0, v2)
+                d11 = jnp.dot(v1, v1); d12 = jnp.dot(v1, v2); d22 = jnp.dot(v2, v2)
+                dp0 = jnp.dot(vp, v0); dp1 = jnp.dot(vp, v1); dp2 = jnp.dot(vp, v2)
+                det = (d00 * (d11*d22 - d12*d12)
+                       - d01 * (d01*d22 - d02*d12)
+                       + d02 * (d01*d12 - d02*d11))
+                det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN,
+                                config.INTERPOLATION_DET_MIN, det)
+                b1 = (dp0*(d11*d22 - d12*d12) - d01*(dp1*d22 - dp2*d12)
+                      + d02*(dp1*d12 - dp2*d11)) / det
+                b2 = (d00*(dp1*d22 - dp2*d12) - dp0*(d01*d22 - d02*d12)
+                      + d02*(d01*dp2 - d02*dp1)) / det
+                b3 = (d00*(d11*dp2 - d12*dp1) - d01*(d01*dp2 - d02*dp1)
+                      + dp0*(d01*d12 - d02*d11)) / det
+                b0 = 1.0 - b1 - b2 - b3
+
+                T_at_pos = b0 * node_T[0] + b1 * node_T[1] + b2 * node_T[2] + b3 * node_T[3]
+                # Only update when the particle is still inside a valid element.
+                new_max = jnp.where(valid, jnp.maximum(prev_max, T_at_pos), prev_max)
+                return new_max
+
+            return jax.vmap(per_particle)(positions, element_ids, max_so_far)
+
     # Output directory
     if args.run_tag:
         output_subdir = args.output / args.run_tag
@@ -933,12 +1032,42 @@ def main():
 
     extra_scalars = {'Group': particle_groups} if particle_groups is not None else None
 
+    # Per-particle trajectory flags (GPU-resident, updated every RK4 step).
+    # escaped_ever: True if element_id has ever been <0 at any step.
+    # max_temperature: running maximum of P1-interpolated temperature.
+    escaped_ever_gpu = None
+    max_temperature_gpu = None
+    if args.export_escaped_flag:
+        escaped_ever_gpu = jnp.zeros(n_particles, dtype=jnp.bool_)
+
+        @jax.jit
+        def _update_escaped(prev_flag, element_ids):
+            return prev_flag | (element_ids < 0)
+
+    if args.track_max_temperature:
+        # Initialize to -inf so the first valid interpolation always overwrites.
+        max_temperature_gpu = jnp.full(
+            (n_particles,), -jnp.inf, dtype=config.FLOAT_DTYPE_JNP
+        )
+
     # Export initial state
     if exporter is not None:
         pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
         eid_cpu = np.array(element_ids_initial, dtype=np.int32) if EXPORT_ELEMENT_IDS else None
+        init_extras = dict(extra_scalars) if extra_scalars else {}
+        if args.export_escaped_flag:
+            init_extras['Escaped'] = np.zeros(n_particles, dtype=np.uint8)
+        if args.track_max_temperature:
+            # Take one temperature evaluation at t=0 so the initial export is non-empty.
+            max_temperature_gpu = update_max_temperature(
+                positions_gpu, element_ids_initial, 0, max_temperature_gpu,
+            )
+            init_extras['MaxTemperature'] = np.asarray(
+                max_temperature_gpu, dtype=np.float32,
+            )
         exporter.enqueue_export(0, pos_cpu, particle_ids=particle_ids,
-                                element_ids=eid_cpu, extra_scalars=extra_scalars)
+                                element_ids=eid_cpu,
+                                extra_scalars=init_extras or extra_scalars)
         print(f"  Exported initial state (step 0)")
 
     print(f"\n[7/7] Running {N_STEPS} RK4 steps...")
@@ -949,6 +1078,14 @@ def main():
         positions_gpu, element_ids_gpu = rk4_step(
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
+        # Update per-step trajectory flags on GPU (cheap, fully fused).
+        if args.export_escaped_flag:
+            escaped_ever_gpu = _update_escaped(escaped_ever_gpu, element_ids_gpu)
+        if args.track_max_temperature:
+            max_temperature_gpu = update_max_temperature(
+                positions_gpu, element_ids_gpu, step - 1, max_temperature_gpu,
+            )
+
         do_log = (step % LOG_INTERVAL == 0) or (step == N_STEPS)
         do_export = ((exporter is not None)
                      and ((step % EXPORT_FREQUENCY == 0) or (step == N_STEPS)))
@@ -970,8 +1107,18 @@ def main():
                     do_export = True
             if do_export and exporter is not None:
                 eid_export = eid_cpu_raw if EXPORT_ELEMENT_IDS else None
+                step_extras = dict(extra_scalars) if extra_scalars else {}
+                if args.export_escaped_flag:
+                    step_extras['Escaped'] = np.asarray(
+                        escaped_ever_gpu, dtype=np.uint8,
+                    )
+                if args.track_max_temperature:
+                    step_extras['MaxTemperature'] = np.asarray(
+                        max_temperature_gpu, dtype=np.float32,
+                    )
                 exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
-                                        element_ids=eid_export, extra_scalars=extra_scalars)
+                                        element_ids=eid_export,
+                                        extra_scalars=step_extras or extra_scalars)
 
     t_elapsed = time.time() - t_start
     stage_times['7_tracking'] = t_elapsed
@@ -1036,13 +1183,17 @@ def main():
             print(f"    {end_file}")
             print(f"  Skipping comparison.")
 
-    # Always save a lightweight final-state npz
-    np.savez(
-        output_subdir / "final_state.npz",
-        positions=jt_positions_final,
-        element_ids=jt_elem_ids_final,
-        particle_ids=particle_ids,
-    )
+    # Always save a lightweight final-state npz (plus optional trajectory flags)
+    final_state = {
+        'positions': jt_positions_final,
+        'element_ids': jt_elem_ids_final,
+        'particle_ids': particle_ids,
+    }
+    if args.export_escaped_flag and escaped_ever_gpu is not None:
+        final_state['escaped_ever'] = np.asarray(escaped_ever_gpu, dtype=np.uint8)
+    if args.track_max_temperature and max_temperature_gpu is not None:
+        final_state['max_temperature'] = np.asarray(max_temperature_gpu, dtype=np.float32)
+    np.savez(output_subdir / "final_state.npz", **final_state)
 
     # ==================================================================
     # Timing
