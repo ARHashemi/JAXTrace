@@ -87,6 +87,8 @@ import jax.numpy as jnp
 
 # Reuse helpers from benchmark_femuss_comparison (kept as the source of truth
 # until this logic is merged into jaxtrace core).
+from jaxtrace.io.vtkhdf_writer import VTKHDFExportThread
+
 from benchmark_femuss_comparison import (
     load_femuss_particles,
     reconstruct_pin_velocity,
@@ -239,15 +241,24 @@ def parse_args():
                              "Requires --seed-source=femuss. If the reference file is missing, "
                              "a warning is printed and the run completes without comparison.")
 
-    # --- VTU export options ---
+    # --- Particle export options ---
+    parser.add_argument("--export-format", type=str, default="vtkhdf",
+                        choices=["vtkhdf", "vtu"],
+                        help="Particle export format. "
+                             "'vtkhdf' (default): one single .vtkhdf archive for the whole "
+                             "run (transient PolyData; ParaView >= 6.0). "
+                             "'vtu': one .vtu per step (legacy path, opened directly in "
+                             "ParaView as a numbered series). "
+                             "VTKHDF is ~5-10x faster to write and ~5-10x faster to transfer "
+                             "to a workstation; switch to 'vtu' for older ParaView installs.")
     parser.add_argument("--export-element-ids", action="store_true", default=False,
-                        help="Include element IDs in VTU export")
+                        help="Include element IDs in particle export")
     parser.add_argument("--n-groups", type=int, default=5,
                         help="Number of particle groups by initial X position (0 to disable)")
     parser.add_argument("--no-groups", action="store_true", default=False,
                         help="Disable particle group export")
     parser.add_argument("--no-export", action="store_true", default=False,
-                        help="Disable all VTU export (timing/statistics only)")
+                        help="Disable all particle export (timing/statistics only)")
     parser.add_argument("--export-escaped-flag", action="store_true", default=False,
                         help="Add a per-particle 'Escaped' UInt8 field (0/1) to VTU output: "
                              "1 if the particle has ever had element_id<0 (escaped the domain "
@@ -1006,12 +1017,21 @@ def main():
     stats_csv = open(stats_csv_path, 'w')
     stats_csv.write("step,n_active,n_lost,new_lost\n")
 
-    # VTU exporter
+    # Particle exporter — VTKHDF (default; single transient archive) or
+    # legacy VTU+.pvd path (one file per step).
     EXPORT_ELEMENT_IDS = args.export_element_ids
     N_GROUPS = args.n_groups if not args.no_groups else 0
     exporter = None
     if not args.no_export:
-        exporter = VTKExportThread(output_subdir)
+        if args.export_format == "vtkhdf":
+            exporter = VTKHDFExportThread(
+                output_subdir,
+                n_particles_hint=int(particle_positions.shape[0]),
+            )
+            print(f"  Particle export: VTKHDF -> {exporter.output_path}")
+        else:
+            exporter = VTKExportThread(output_subdir)
+            print(f"  Particle export: VTU+.pvd -> {output_subdir}")
         exporter.start()
 
     # Re-initialize for actual run
@@ -1125,7 +1145,11 @@ def main():
     stats_csv.close()
     if exporter is not None:
         exporter.stop()
-        print(f"  Exported {exporter.n_exported} VTU files")
+        if args.export_format == "vtkhdf":
+            print(f"  Exported {exporter.n_exported} steps to "
+                  f"{exporter.output_path}")
+        else:
+            print(f"  Exported {exporter.n_exported} VTU files")
     print(f"  Stage 7 time: {t_elapsed:.1f}s")
 
     # ==================================================================
