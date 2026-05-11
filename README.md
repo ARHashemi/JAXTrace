@@ -1,283 +1,194 @@
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
-[![JAX](https://img.shields.io/badge/JAX-accelerated-green.svg)](https://jax.readthedocs.io/)
-[![License](https://img.shields.io/badge/license-EUPL--1.2-blue?logo=europeanunion)](LICENSE)
-[![GitHub](https://img.shields.io/badge/github-JAXTrace-lightgrey?logo=github)](https://github.com/ARHashemi/JAXTrace)
-
 # JAXTrace
 
-🚀 **Memory-optimized Lagrangian particle tracking with JAX acceleration**
+GPU-accelerated Lagrangian particle tracking on unstructured tetrahedral
+meshes, written in Python on top of JAX/XLA. The point-location kernel
+is a *mesh-aligned multi-level octree* (MALMO) that resolves the host
+element of each particle in a single fused RK4 step.
 
-JAXTrace is a high-performance Python package for particle tracking in time-dependent velocity fields, featuring JAX acceleration, advanced memory management strategies, and comprehensive analysis tools. Designed for computational fluid dynamics applications with large-scale particle simulations.
+The intended workload is post-processing of finite-element flow
+solutions: given a sequence of node-centred velocity snapshots on the
+same mesh, integrate large batches of passive tracers through the
+domain.
 
-## ✨ Key Features
+[![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE)
 
-### 🔥 **JAX-Powered Performance**
-- **Optional JAX acceleration** with automatic NumPy fallbacks
-- **Vectorized computations** for maximum throughput
-- **JIT compilation** for optimized particle integration - functions compiled once, executed at C speed
-- **GPU support** for large-scale simulations with seamless CPU/GPU computation switching
-- **Automatic differentiation** - built-in gradient computation capabilities
+---
 
-### 🧠 **Advanced Memory Management**
-- **Chunked processing** for datasets larger than available RAM
-- **Adaptive batch sizing** with out-of-memory recovery - automatically adjusts based on available memory
-- **Memory monitoring** with automatic optimization - real-time tracking prevents crashes
-- **Configurable memory limits** (default: 6GB)
-- **Garbage collection** - automatic cleanup of intermediate results
+## What it does
 
-### 🌊 **Comprehensive Flow Physics**
-- **Time-dependent velocity fields** with temporal interpolation
-- **Multiple integrator schemes** (Euler, RK2, RK4)
-- **Advanced boundary conditions** (periodic, reflective, inlet/outlet)
-- **Grid-preserving particle replacement** - maintains spatial structure at inlet boundaries
-- **Continuous flow analysis** - seamless particle replacement for steady-state studies
+* **Reads** time-dependent velocity fields from PVTU file sequences
+  (the FEMUSS export layout is the default; any compatible PVTU stack
+  works).
+* **Builds** a mesh-aligned octree over the source mesh
+  (centroid-registered parent cubes with a static 3×3×3 search
+  neighbourhood — see references below).
+* **Tracks** particles via a fully-fused RK4 step on GPU. The integration
+  loop, host-element search, P1 interpolation, and boundary handling
+  are JIT-compiled into a single XLA graph.
+* **Writes** particle positions and per-step element IDs to VTU /
+  VTP files; an optional HDF5 path is also available.
+* Validates against FEMUSS's own embedded particle tracker for the same
+  data.
 
-### 📊 **Rich Density Analysis**
-- **Kernel Density Estimation (KDE)** with Scott/Silverman bandwidth rules
-- **Smoothed Particle Hydrodynamics (SPH)** with multiple kernel types
-- **2D/3D density visualization** with automatic slicing
-- **Efficient neighbor search** using hash grids
-- **Multi-scale density analysis** - from local SPH to global KDE analysis
+Limitations: tested on a fixed mesh topology with a periodic velocity
+sequence; r-adaptive (per-step remeshed) datasets are not yet handled
+end-to-end by the runtime — see the design notes branch for that work.
 
-### 📈 **Professional Visualization & I/O**
-- **Static plots** with matplotlib integration
-- **Interactive visualization** via Plotly and PyVista
-- **VTK export** for ParaView/VisIt compatibility - industry-standard format support
-- **Trajectory animation** with MP4/AVI export
-- **Statistical validation** - built-in trajectory quality metrics
+---
 
-## 📋 Requirements
+## Requirements
 
-### System Requirements
-- Python 3.8+
-- 4GB+ RAM recommended (configurable)
-- Optional: CUDA-capable GPU for acceleration
+Python 3.10+ and a working JAX install for your platform:
 
-### Core Dependencies
-```
-numpy>=1.20.0
-matplotlib>=3.3.0
-vtk>=9.0.0
-scipy>=1.7.0
-jax>=0.4.0
-jaxlib>=0.4.0
-```
+* CPU only (fallback, slow): `pip install -r requirements.txt`
+* NVIDIA CUDA: install JAX per
+  [Google's instructions](https://jax.readthedocs.io/en/latest/installation.html)
+  before `pip install -e .`
+* AMD ROCm (LUMI): use the container image referenced in
+  `scripts/run_lumi.sh`.
 
-## 🔧 Installation
+Core dependencies: `numpy`, `jax`, `jaxlib`, `vtk`, `h5py`, `scipy`.
 
-### 1. Install Dependencies
+---
+
+## Install
+
 ```bash
-# Install from requirements file
-pip install -r requirements.txt
-
-# For GPU acceleration (NVIDIA CUDA)
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-```
-
-### 2. Install JAXTrace
-```bash
-# Development installation (recommended)
+git clone --branch release/stable https://github.com/ARHashemi/JAXTrace.git
+cd JAXTrace
 pip install -e .
-
-# Or standard installation
-pip install .
 ```
 
-### 3. Verify Installation
-```python
-import jaxtrace as jt
-print(f"JAXTrace {jt.__version__}")
-print(f"JAX available: {jt.JAX_AVAILABLE}")
-jt.check_system_requirements()  # Display system capabilities
-```
+For day-to-day production work, **`release/stable`** is the branch to
+clone — it contains only the runtime code (no design notes, run logs,
+or diagnostic scripts). The full development history is on
+`feature/lumi-benchmark`.
 
-**Or run comprehensive tests:**
-```bash
-python tests/smoke_test.py      # Quick functionality test
-python tests/structure_test.py  # Package structure validation
-```
+---
 
-### 4. Updating JAXTrace
+## Running a tracking job
 
-To update your installation to the latest version from GitHub:
+The production entry point is `run_tracking.py`. It expects a directory
+of PVTU files indexed by time step and produces VTU output for the
+tracked particles.
 
 ```bash
-# If you did a development installation (pip install -e .)
-cd /path/to/JAXTrace
-git pull origin main
-pip install -e . --upgrade
-
-# If you did a standard installation (pip install .)
-cd /path/to/JAXTrace
-git pull origin main
-pip install . --upgrade --force-reinstall
+python run_tracking.py \
+    --input  /path/to/case.gid/post \
+    --output /path/to/results \
+    --n-steps 2684
 ```
 
-**Or update from a specific branch:**
-```bash
-cd /path/to/JAXTrace
-git fetch origin
-git checkout branch-name
-git pull origin branch-name
-pip install -e . --upgrade
-```
+By default the loader auto-detects the FEMUSS case stem from the input
+directory; pass `--mesh-dir` / `--femuss-dir` if your layout differs.
 
-## 🚀 Quick Start
+### Particle seeding
 
-### Running JAXTrace
+Pick one of six modes via `--seed-source`:
 
-JAXTrace provides multiple entrypoints for different use cases:
+| Mode | Bounds | Distribution | Required args |
+|------|--------|--------------|---------------|
+| `femuss`    | from FEMUSS PVTU | as in source | `--femuss-start` |
+| `box`       | `--seed-box XMIN XMAX YMIN YMAX ZMIN ZMAX` | uniform random | `--n-particles` |
+| `grid`      | `--seed-box` | uniform grid | `--seed-grid NX NY NZ` |
+| `box-frac`  | fractions of mesh bbox via `--seed-fraction XLO XHI YLO YHI ZLO ZHI` | uniform random | `--n-particles` |
+| `grid-frac` | `--seed-fraction` | uniform grid | `--seed-grid NX NY NZ` |
+| `file`      | from `.npy` / `.npz` of shape `(N, 3)` | from file | `--seed-file` |
+
+Examples:
 
 ```bash
-# 1. Quick test (recommended first run)
-python run.py --test
-# or
-python -m jaxtrace --test
+# Seed 100k particles uniformly at random in an absolute box
+python run_tracking.py --input <dir> --output <dir> \
+    --seed-source box \
+    --seed-box -0.01 0.01 -0.005 0.005 0.0 0.002 \
+    --n-particles 100000 --n-steps 2684
 
-# 2. Run with default configuration
-python run.py
-# or
-python example_workflow.py
-
-# 3. Run with custom configuration file
-python run.py --config myconfig.py
-
-# 4. Module-based execution
-python -m jaxtrace
-
-# 5. Check version
-python -m jaxtrace --version
+# 50x70x30 = 105k particles on a regular grid covering the first 20%
+# of X (full Y, full Z) of the mesh bounding box
+python run_tracking.py --input <dir> --output <dir> \
+    --seed-source grid-frac \
+    --seed-fraction 0.0 0.2 0.0 1.0 0.0 1.0 \
+    --seed-grid 50 70 30 --n-steps 2684
 ```
 
-### Basic Particle Tracking
-```python
-import numpy as np
-import jaxtrace as jt
+### Cluster wrappers
 
-# Load velocity field data
-field = jt.open_dataset("path/to/velocity_*.vtk").load_time_series()
-ts_field = jt.TimeSeriesField(
-    data=field["velocity_data"],
-    times=field["times"],
-    positions=field["positions"]
-)
+* `scripts/run_lumi.sh` — SLURM batch script for LUMI (AMD MI250X).
+  Edit the `[1]`–`[6]` configuration blocks at the top, then `sbatch`.
+* `scripts/run_workstation.sh` — local equivalent for an NVIDIA
+  workstation. Sets the XLA memory cap and forwards the same CLI
+  flags as the LUMI script.
 
-# Configure particle tracking
-from jaxtrace.tracking import create_tracker
-tracker = create_tracker(
-    integrator_name="rk4",
-    field=ts_field,
-    boundary_condition=jt.periodic_boundary(domain_bounds),
-    max_memory_gb=6.0,
-    use_jax_jit=True
-)
+Both expose the seeding modes above through `SEED_SOURCE`, `SEED_BOX`,
+`SEED_FRACTION`, `SEED_GRID`, `N_PARTICLES`.
 
-# Generate initial particle positions
-initial_positions = jt.random_seeds(
-    n=10000,
-    bounds=((0,0,0), (1,1,1)),
-    rng_seed=42
-)
+### Validating against FEMUSS
 
-# Track particles
-trajectory = tracker.track_particles(
-    initial_positions=initial_positions,
-    time_span=(0.0, 10.0),
-    dt=0.01
-)
+If your input directory contains a FEMUSS particle-tracking PVTU,
+add `--femuss-compare` (and use `--seed-source femuss`). The driver
+will read the FEMUSS reference at the final step and report
+per-particle position errors. See
+`diagnose_femuss_deviation.py` for a step-by-step deviation
+analyser.
 
-print(f"Tracked {trajectory.N} particles for {trajectory.T} timesteps")
+---
+
+## Project layout
+
 ```
-
-### Advanced Inlet/Outlet Boundaries
-```python
-# Create continuous inlet boundary with grid preservation
-from jaxtrace.tracking.boundary import continuous_inlet_boundary_factory
-inlet_boundary = continuous_inlet_boundary_factory(
-    inlet_position=0.0,
-    outlet_position=1.0,
-    flow_axis="x",
-    domain_bounds=domain_bounds,
-    concentrations={"x": 50, "y": 20, "z": 20}  # Grid resolution
-)
-
-tracker = create_tracker(
-    integrator_name="rk4",
-    field=ts_field,
-    boundary_condition=inlet_boundary
-)
-```
-
-### Density Analysis
-```python
-# Kernel Density Estimation
-kde = jt.KDEEstimator(
-    positions=trajectory.positions[-1],  # Final positions
-    bandwidth_rule="scott",
-    normalize=True
-)
-# For 2D evaluation
-X, Y, density_2d = kde.evaluate_2d()
-# For 3D evaluation
-X, Y, Z, density_3d = kde.evaluate_3d()
-
-# SPH Density Estimation
-sph = jt.SPHDensityEstimator(
-    positions=trajectory.positions[-1],
-    smoothing_length=0.1,
-    kernel_type="cubic_spline"
-)
-sph_density = sph.evaluate(query_points)
-```
-
-## 📖 Documentation
-
-### Core Modules
-- **`jaxtrace.io`**: VTK/HDF5 data loading with memory optimization
-- **`jaxtrace.fields`**: Temporal field interpolation and periodic wrapping
-- **`jaxtrace.tracking`**: Particle integration with boundary conditions
-- **`jaxtrace.density`**: KDE and SPH density estimation
-- **`jaxtrace.visualization`**: Static and interactive plotting tools
-
-### Examples
-- **`example_workflow_minimal.py`**: Minimal working example (~150 lines) with synthetic data
-- **`example_workflow.py`**: Complete workflow with VTK data loading and advanced features
-
-## 🤝 Contributing
-
-JAXTrace is developed for high-performance particle tracking in fluid dynamics. Contributions welcome for:
-- Advanced boundary conditions
-- GPU optimization
-- Visualization enhancements
-- I/O enhancements
-- Documentation & Examples
-
-## 📄 License
-
-This project is licensed under the European Union Public License (EUPL), Version 1.2, with additional terms specified in the [LICENSE](LICENSE) file.
-
-## 🔬 Citation
-
-If you use JAXTrace in your research, please cite:
-
-**Plain text:**
-```
-JAXTrace: Memory-optimized Lagrangian particle tracking with JAX acceleration
-https://github.com/ARHashemi/JAXTrace
-```
-
-**BibTeX:**
-```bibtex
-@software{jaxtrace2025,
-  title = {JAXTrace: Memory-optimized Lagrangian particle tracking with JAX acceleration},
-  author = {A.R. Hashemi},
-  year = {2025},
-  url = {https://github.com/ARHashemi/JAXTrace},
-  note = {High-performance particle tracking for fluid dynamics},
-  version = {0.1.1}
-}
+run_tracking.py                  # production driver
+benchmark_femuss_comparison.py   # reference benchmark + RK4 builder
+benchmark_l2_accuracy.py         # search-correctness microbenchmark
+diagnose_femuss_deviation.py     # per-step deviation analyser
+jaxtrace/                        # library code
+├── config.py                    # precision and RK4 policy flags
+├── tracking/                    # seeding, integrators, boundaries
+└── gpu/                         # JAX/GPU implementation
+    ├── mesh_loader.py           # PVTU → flat arrays
+    ├── mesh_loader_timedep.py   # time-series loader
+    ├── search/                  # MALMO octree (build + search kernels)
+    └── tracking/                # mesh upload, fused RK4 step
+scripts/                         # cluster + workstation runners
+tests/                           # unit + integration tests
+config/                          # reference YAML configs
+examples/gpu/                    # minimal GPU usage examples
 ```
 
 ---
 
-*Built with ❤️ for academic research*
+## How MALMO works (brief)
+
+For a query point **q**, the search needs to return the host
+tetrahedral element K* ∈ T_h. MALMO builds an octree over axis-aligned
+parent cubes derived from the mesh's natural refinement levels; each
+tetrahedron is registered to the parent cube containing its centroid.
+At query time, the kernel computes **q**'s Morton code, locates the
+candidate cell, and tests the (≤8) elements registered there plus a
+26-cell halo (3×3×3). The whole loop is statically shaped, allowing
+JAX/XLA to fuse it into a single RK4 substep with no host
+round-trips.
+
+The 3×3×3 neighbourhood is sufficient (and necessary) for the
+class of meshes we target; see the paper draft for the geometric
+argument and validation.
+
+---
+
+## License
+
+EUPL-1.2 — see [LICENSE](LICENSE).
+
+---
+
+## Citation
+
+```bibtex
+@software{jaxtrace,
+  author = {Hashemi, A. R.},
+  title  = {JAXTrace: GPU-accelerated particle tracking on unstructured
+            tetrahedral meshes},
+  url    = {https://github.com/ARHashemi/JAXTrace},
+  year   = {2026}
+}
+```
