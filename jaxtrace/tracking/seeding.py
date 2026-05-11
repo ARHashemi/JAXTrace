@@ -135,7 +135,53 @@ def _validate_bounds(bounds: np.ndarray) -> np.ndarray:
     return bounds  
 
 
-# ---------- Basic seeding strategies ----------  
+def bounds_from_fractions(
+    domain_min: Union[np.ndarray, List],
+    domain_max: Union[np.ndarray, List],
+    x_frac: Tuple[float, float] = (0.0, 1.0),
+    y_frac: Tuple[float, float] = (0.0, 1.0),
+    z_frac: Tuple[float, float] = (0.0, 1.0),
+) -> np.ndarray:
+    """
+    Build absolute bounds from per-axis domain fractions.
+
+    Each fraction pair (lo, hi) selects a sub-interval of the domain along
+    that axis: bounds_min = domain_min + lo * (domain_max - domain_min);
+    bounds_max = domain_min + hi * (domain_max - domain_min). Useful for
+    seeding particles into a domain-relative region (e.g. inlet at the
+    first 20% of X with full Y/Z extents).
+
+    Parameters
+    ----------
+    domain_min, domain_max : array-like, length 3
+        Absolute domain bounds (e.g. node_positions.min/max(axis=0)).
+    x_frac, y_frac, z_frac : (lo, hi) with 0 <= lo < hi <= 1
+        Per-axis sub-interval fractions.
+
+    Returns
+    -------
+    np.ndarray, shape (2, 3), dtype float32
+        Absolute bounds in the canonical (2, 3) layout used elsewhere
+        in this module.
+    """
+    domain_min = np.asarray(domain_min, dtype=np.float32).reshape(3)
+    domain_max = np.asarray(domain_max, dtype=np.float32).reshape(3)
+    extent = domain_max - domain_min
+
+    fracs = np.array([x_frac, y_frac, z_frac], dtype=np.float32)  # (3, 2)
+    for i, name in enumerate(('x', 'y', 'z')):
+        lo, hi = float(fracs[i, 0]), float(fracs[i, 1])
+        if not (0.0 <= lo < hi <= 1.0):
+            raise ValueError(
+                f"{name}_frac=({lo}, {hi}) must satisfy 0 <= lo < hi <= 1"
+            )
+
+    bmin = domain_min + fracs[:, 0] * extent
+    bmax = domain_min + fracs[:, 1] * extent
+    return np.stack([bmin, bmax], axis=0).astype(np.float32)
+
+
+# ---------- Basic seeding strategies ----------
 
 def random_seeds(n: int, bounds: Union[np.ndarray, List], rng_seed: int = 0,   
                 dtype=np.float32) -> np.ndarray:  

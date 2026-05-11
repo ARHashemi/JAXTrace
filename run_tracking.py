@@ -22,11 +22,29 @@ Key differences vs. ``benchmark_femuss_comparison.py``:
 
 Usage
 -----
-# Basic run without FEMUSS (random seeding in a box)
+# Basic run without FEMUSS (random seeding in an absolute box)
 python run_tracking.py \\
     --input /path/to/data \\
     --output /path/to/output \\
     --seed-source box --seed-box -0.01 0.01 -0.005 0.005 0.0 0.002 \\
+    --n-particles 100000 --n-steps 2684
+
+# Gridded seeding in an absolute box (count = 50*70*30 = 105000)
+python run_tracking.py \\
+    --input /path/to/data --output /path/to/output \\
+    --seed-source grid --seed-box -0.01 0.01 -0.005 0.005 0.0 0.002 \\
+    --seed-grid 50 70 30 --n-steps 2684
+
+# Gridded seeding in the first 20% of X (full Y/Z) of the mesh bbox
+python run_tracking.py \\
+    --input /path/to/data --output /path/to/output \\
+    --seed-source grid-frac --seed-fraction 0.0 0.2 0.0 1.0 0.0 1.0 \\
+    --seed-grid 50 70 30 --n-steps 2684
+
+# Same fractional region but random sampling
+python run_tracking.py \\
+    --input /path/to/data --output /path/to/output \\
+    --seed-source box-frac --seed-fraction 0.0 0.2 0.0 1.0 0.0 1.0 \\
     --n-particles 100000 --n-steps 2684
 
 # FEMUSS-style run (same as benchmark_femuss_comparison.py)
@@ -177,24 +195,40 @@ def parse_args():
 
     # --- Seeding ---
     parser.add_argument("--seed-source", type=str, default="femuss",
-                        choices=["femuss", "box", "file"],
+                        choices=["femuss", "box", "grid", "box-frac", "grid-frac", "file"],
                         help="Particle initialization source. "
                              "'femuss' loads from a FEMUSS particle PVTU. "
-                             "'box' samples uniformly inside --seed-box. "
+                             "'box' samples uniformly at random inside --seed-box. "
+                             "'grid' places --seed-grid Nx Ny Nz particles on a uniform "
+                             "grid inside --seed-box. "
+                             "'box-frac' / 'grid-frac' behave like 'box' / 'grid' but the "
+                             "bounds come from --seed-fraction (per-axis fractions of the "
+                             "mesh bounding box). "
                              "'file' loads positions from --seed-file.")
     parser.add_argument("--femuss-start", type=int, default=0,
                         help="FEMUSS start step when --seed-source=femuss")
     parser.add_argument("--seed-box", type=float, nargs=6, default=None,
                         metavar=("XMIN", "XMAX", "YMIN", "YMAX", "ZMIN", "ZMAX"),
-                        help="Seed box bounds (required if --seed-source=box)")
+                        help="Absolute seed box bounds (required for --seed-source=box or grid)")
+    parser.add_argument("--seed-fraction", type=float, nargs=6, default=None,
+                        metavar=("XLO", "XHI", "YLO", "YHI", "ZLO", "ZHI"),
+                        help="Per-axis fractions of mesh bbox in [0,1] "
+                             "(required for --seed-source=box-frac or grid-frac). "
+                             "Example: 0.0 0.2 0.0 1.0 0.0 1.0 = first 20%% of X, full Y/Z.")
+    parser.add_argument("--seed-grid", type=int, nargs=3, default=None,
+                        metavar=("NX", "NY", "NZ"),
+                        help="Grid resolution along each axis "
+                             "(required for --seed-source=grid or grid-frac). "
+                             "Total particle count = NX*NY*NZ; --n-particles is ignored.")
     parser.add_argument("--n-particles", type=int, default=100000,
-                        help="Number of particles when --seed-source=box")
+                        help="Number of particles (used by --seed-source=box and box-frac; "
+                             "ignored by grid modes which derive count from --seed-grid).")
     parser.add_argument("--seed-file", type=Path, default=None,
                         help="Path to .npy / .npz file containing (N,3) positions "
                              "(required if --seed-source=file). If .npz, the "
                              "'positions' key is used.")
     parser.add_argument("--seed", type=int, default=42,
-                        help="RNG seed for --seed-source=box")
+                        help="RNG seed for random box modes")
 
     # --- FEMUSS comparison (OPTIONAL) ---
     parser.add_argument("--femuss-compare", action="store_true", default=False,
@@ -306,22 +340,94 @@ def seed_from_femuss(args):
     return positions, particle_ids, femuss
 
 
-def seed_from_box(args):
-    """Uniform random seeding inside an axis-aligned box."""
-    if args.seed_box is None:
-        raise ValueError("--seed-source=box requires --seed-box XMIN XMAX YMIN YMAX ZMIN ZMAX")
-    x0, x1, y0, y1, z0, z1 = args.seed_box
+def _resolve_seed_bounds(args, mesh_bbox_min=None, mesh_bbox_max=None):
+    """Resolve absolute (2, 3) bounds for box-based seeding.
+
+    Uses --seed-box for absolute bounds, or --seed-fraction (and the mesh
+    bbox passed in) for fraction-based bounds. Returns a (2, 3) array
+    [[x0,y0,z0],[x1,y1,z1]].
+    """
+    from jaxtrace.tracking.seeding import bounds_from_fractions
+
+    is_frac = args.seed_source.endswith("-frac")
+    if is_frac:
+        if args.seed_fraction is None:
+            raise ValueError(
+                f"--seed-source={args.seed_source} requires "
+                "--seed-fraction XLO XHI YLO YHI ZLO ZHI"
+            )
+        if mesh_bbox_min is None or mesh_bbox_max is None:
+            raise RuntimeError("Mesh bbox required for fraction-based seeding")
+        xl, xh, yl, yh, zl, zh = args.seed_fraction
+        return bounds_from_fractions(
+            mesh_bbox_min, mesh_bbox_max,
+            x_frac=(xl, xh), y_frac=(yl, yh), z_frac=(zl, zh),
+        )
+    else:
+        if args.seed_box is None:
+            raise ValueError(
+                f"--seed-source={args.seed_source} requires "
+                "--seed-box XMIN XMAX YMIN YMAX ZMIN ZMAX"
+            )
+        x0, x1, y0, y1, z0, z1 = args.seed_box
+        return np.array([[x0, y0, z0], [x1, y1, z1]], dtype=np.float32)
+
+
+def seed_from_box(args, mesh_bbox_min=None, mesh_bbox_max=None):
+    """Uniform random seeding inside an axis-aligned box.
+
+    Box bounds come from --seed-box (absolute) when seed-source is 'box',
+    or from --seed-fraction + mesh bbox when seed-source is 'box-frac'.
+    """
+    bounds = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
     rng = np.random.default_rng(args.seed)
     n = args.n_particles
     positions = np.stack([
-        rng.uniform(x0, x1, n),
-        rng.uniform(y0, y1, n),
-        rng.uniform(z0, z1, n),
+        rng.uniform(bounds[0, 0], bounds[1, 0], n),
+        rng.uniform(bounds[0, 1], bounds[1, 1], n),
+        rng.uniform(bounds[0, 2], bounds[1, 2], n),
     ], axis=1).astype(config.FLOAT_DTYPE_NP)
     particle_ids = np.arange(n, dtype=np.int32)
-    print(f"  Seed source: uniform random in box")
-    print(f"    X=[{x0},{x1}]  Y=[{y0},{y1}]  Z=[{z0},{z1}]")
+    print(f"  Seed source: uniform random in box ({args.seed_source})")
+    print(f"    X=[{bounds[0,0]:.6g},{bounds[1,0]:.6g}]  "
+          f"Y=[{bounds[0,1]:.6g},{bounds[1,1]:.6g}]  "
+          f"Z=[{bounds[0,2]:.6g},{bounds[1,2]:.6g}]")
     print(f"    n_particles={n:,}  seed={args.seed}")
+    return positions, particle_ids, None
+
+
+def seed_from_grid(args, mesh_bbox_min=None, mesh_bbox_max=None):
+    """Uniform-grid seeding inside an axis-aligned box.
+
+    Particle count = Nx*Ny*Nz (--seed-grid). Box bounds come from
+    --seed-box (absolute) when seed-source is 'grid', or from
+    --seed-fraction + mesh bbox when seed-source is 'grid-frac'.
+    --n-particles is ignored.
+    """
+    from jaxtrace.tracking.seeding import uniform_grid_seeds
+
+    if args.seed_grid is None:
+        raise ValueError(
+            f"--seed-source={args.seed_source} requires --seed-grid NX NY NZ"
+        )
+    nx, ny, nz = (int(v) for v in args.seed_grid)
+    if min(nx, ny, nz) < 1:
+        raise ValueError(f"--seed-grid values must be >= 1; got {args.seed_grid}")
+
+    bounds = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
+    positions = uniform_grid_seeds(
+        resolution=(nx, ny, nz), bounds=bounds, include_boundaries=True,
+    ).astype(config.FLOAT_DTYPE_NP)
+    n = positions.shape[0]
+    if args.n_particles and args.n_particles != n:
+        print(f"  Note: --n-particles={args.n_particles:,} ignored; "
+              f"grid resolution {nx}x{ny}x{nz} = {n:,} particles")
+    particle_ids = np.arange(n, dtype=np.int32)
+    print(f"  Seed source: uniform grid in box ({args.seed_source})")
+    print(f"    Grid: {nx} x {ny} x {nz} = {n:,} particles")
+    print(f"    X=[{bounds[0,0]:.6g},{bounds[1,0]:.6g}]  "
+          f"Y=[{bounds[0,1]:.6g},{bounds[1,1]:.6g}]  "
+          f"Z=[{bounds[0,2]:.6g},{bounds[1,2]:.6g}]")
     return positions, particle_ids, None
 
 
@@ -711,8 +817,14 @@ def main():
     femuss_start_data = None
     if args.seed_source == 'femuss':
         particle_positions, particle_ids, femuss_start_data = seed_from_femuss(args)
-    elif args.seed_source == 'box':
-        particle_positions, particle_ids, _ = seed_from_box(args)
+    elif args.seed_source in ('box', 'box-frac'):
+        particle_positions, particle_ids, _ = seed_from_box(
+            args, mesh_bbox_min_cpu, mesh_bbox_max_cpu,
+        )
+    elif args.seed_source in ('grid', 'grid-frac'):
+        particle_positions, particle_ids, _ = seed_from_grid(
+            args, mesh_bbox_min_cpu, mesh_bbox_max_cpu,
+        )
     else:  # file
         particle_positions, particle_ids, _ = seed_from_file(args)
 
