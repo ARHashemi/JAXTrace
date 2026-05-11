@@ -109,7 +109,14 @@ PIN_CENTER="0.0 0.0 0.0"
 PIN_AXIS="0.0 0.0 1.0"
 PIN_TILT=0.0
 
-# ── [9] VTU export options ───────────────────────────────────────────────────
+# ── [9] Particle export options ──────────────────────────────────────────────
+# EXPORT_FORMAT: vtkhdf | vtu
+#   vtkhdf (default) -- single transient .vtkhdf archive for the whole run.
+#                       Requires ParaView >= 6.0 / VTK >= 9.4.
+#                       Much faster to write and transfer than per-step VTUs.
+#   vtu              -- legacy: one .vtu per step, opened in ParaView as a
+#                       numbered series. Use this on older ParaView installs.
+EXPORT_FORMAT=vtkhdf
 N_GROUPS=5                    # 0 disables group export
 EXPORT_ELEMENT_IDS=0          # 1 = include ElementID field
 EXPORT_ESCAPED_FLAG=0         # 1 = add 'Escaped' (0/1) per-particle flag set
@@ -255,6 +262,7 @@ ARGS=(
 [ -n "$BOUNDARY_WALLS" ]  && ARGS+=( --boundary-walls "$BOUNDARY_WALLS" )
 [ -n "$REGISTRATION" ]    && ARGS+=( --registration "$REGISTRATION" )
 [ "$NO_EXPORT" = "1" ]    && ARGS+=( --no-export )
+ARGS+=( --export-format "$EXPORT_FORMAT" )
 [ "$EXPORT_ELEMENT_IDS" = "1" ] && ARGS+=( --export-element-ids )
 [ "$EXPORT_ESCAPED_FLAG" = "1" ] && ARGS+=( --export-escaped-flag )
 [ "$TRACK_MAX_TEMPERATURE" = "1" ] && ARGS+=( --track-max-temperature --temperature-field "$TEMPERATURE_FIELD" )
