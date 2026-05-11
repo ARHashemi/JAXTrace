@@ -147,6 +147,87 @@ def load_velocity_sequence_from_pvtu(
     return node_positions, connectivity, velocity_sequence
 
 
+def load_scalar_sequence_from_pvtu(
+    base_path: Path,
+    file_pattern: str,
+    timestep_range: Tuple[int, int],
+    field_name: str,
+    verbose: bool = True,
+) -> np.ndarray:
+    """
+    Load a sequence of per-node scalar fields from PVTU files.
+
+    Companion to ``load_velocity_sequence_from_pvtu`` for fields with one
+    component per node (Temperature, Pressure, LEVEL, ...). Mesh topology
+    is assumed identical across timesteps and is not returned; call the
+    velocity loader first if you need positions/connectivity.
+
+    Parameters
+    ----------
+    base_path, file_pattern, timestep_range, field_name, verbose
+        Same meaning as ``load_velocity_sequence_from_pvtu``.
+
+    Returns
+    -------
+    np.ndarray
+        ``(n_timesteps, n_nodes)`` float array. Same precision policy as the
+        velocity loader (``config.FLOAT_DTYPE_NP``).
+    """
+    start, end = timestep_range
+    all_timesteps = list(range(start, end + 1))
+
+    if verbose:
+        print(f"\nLoading scalar sequence '{field_name}':")
+        print(f"  Range: {start}-{end} ({len(all_timesteps)} timesteps)")
+
+    # Find first timestep that has the field (handle leading missing entries).
+    first_idx = None
+    first_arr = None
+    n_nodes = None
+    for idx, ts in enumerate(all_timesteps):
+        file_path = base_path / file_pattern.format(timestep=ts)
+        _, _, arr = load_mesh_from_pvtu(file_path, field_name=field_name)
+        if arr is not None:
+            first_idx = idx
+            # Coerce to 1D in case VTK returned (n_nodes, 1).
+            first_arr = np.asarray(arr).reshape(-1)
+            n_nodes = first_arr.shape[0]
+            break
+
+    if first_idx is None:
+        raise RuntimeError(
+            f"None of the {len(all_timesteps)} files in range {start}-{end} "
+            f"contain scalar field '{field_name}'"
+        )
+
+    valid_ts = all_timesteps[first_idx:]
+    n_valid = len(valid_ts)
+    sequence = np.zeros((n_valid, n_nodes), dtype=config.FLOAT_DTYPE_NP)
+    sequence[0] = first_arr.astype(config.FLOAT_DTYPE_NP)
+
+    for i, ts in enumerate(valid_ts[1:], start=1):
+        file_path = base_path / file_pattern.format(timestep=ts)
+        _, _, arr = load_mesh_from_pvtu(file_path, field_name=field_name)
+        if arr is None:
+            raise RuntimeError(
+                f"Scalar field '{field_name}' missing in timestep {ts} "
+                f"(file: {file_path}). Only leading timesteps may be skipped."
+            )
+        arr = np.asarray(arr).reshape(-1)
+        if arr.shape[0] != n_nodes:
+            raise ValueError(
+                f"Scalar field shape mismatch at timestep {ts}: "
+                f"expected ({n_nodes},), got {arr.shape}"
+            )
+        sequence[i] = arr.astype(config.FLOAT_DTYPE_NP)
+
+    if verbose:
+        memory_mb = sequence.nbytes / (1024 ** 2)
+        print(f"    Loaded {n_valid}/{n_valid} timesteps  ({memory_mb:.1f} MB)")
+
+    return sequence
+
+
 def compute_velocity_cycle_params(
     total_steps: int,
     dt: float,
