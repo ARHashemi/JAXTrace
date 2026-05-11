@@ -21,6 +21,7 @@ def deduplicate_nodes(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
     velocity_sequence: np.ndarray = None,
+    scalar_sequences: dict = None,
     verbose: bool = True
 ) -> Tuple[np.ndarray, np.ndarray, int, np.ndarray]:
     """
@@ -38,6 +39,11 @@ def deduplicate_nodes(
     velocity_sequence : np.ndarray, optional
         (n_timesteps, n_nodes, 3) float32 - velocity at nodes for each timestep
         If provided, will be remapped to deduplicated node IDs
+    scalar_sequences : dict[str, np.ndarray], optional
+        Optional per-node scalar field sequences, each shaped
+        ``(n_timesteps, n_nodes)``. Remapped in place; the dict is mutated to
+        hold the deduplicated arrays. Use this for fields like Temperature,
+        Pressure, LEVEL that should follow the dedup of the velocity stack.
     verbose : bool, default=True
         Print progress and statistics
 
@@ -153,6 +159,27 @@ def deduplicate_nodes(
         if verbose:
             print(f"    Original velocity: {velocity_sequence.shape}")
             print(f"    Remapped velocity: {remapped_velocity_sequence.shape}")
+
+    # Step 3.6: Remap scalar sequences if provided
+    if scalar_sequences:
+        if verbose:
+            print(f"  Remapping {len(scalar_sequences)} scalar sequence(s)...")
+        for name, seq in list(scalar_sequences.items()):
+            if seq is None:
+                continue
+            if seq.ndim != 2 or seq.shape[1] != n_nodes:
+                raise ValueError(
+                    f"Scalar sequence '{name}' shape mismatch: "
+                    f"expected (n_timesteps, {n_nodes}), got {seq.shape}"
+                )
+            n_t = seq.shape[0]
+            remapped = np.zeros((n_t, n_unique), dtype=seq.dtype)
+            for old_id in range(n_nodes):
+                new_id = node_map[old_id]
+                remapped[:, new_id] = seq[:, old_id]
+            scalar_sequences[name] = remapped
+            if verbose:
+                print(f"    {name}: {seq.shape} -> {remapped.shape}")
 
     # Step 4: Validate
     if verbose:
