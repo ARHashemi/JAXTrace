@@ -161,6 +161,26 @@ MONITOR_INTERVAL=30
 # END USER CONFIGURATION — below this line is infrastructure.
 # =============================================================================
 
+# ── Local overrides (untracked) ──────────────────────────────────────────────
+# If a sibling file named run_workstation.local.sh exists, source it here so
+# host-specific paths and per-experiment knobs override the defaults above
+# without modifying the tracked script. The local file is gitignored, so
+# `git pull` will never collide with your customisations.
+#
+# Example contents for scripts/run_workstation.local.sh:
+#   INPUT=/flash/users/ali/data/A2.gid
+#   N_PARTICLES=192000
+#   N_STEPS=8000
+#   SEED_SOURCE=grid
+#   EXPORT_ESCAPED_FLAG=1
+#   TRACK_MAX_TEMPERATURE=1
+_LOCAL_OVERRIDES="$(dirname "$0")/run_workstation.local.sh"
+if [ -f "$_LOCAL_OVERRIDES" ]; then
+    echo "[config] Sourcing local overrides: $_LOCAL_OVERRIDES"
+    # shellcheck source=/dev/null
+    source "$_LOCAL_OVERRIDES"
+fi
+
 # ── Generate unique run ID (replaces $SLURM_JOB_ID) ──────────────────────────
 RUN_ID="$(date +%Y%m%d_%H%M%S)_$$"
 
