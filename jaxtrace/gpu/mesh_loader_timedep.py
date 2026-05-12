@@ -147,6 +147,128 @@ def load_velocity_sequence_from_pvtu(
     return node_positions, connectivity, velocity_sequence
 
 
+def load_field_sequences_from_pvtu(
+    base_path: Path,
+    file_pattern: str,
+    timestep_range: Tuple[int, int],
+    field_names: List[str],
+    verbose: bool = True,
+):
+    """
+    Load multiple per-node fields from a sequence of PVTU files in a
+    single traversal.
+
+    Each PVTU file is opened, parsed, and decompressed **once** —
+    every requested field is extracted from the same VTK reader output
+    before the file is closed. This is materially faster than calling
+    :func:`load_velocity_sequence_from_pvtu` once per field (PVTU I/O
+    + base64 decode + decompression dominate the per-file cost; the
+    additional point-data array reads are essentially free).
+
+    Field components are auto-detected: 1-component fields are stacked
+    into ``(n_timesteps, n_nodes)`` arrays; multi-component fields
+    into ``(n_timesteps, n_nodes, n_components)``.
+
+    Parameters
+    ----------
+    base_path : Path
+        Directory containing the PVTU files.
+    file_pattern : str
+        File naming pattern with a ``{timestep}`` placeholder, e.g.
+        ``"cylA_{timestep}.pvtu"``.
+    timestep_range : Tuple[int, int]
+        ``(start, end)`` inclusive timestep range.
+    field_names : list[str]
+        Names of point-data fields to load. Missing fields raise a
+        ``RuntimeError`` (use :func:`load_velocity_sequence_from_pvtu`
+        if you need leading-missing-frame tolerance).
+    verbose : bool
+        If True, print per-file progress.
+
+    Returns
+    -------
+    node_positions : np.ndarray
+        ``(n_nodes, 3)`` float32 — node coordinates from the first file.
+    connectivity : np.ndarray
+        ``(n_elements, 4)`` int32 — element connectivity from the first file.
+    sequences : dict[str, np.ndarray]
+        ``{field_name: stack}``. ``stack`` is ``(n_timesteps, n_nodes)``
+        for scalar fields and ``(n_timesteps, n_nodes, n_components)``
+        for vector fields.
+    """
+    if not field_names:
+        raise ValueError("field_names must contain at least one name")
+
+    start, end = timestep_range
+    timesteps = list(range(start, end + 1))
+    n_steps = len(timesteps)
+
+    if verbose:
+        print(f"\nLoading {len(field_names)} field(s) over {n_steps} timesteps:")
+        print(f"  Pattern: {file_pattern}")
+        print(f"  Fields:  {field_names}")
+
+    node_positions = None
+    connectivity = None
+    sequences: dict = {}
+    n_nodes = None
+
+    for i, ts in enumerate(timesteps):
+        file_path = base_path / file_pattern.format(timestep=ts)
+        pos, conn, fields_dict = load_mesh_from_pvtu(
+            file_path, field_names=field_names, verbose=False,
+        )
+
+        if i == 0:
+            node_positions = pos.astype(config.FLOAT_DTYPE_NP)
+            connectivity = conn
+            n_nodes = pos.shape[0]
+            # Allocate the output stacks now that we know the per-field
+            # component count from the first timestep.
+            for name in field_names:
+                arr = fields_dict.get(name)
+                if arr is None:
+                    raise RuntimeError(
+                        f"Field '{name}' not found in {file_path}"
+                    )
+                if arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1):
+                    sequences[name] = np.zeros(
+                        (n_steps, n_nodes), dtype=config.FLOAT_DTYPE_NP,
+                    )
+                elif arr.ndim == 2:
+                    sequences[name] = np.zeros(
+                        (n_steps, n_nodes, arr.shape[1]),
+                        dtype=config.FLOAT_DTYPE_NP,
+                    )
+                else:
+                    raise ValueError(
+                        f"Field '{name}' has unsupported shape {arr.shape}"
+                    )
+
+        # Validate consistency and store per-step values.
+        for name in field_names:
+            arr = fields_dict.get(name)
+            if arr is None:
+                raise RuntimeError(
+                    f"Field '{name}' missing at timestep {ts} "
+                    f"(file: {file_path}). All requested fields must be "
+                    f"present in every timestep."
+                )
+            arr = np.asarray(arr).reshape(-1) if sequences[name].ndim == 2 \
+                else np.asarray(arr).reshape(n_nodes, -1)
+            sequences[name][i] = arr.astype(config.FLOAT_DTYPE_NP)
+
+        if verbose and (i % 10 == 0 or i == n_steps - 1):
+            print(f"  Loaded timestep {ts} ({i + 1}/{n_steps})")
+
+    if verbose:
+        total_mb = sum(s.nbytes for s in sequences.values()) / (1024 ** 2)
+        print(f"  Total field memory: {total_mb:.1f} MB across "
+              f"{len(sequences)} field(s)")
+
+    return node_positions, connectivity, sequences
+
+
 def load_scalar_sequence_from_pvtu(
     base_path: Path,
     file_pattern: str,
