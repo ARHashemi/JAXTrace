@@ -186,6 +186,23 @@ MONITOR_LOG="${LOG_DIR}/${SCRATCH_FOLDER}_monitor.log"
 
 mkdir -p "$FLASH_OUT" "$SCRATCH_OUT" "$LOG_DIR"
 
+# ── Mirror this script's output to a log file next to the results ────────────
+# The terminal still sees everything; tee duplicates each line to log.txt
+# inside the run's scratch folder. Cost is negligible: the script and
+# run_tracking.py together emit only a few KB of text over a multi-hour run,
+# so this is bytes per second of disk I/O, fully absorbed by the page cache.
+# Skip the re-exec when already mirroring (avoids infinite recursion when the
+# script restarts itself).
+RUN_LOG="${SCRATCH_OUT}/log.txt"
+if [ "${__JAXTRACE_LOG_ATTACHED:-}" != "1" ]; then
+    export __JAXTRACE_LOG_ATTACHED=1
+    # exec replaces stdout/stderr with the tee pipe for the rest of this
+    # process; subsequent commands' output is captured automatically. The
+    # ${PIPESTATUS[0]} machinery preserves the python exit code through tee.
+    exec > >(tee -a "$RUN_LOG") 2>&1
+    echo "[log] Mirroring full output to $RUN_LOG"
+fi
+
 # ── Activate Python venv ──────────────────────────────────────────────────────
 if [ -f "${VENV}/bin/activate" ]; then
     source "${VENV}/bin/activate"
