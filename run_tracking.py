@@ -1034,6 +1034,31 @@ def main():
             print(f"  Particle export: VTU+.pvd -> {output_subdir}")
         exporter.start()
 
+    # Signal handler for graceful shutdown on SIGTERM (SLURM timeout) and
+    # SIGINT (Ctrl-C). Flushes pending writes and closes the file so the
+    # archive is recoverable. Re-raises the default action so Python exits
+    # cleanly after the writer has drained.
+    import signal as _signal
+    _shutdown_called = [False]
+
+    def _graceful_shutdown(signum, frame):
+        if _shutdown_called[0]:
+            return
+        _shutdown_called[0] = True
+        print(f"\n[!] Received signal {signum}; flushing exporter and exiting.")
+        try:
+            if exporter is not None:
+                exporter.stop()
+        except Exception as e:
+            print(f"  Exporter shutdown error: {e}")
+        # Re-raise so the interpreter exits with the conventional 128+signum.
+        _signal.signal(signum, _signal.SIG_DFL)
+        import os as _os
+        _os.kill(_os.getpid(), signum)
+
+    _signal.signal(_signal.SIGTERM, _graceful_shutdown)
+    _signal.signal(_signal.SIGINT, _graceful_shutdown)
+
     # Re-initialize for actual run
     positions_gpu = jax.device_put(particle_positions)
     element_ids_gpu = element_ids_initial

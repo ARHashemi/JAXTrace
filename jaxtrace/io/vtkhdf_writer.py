@@ -79,6 +79,7 @@ class TransientPolyDataWriter:
         n_particles_hint: int = 0,
         compression: str | None = "gzip",
         compression_opts: int = 1,
+        flush_interval: int = 1,
     ) -> None:
         """Open the output file and initialise the VTKHDF skeleton.
 
@@ -99,6 +100,20 @@ class TransientPolyDataWriter:
             on every step.
         compression_opts
             Level for gzip (1–9). Ignored for lzf.
+        flush_interval
+            Call ``H5Fflush`` after every Nth step (default 1, i.e. flush
+            on every step). HDF5 metadata (dataset extents, the ``NSteps``
+            attribute, field offsets) lives in a process-local cache until
+            close; periodic flushes make the file consistent on disk so a
+            SIGTERM-killed job (e.g. SLURM timeout) leaves a recoverable
+            archive containing every committed step. The cost is one
+            metadata flush per N steps — negligible compared to chunk
+            writes themselves. Set to 0 to disable periodic flushing
+            (close-time flush only — risky on shared HPC queues).
+
+            For the use case of "I want every committed step on disk even
+            if the run dies", keep this at 1. For pure benchmark runs where
+            metadata-write latency dominates, bump it to 10 or 100.
         """
         self.output_path = Path(output_path)
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,8 +121,15 @@ class TransientPolyDataWriter:
         self._chunk = _chunk_for(n_particles_hint)
         self._comp = compression
         self._comp_opts = compression_opts
+        self._flush_interval = max(int(flush_interval), 0)
+        self._steps_since_flush = 0
 
-        self._file = h5py.File(str(self.output_path), "w")
+        # libver="latest" enables HDF5 1.10+ format features (required by
+        # SWMR and by VTKHDF Version 2). It does not lock SWMR on; we'd
+        # only call swmr_mode = True if a separate reader process were
+        # tailing the file — but using "latest" makes the on-disk format
+        # consistent with the schema we declare.
+        self._file = h5py.File(str(self.output_path), "w", libver="latest")
         self._root = self._file.create_group("VTKHDF")
         self._root.attrs["Version"] = np.array([2, 0], dtype="i8")
         # The Type attribute must be a fixed-length ASCII string per the
@@ -409,6 +431,20 @@ class TransientPolyDataWriter:
             _append(dset, np.zeros(pad_shape, dtype=dset.dtype))
             _append(offset_dset, np.array([offset_value], dtype="i8"))
 
+        # Periodic flush: commits dataset extents, the NSteps attribute,
+        # and all PointDataOffsets entries to disk so a SIGTERM-killed run
+        # leaves a recoverable file with every committed step intact.
+        self._steps_since_flush += 1
+        if self._flush_interval > 0 and self._steps_since_flush >= self._flush_interval:
+            self.flush()
+
+    def flush(self) -> None:
+        """Force HDF5 to write all buffered metadata and chunks to disk.
+        Safe to call from a signal handler — does not allocate."""
+        if self._file:
+            self._file.flush()
+            self._steps_since_flush = 0
+
     def close(self) -> None:
         """Flush and close the file."""
         if self._file:
@@ -436,12 +472,29 @@ class VTKHDFExportThread:
     def __init__(
         self,
         output_dir: Path,
-        queue_size: int = 20,
+        queue_size: int = 200,
         filename: str = "particles.vtkhdf",
         n_particles_hint: int = 0,
         compression: str | None = "gzip",
         compression_opts: int = 1,
+        flush_interval: int = 1,
     ) -> None:
+        """Spawn a background writer thread.
+
+        Parameters
+        ----------
+        queue_size
+            Maximum number of pending exports. The main loop blocks in
+            ``enqueue_export`` once the queue is full; pick a value large
+            enough that the writer drains fast enough to never fill up at
+            the kernel's step rate. With 100-300k particles and gzip-1
+            compression, ~30-50 ms per step is typical; a 200-deep queue
+            absorbs ~10 s of GPU bursts before back-pressuring.
+        flush_interval
+            Forwarded to :class:`TransientPolyDataWriter`. Default 1
+            (flush every step) so a SIGTERM-killed run leaves a complete
+            file up to the last committed step.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.output_path = self.output_dir / filename
@@ -456,6 +509,7 @@ class VTKHDFExportThread:
             n_particles_hint=n_particles_hint,
             compression=compression,
             compression_opts=compression_opts,
+            flush_interval=flush_interval,
         )
 
     def start(self) -> None:
@@ -477,14 +531,26 @@ class VTKHDFExportThread:
         except queue.Full:
             print(f"Warning: Export queue full at step {step}, skipping")
 
+    # Sentinel objects placed on the queue to instruct the worker.
+    _STOP = object()
+    _FLUSH = object()
+
     def _worker(self) -> None:
         while not self.stop_event.is_set():
             try:
                 item = self.export_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            if item is None:
+            if item is self._STOP or item is None:
                 break
+            if item is self._FLUSH:
+                try:
+                    self._writer.flush()
+                except Exception as e:  # pragma: no cover
+                    print(f"VTKHDF flush error: {e}")
+                finally:
+                    self.export_queue.task_done()
+                continue
             step, positions, particle_ids, element_ids, extra_scalars = item
             try:
                 self._writer.write_step(
@@ -500,8 +566,18 @@ class VTKHDFExportThread:
             finally:
                 self.export_queue.task_done()
 
+    def flush_async(self) -> None:
+        """Request the writer to flush the file at its next opportunity
+        (after any already-queued writes complete). Non-blocking; safe to
+        call from a signal handler."""
+        try:
+            self.export_queue.put_nowait(self._FLUSH)
+        except queue.Full:
+            # Queue is full; the next stop() will flush via close() anyway.
+            pass
+
     def stop(self) -> None:
-        self.export_queue.put(None)
+        self.export_queue.put(self._STOP)
         self.stop_event.set()
         if self.worker_thread:
             self.worker_thread.join(timeout=60.0)
