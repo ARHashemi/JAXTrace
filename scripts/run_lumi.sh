@@ -147,6 +147,18 @@ MONITOR_INTERVAL=30
 # END USER CONFIGURATION — below this line is infrastructure.
 # =============================================================================
 
+# ── Local overrides (untracked) ──────────────────────────────────────────────
+# If scripts/run_lumi.local.sh exists alongside this file, source it here.
+# Use it for per-user paths and per-experiment knobs that you don't want to
+# commit. The .gitignore in this repo already excludes *.local.sh so the
+# file will never be picked up by `git add` or collide with `git pull`.
+_LOCAL_OVERRIDES="$(dirname "$0")/run_lumi.local.sh"
+if [ -f "$_LOCAL_OVERRIDES" ]; then
+    echo "[config] Sourcing local overrides: $_LOCAL_OVERRIDES"
+    # shellcheck source=/dev/null
+    source "$_LOCAL_OVERRIDES"
+fi
+
 # ── Derive case name (needed for default output folder) ─────────────────────
 if [ -n "$CASE_STEM" ]; then
   _CASE="$CASE_STEM"

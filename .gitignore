@@ -1,3 +1,9 @@
+# Per-host / per-user override files for the launcher scripts.
+# These are sourced from the tracked scripts if present but never
+# committed, so users can keep their paths and per-run knobs locally.
+scripts/run_workstation.local.sh
+scripts/run_lumi.local.sh
+
 # outputs
 *.jpg
 *.mkv
