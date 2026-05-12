@@ -8,6 +8,9 @@
 #SBATCH --cpus-per-task=7
 #SBATCH --mem=120G
 #SBATCH --time=06:00:00
+#SBATCH --signal=B:SIGTERM@120   # SIGTERM batch shell 120s before time limit
+                                  # so run_tracking.py can flush its VTKHDF
+                                  # archive before SLURM SIGKILLs everything
 #SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%j.out
 #SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%j.err
 
@@ -309,6 +312,22 @@ if [ -n "${XLA_PYTHON_CLIENT_ALLOCATOR:-}" ]; then
   ALLOC_ENV=( --env "XLA_PYTHON_CLIENT_ALLOCATOR=$XLA_PYTHON_CLIENT_ALLOCATOR" )
 fi
 
+# Trap SIGTERM so that when SLURM signals 120 s before the time limit
+# (--signal=B:SIGTERM@120), we forward it to the srun job step. srun in
+# turn forwards SIGTERM to the singularity/python child, which lets
+# run_tracking.py's signal handler flush the VTKHDF archive cleanly.
+# The trap MUST be a one-liner that calls scancel/kill rather than waits,
+# otherwise bash blocks waiting for the foreground job to finish.
+_forward_sigterm() {
+  echo "[trap] Forwarding SIGTERM to srun step (PID $SRUN_PID)..."
+  if [ -n "${SRUN_PID:-}" ]; then
+    # scancel --signal forwards to the job step's tasks (python).
+    scancel --signal=TERM --batch ${SLURM_JOB_ID:-} 2>/dev/null
+    kill -TERM "$SRUN_PID" 2>/dev/null
+  fi
+}
+trap _forward_sigterm SIGTERM
+
 srun --gpus-per-task=1 \
   singularity exec --cleanenv \
   --env PYTHONPATH=$JAXTRACE:$PKGS \
@@ -323,8 +342,9 @@ srun --gpus-per-task=1 \
   --env TF_CPP_MIN_LOG_LEVEL=$TF_CPP_MIN_LOG_LEVEL \
   --env HSA_ENABLE_SDMA=$HSA_ENABLE_SDMA \
   $SIF \
-  python $JAXTRACE/run_tracking.py "${ARGS[@]}"
-
+  python $JAXTRACE/run_tracking.py "${ARGS[@]}" &
+SRUN_PID=$!
+wait $SRUN_PID
 SIM_EXIT=$?
 
 # ── Stop monitor ─────────────────────────────────────────────────────────────
