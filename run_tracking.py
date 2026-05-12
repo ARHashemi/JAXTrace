@@ -654,28 +654,44 @@ def main():
     # ==================================================================
     t_stage = time.time()
     print(f"\n[1/7] Loading mesh...")
-    node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
-        base_path=MESH_BASE_PATH,
-        file_pattern=args.mesh_pattern,
-        timestep_range=VELOCITY_TIMESTEP_RANGE,
-        field_name=VELOCITY_FIELD,
-        verbose=False,
-    )
-    print(f"  Elements: {connectivity.shape[0]:,}, Nodes: {node_positions.shape[0]:,}")
-
-    # Optional: load temperature sequence (for --track-max-temperature)
-    temperature_sequence = None
+    # Load all requested fields in a single PVTU traversal. PVTU parse +
+    # decompression is the dominant per-file cost (~50-200 MB per file on
+    # large meshes); reading additional fields from the already-open VTK
+    # output is essentially free. With temperature off this loads only
+    # Displacement, identical wall time to the legacy single-field path.
+    fields_to_load = [VELOCITY_FIELD]
     if args.track_max_temperature:
-        print(f"  Loading temperature field '{args.temperature_field}'...")
-        temperature_sequence = load_scalar_sequence_from_pvtu(
+        fields_to_load.append(args.temperature_field)
+
+    if len(fields_to_load) == 1:
+        # Use the legacy single-field loader so existing runs are unchanged.
+        node_positions, connectivity, velocity_sequence = (
+            load_velocity_sequence_from_pvtu(
+                base_path=MESH_BASE_PATH,
+                file_pattern=args.mesh_pattern,
+                timestep_range=VELOCITY_TIMESTEP_RANGE,
+                field_name=VELOCITY_FIELD,
+                verbose=False,
+            )
+        )
+        temperature_sequence = None
+    else:
+        # Multi-field path: one pass over the PVTUs for every needed field.
+        from jaxtrace.gpu.mesh_loader_timedep import load_field_sequences_from_pvtu
+        node_positions, connectivity, _fields = load_field_sequences_from_pvtu(
             base_path=MESH_BASE_PATH,
             file_pattern=args.mesh_pattern,
             timestep_range=VELOCITY_TIMESTEP_RANGE,
-            field_name=args.temperature_field,
+            field_names=fields_to_load,
             verbose=False,
         )
+        velocity_sequence = _fields[VELOCITY_FIELD]
+        temperature_sequence = _fields[args.temperature_field]
+        print(f"    Loaded fields in single pass: {fields_to_load}")
         print(f"    Temperature: {temperature_sequence.shape}  "
               f"({temperature_sequence.nbytes / (1024**2):.1f} MB)")
+
+    print(f"  Elements: {connectivity.shape[0]:,}, Nodes: {node_positions.shape[0]:,}")
 
     print("  Deduplicating...")
     scalar_seqs = {'Temperature': temperature_sequence} if temperature_sequence is not None else None

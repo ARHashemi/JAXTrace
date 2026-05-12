@@ -124,12 +124,18 @@ class TransientPolyDataWriter:
         self._flush_interval = max(int(flush_interval), 0)
         self._steps_since_flush = 0
 
-        # libver="latest" enables HDF5 1.10+ format features (required by
-        # SWMR and by VTKHDF Version 2). It does not lock SWMR on; we'd
-        # only call swmr_mode = True if a separate reader process were
-        # tailing the file — but using "latest" makes the on-disk format
-        # consistent with the schema we declare.
-        self._file = h5py.File(str(self.output_path), "w", libver="latest")
+        # Pin the on-disk HDF5 file-format envelope to ('earliest', 'v110').
+        # v110 is the format introduced in HDF5 1.10 and is what VTK 9.x
+        # bundles internally. Letting h5py default to ('earliest', 'v114')
+        # or worse, using libver='latest', produces chunked-compressed
+        # dataset layout messages that VTK 9.5's reader and ParaView's
+        # vtkHDFReader cannot decode (it reports
+        # 'bad version number for layout message'). The fix is to write a
+        # purely v110-compatible file. v110 already provides everything we
+        # need (chunking, gzip, dataset resize, SWMR if we later opt in).
+        self._file = h5py.File(
+            str(self.output_path), "w", libver=("earliest", "v110"),
+        )
         self._root = self._file.create_group("VTKHDF")
         self._root.attrs["Version"] = np.array([2, 0], dtype="i8")
         # The Type attribute must be a fixed-length ASCII string per the

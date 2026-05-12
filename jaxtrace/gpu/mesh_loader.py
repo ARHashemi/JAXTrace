@@ -28,19 +28,33 @@ except ImportError:
 
 def load_mesh_from_pvtu(
     mesh_path: Path,
-    field_name: Optional[str] = None
+    field_name: Optional[str] = None,
+    field_names: Optional[list] = None,
+    verbose: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
     Load mesh from PVTU file.
 
     Args:
-        mesh_path: Path to PVTU file or directory containing PVTU
-        field_name: Optional velocity field name to load
+        mesh_path: Path to PVTU file or directory containing PVTU.
+        field_name: Optional single field name to load. Kept for
+            backward compatibility; returns the field as the third
+            tuple element, or ``None`` if it isn't present.
+        field_names: Optional list of field names to load in a single
+            pass over the PVTU file. When supplied, the third tuple
+            element is a ``dict[str, np.ndarray | None]`` keyed by
+            field name. Use this to avoid re-opening the same PVTU
+            multiple times when several fields are needed (e.g.
+            Displacement, Temperature, LEVEL).
+        verbose: When True (default), print per-file size info.
 
     Returns:
-        positions: (N_nodes, 3) float64
-        connectivity: (N_elements, 4) int32
-        velocities: (N_nodes, 3) float64 or None
+        positions: ``(N_nodes, 3)`` float64.
+        connectivity: ``(N_elements, 4)`` int32.
+        fields: If ``field_names`` is supplied, a dict from each
+            requested name to its array (or ``None`` if absent).
+            Otherwise, the array for ``field_name`` (single-field
+            legacy behaviour) or ``None``.
     """
     # Find PVTU file
     if mesh_path.is_dir():
@@ -51,7 +65,8 @@ def load_mesh_from_pvtu(
     else:
         mesh_file = mesh_path
 
-    print(f"Loading mesh: {mesh_file}")
+    if verbose:
+        print(f"Loading mesh: {mesh_file}")
 
     # Fail early and clearly if the file is missing rather than letting VTK
     # return a null output that crashes later with 'NoneType has no GetData'.
@@ -72,7 +87,8 @@ def load_mesh_from_pvtu(
     # Extract positions
     positions = numpy_support.vtk_to_numpy(output.GetPoints().GetData())
     positions = positions.astype(np.float64)
-    print(f"  Nodes: {positions.shape[0]:,}")
+    if verbose:
+        print(f"  Nodes: {positions.shape[0]:,}")
 
     # Extract connectivity (assume all tetrahedral)
     n_cells = output.GetNumberOfCells()
@@ -83,21 +99,37 @@ def load_mesh_from_pvtu(
     for i in range(n_cells):
         connectivity[i] = connectivity_data[i * 5 + 1 : i * 5 + 5]
 
-    print(f"  Elements: {n_cells:,}")
+    if verbose:
+        print(f"  Elements: {n_cells:,}")
 
-    # Load velocity field if requested
-    velocities = None
+    # Load fields. When field_names is provided, return a dict keyed by
+    # name; otherwise honour the legacy single-field interface.
+    point_data = output.GetPointData()
+
+    def _extract(name: str) -> Optional[np.ndarray]:
+        if not point_data.HasArray(name):
+            if verbose:
+                avail = [point_data.GetArrayName(i)
+                         for i in range(point_data.GetNumberOfArrays())]
+                print(f"  Warning: field '{name}' not found. Available: {avail}")
+            return None
+        arr = numpy_support.vtk_to_numpy(point_data.GetArray(name))
+        arr = arr.astype(np.float64)
+        if verbose:
+            print(f"  Loaded field '{name}': {arr.shape}")
+        return arr
+
+    if field_names is not None:
+        result: dict = {name: _extract(name) for name in field_names}
+        # Backward compatibility: when both field_name and field_names are
+        # specified, prefer the dict form but still include the single name.
+        if field_name is not None and field_name not in result:
+            result[field_name] = _extract(field_name)
+        return positions, connectivity, result
+
+    velocities: Optional[np.ndarray] = None
     if field_name is not None:
-        point_data = output.GetPointData()
-        if point_data.HasArray(field_name):
-            velocities = numpy_support.vtk_to_numpy(point_data.GetArray(field_name))
-            velocities = velocities.astype(np.float64)
-            print(f"  Loaded field '{field_name}': {velocities.shape}")
-        else:
-            print(f"  Warning: Field '{field_name}' not found")
-            available = [point_data.GetArrayName(i) for i in range(point_data.GetNumberOfArrays())]
-            print(f"  Available fields: {available}")
-
+        velocities = _extract(field_name)
     return positions, connectivity, velocities
 
 
