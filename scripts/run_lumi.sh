@@ -283,31 +283,45 @@ export TF_CPP_MIN_LOG_LEVEL=2
 export HSA_ENABLE_SDMA=0
 
 # ── GPU & Memory Monitor (background) ───────────────────────────────────────
-# BENCHMARK_MODE disables the monitor entirely. Otherwise the monitor logs
-# rocm-smi + free at $MONITOR_INTERVAL seconds. We deliberately do NOT run
-# find / du on the output dir every tick -- that becomes O(N) per tick with
-# many VTU files and hurts timing on large runs.
+# Logs rocm-smi + free at $MONITOR_INTERVAL seconds when BENCHMARK_MODE != 1.
+# The monitor runs in its own process group via `setsid` so the cleanup
+# `kill -- -$MONITOR_PGID` reaches both the bash subshell AND its current
+# `sleep` child (a plain `kill` to the bash PID would only fire after the
+# sleep returns, leaving the monitor alive up to $MONITOR_INTERVAL seconds
+# after the run completes).
 MONITOR_PID=""
+MONITOR_PGID=""
 if [ "$BENCHMARK_MODE" != "1" ] && [ "$MONITOR_INTERVAL" -gt 0 ] 2>/dev/null; then
-  (
-    echo "=== GPU & Memory Monitor === Job $SLURM_JOB_ID === $(date) ==="
-    echo "Interval: ${MONITOR_INTERVAL}s"
+  setsid bash -c '
+    echo "=== GPU & Memory Monitor === Job '"$SLURM_JOB_ID"' === $(date) ==="
+    echo "Interval: '"${MONITOR_INTERVAL}"'s"
     echo ""
     while true; do
-      echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
+      echo "--- $(date '\''+%Y-%m-%d %H:%M:%S'\'') ---"
       if command -v rocm-smi &>/dev/null; then
         rocm-smi --showuse --showmemuse --showtemp 2>/dev/null \
-          | grep -E 'GPU|%|MiB|Temperature' \
+          | grep -E "GPU|%|MiB|Temperature" \
           || rocm-smi 2>/dev/null | tail -n +3
       fi
       echo ""
       free -h | head -2
       echo ""
-      sleep "$MONITOR_INTERVAL"
+      sleep '"${MONITOR_INTERVAL}"'
     done
-  ) > $MONITOR_LOG 2>&1 &
+  ' > "$MONITOR_LOG" 2>&1 &
   MONITOR_PID=$!
+  MONITOR_PGID=$MONITOR_PID   # setsid makes the new process its own pgleader
 fi
+
+# Ensure the monitor is reaped on any kind of exit (normal, error, SIGTERM
+# from SLURM, Ctrl-C). trap EXIT is bash's unconditional cleanup hook.
+_cleanup_monitor() {
+  if [ -n "${MONITOR_PGID:-}" ]; then
+    kill -- -"$MONITOR_PGID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+  fi
+}
+trap _cleanup_monitor EXIT
 
 # ── Build CLI argument list from user config ────────────────────────────────
 ARGS=(
@@ -439,10 +453,10 @@ wait $SRUN_PID
 SIM_EXIT=$?
 
 # ── Stop monitor ─────────────────────────────────────────────────────────────
-if [ -n "$MONITOR_PID" ]; then
-  kill $MONITOR_PID 2>/dev/null
-  wait $MONITOR_PID 2>/dev/null
-fi
+# Handled unconditionally by the EXIT trap installed alongside the monitor.
+# Calling it explicitly here closes the log before the move/copy steps so
+# the archived monitor log captures only the active run.
+_cleanup_monitor
 
 echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"

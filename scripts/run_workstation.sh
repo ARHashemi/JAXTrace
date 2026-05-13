@@ -338,27 +338,46 @@ export TF_CPP_MIN_LOG_LEVEL=2
 # Python path
 # export PYTHONPATH="${JAXTRACE}:${PKGS}:${PYTHONPATH:-}"
 
-# ── GPU & Memory Monitor (nvidia-smi replaces rocm-smi) ──────────────────────
+# ── GPU & Memory Monitor (nvidia-smi) ────────────────────────────────────────
+# The monitor runs in its own process group via `setsid` so the cleanup
+# `kill -- -$MONITOR_PGID` reaches both the bash subshell AND its current
+# `sleep` child (a plain `kill` to the bash PID would wait for the sleep
+# to finish, leaving the monitor alive for up to $MONITOR_INTERVAL seconds
+# after the run completes).
 MONITOR_PID=""
+MONITOR_PGID=""
 if [ "$BENCHMARK_MODE" != "1" ] && [ "${MONITOR_INTERVAL}" -gt 0 ] 2>/dev/null; then
-(
-    echo "=== GPU & Memory Monitor === Run ${RUN_ID} === $(date) ==="
-    echo "Interval: ${MONITOR_INTERVAL}s"
+setsid bash -c '
+    echo "=== GPU & Memory Monitor === Run '"${RUN_ID}"' === $(date) ==="
+    echo "Interval: '"${MONITOR_INTERVAL}"'s"
     echo ""
     while true; do
-        echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
+        echo "--- $(date '\''+%Y-%m-%d %H:%M:%S'\'') ---"
         nvidia-smi \
             --query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw \
             --format=csv,noheader,nounits \
-        | awk -F', ' '{printf "  GPU  Temp:%s°C  Util:%s%%  VRAM:%s/%s MiB  Power:%sW\n",$1,$2,$3,$4,$5}'
+        | awk -F", " '\''{printf "  GPU  Temp:%s°C  Util:%s%%  VRAM:%s/%s MiB  Power:%sW\n",$1,$2,$3,$4,$5}'\''
         echo ""
         free -h | head -2
         echo ""
-        sleep "$MONITOR_INTERVAL"
+        sleep '"${MONITOR_INTERVAL}"'
     done
-) > "$MONITOR_LOG" 2>&1 &
+' > "$MONITOR_LOG" 2>&1 &
 MONITOR_PID=$!
+MONITOR_PGID=$MONITOR_PID   # setsid makes the new process its own pgleader
 fi
+
+# Ensure the monitor is reaped no matter how this script ends — normal exit,
+# user Ctrl-C, killed terminal, or unhandled error. trap EXIT is bash's
+# unconditional cleanup hook.
+_cleanup_monitor() {
+    if [ -n "${MONITOR_PGID:-}" ]; then
+        kill -- -"$MONITOR_PGID" 2>/dev/null || true
+        # Reap the process so it doesn't linger as a zombie.
+        wait "$MONITOR_PID" 2>/dev/null || true
+    fi
+}
+trap _cleanup_monitor EXIT INT TERM
 
 # ── Build CLI argument list ───────────────────────────────────────────────────
 ARGS=(
@@ -465,10 +484,10 @@ python "${JAXTRACE}/run_tracking.py" "${ARGS[@]}"
 SIM_EXIT=$?
 
 # ── Stop monitor ──────────────────────────────────────────────────────────────
-if [ -n "$MONITOR_PID" ]; then
-    kill "$MONITOR_PID" 2>/dev/null
-    wait "$MONITOR_PID" 2>/dev/null
-fi
+# Handled unconditionally by the EXIT trap installed alongside the monitor.
+# Calling _cleanup_monitor explicitly here triggers it before the move/log
+# steps so the monitor log captures only the active run, not the cleanup.
+_cleanup_monitor
 
 echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
