@@ -1,7 +1,11 @@
 #!/bin/bash
+# SLURM directives. SLURM does not expand shell variables here; fill in your
+# LUMI project ID and log directory before submitting. Override at submission
+# time with:
+#   sbatch --account=project_XXXXXXXXX --output=... --error=... run_lumi.sh
 #SBATCH --job-name=jaxtrace
 #SBATCH --partition=small-g
-#SBATCH --account=project_465002752
+#SBATCH --account=project_XXXXXXXXX
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks=1
@@ -11,8 +15,8 @@
 #SBATCH --signal=B:SIGTERM@120   # SIGTERM batch shell 120s before time limit
                                   # so run_tracking.py can flush its VTKHDF
                                   # archive before SLURM SIGKILLs everything
-#SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%j.out
-#SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 # =============================================================================
 # USER CONFIGURATION — edit these groups to control the production run.
@@ -20,12 +24,21 @@
 # =============================================================================
 
 # ── [1] Paths ────────────────────────────────────────────────────────────────
+# LUMI project ID. Defaults to the SLURM account used to submit the job
+# (SLURM_JOB_ACCOUNT), which is set automatically when run via `sbatch`.
+PROJECT="${SLURM_JOB_ACCOUNT:-project_XXXXXXXXX}"
+
+# Singularity image with JAX + ROCm.
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
-JAXTRACE=/project/project_465002752/hashemia/JAXTrace_stable
-PKGS=/project/project_465002752/hashemia/required-packages
+
+# Per-user paths derived from $PROJECT and $USER. Override in a local config
+# (scripts/run_lumi.local.sh, untracked) if your layout differs.
+JAXTRACE="/project/${PROJECT}/${USER}/JAXTrace"
+PKGS="/project/${PROJECT}/${USER}/required-packages"
+
 # INPUT: path to the case folder. Accepts either '<case>.gid' or
 # '<case>.gid/post'. Ignored when AUTO_DETECT_CASE=1.
-INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid
+INPUT="/scratch/${PROJECT}/${USER}/data/<CASE>.gid"
 
 # AUTO_DETECT_CASE: when 1, INPUT is replaced by the directory containing
 # this script at runtime. Use this when a copy of the script is placed
@@ -53,8 +66,8 @@ FEMUSS_DIR=""                 # directory containing the FEMUSS particle files
 RUN_TAG=""
 
 # OUTPUT_TARGET selects where JAXTrace results are written.
-#   scratch -- /flash/project_*/hashemia/run_<JOB_ID> during the run, then
-#              moved to /scratch/project_*/hashemia/outputs/<run_folder>.
+#   scratch -- /flash/${PROJECT}/${USER}/run_<JOB_ID> during the run, then
+#              moved to /scratch/${PROJECT}/${USER}/outputs/<run_folder>.
 #   case    -- <case>.gid/<OUTPUT_CASE_SUBFOLDER>, written in place.
 OUTPUT_TARGET=scratch
 OUTPUT_CASE_SUBFOLDER=post_pt   # used when OUTPUT_TARGET=case
@@ -216,9 +229,9 @@ fi
 # ── Output paths ────────────────────────────────────────────────────────────
 # Two layouts:
 #   OUTPUT_TARGET=scratch (default): /flash for active IO, then move to
-#                                    /scratch/project_*/hashemia/outputs/.
+#                                    /scratch/${PROJECT}/${USER}/outputs/.
 #   OUTPUT_TARGET=case             : write straight into the case folder.
-FLASH_OUT=/flash/project_465002752/hashemia/run_$SLURM_JOB_ID
+FLASH_OUT="/flash/${PROJECT}/${USER}/run_${SLURM_JOB_ID}"
 case "${OUTPUT_TARGET:-scratch}" in
   case)
     SUB="${OUTPUT_CASE_SUBFOLDER:-post_pt}"
@@ -228,7 +241,7 @@ case "${OUTPUT_TARGET:-scratch}" in
     echo "[output] OUTPUT_TARGET=case: writing to '$SCRATCH_OUT'"
     ;;
   scratch)
-    SCRATCH_BASE=/scratch/project_465002752/hashemia/outputs
+    SCRATCH_BASE="/scratch/${PROJECT}/${USER}/outputs"
     SCRATCH_FOLDER=""             # auto: "${_CASE}_jaxtrace_${SLURM_JOB_ID}"
     if [ -z "$SCRATCH_FOLDER" ]; then
       SCRATCH_FOLDER="${_CASE}_jaxtrace_${SLURM_JOB_ID}"
@@ -245,7 +258,7 @@ MONITOR_LOG="${SCRATCH_BASE}/$(basename "$SCRATCH_OUT")_monitor.log"
 mkdir -p $FLASH_OUT $SCRATCH_OUT
 
 # ── MIOpen cache to RAM ──────────────────────────────────────────────────────
-export MIOPEN_USER_DB_PATH="/tmp/hashemia-miopen-$SLURM_JOB_ID"
+export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-${SLURM_JOB_ID}"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p $MIOPEN_USER_DB_PATH
 
@@ -266,7 +279,7 @@ else
 fi
 export MIOPEN_FIND_MODE=1
 export TF_CPP_MIN_LOG_LEVEL=2
-# HSA SDMA: leaving disabled (validated on MI250X; enable via local edit to test).
+# Disable HSA SDMA for host<->device transfers (set to 1 to enable).
 export HSA_ENABLE_SDMA=0
 
 # ── GPU & Memory Monitor (background) ───────────────────────────────────────
@@ -443,9 +456,11 @@ if [ "$FLASH_OUT" != "$SCRATCH_OUT" ]; then
   rmdir $FLASH_OUT 2>/dev/null
 fi
 
-# Copy SLURM stdout/stderr and monitor log into the results folder
-SLURM_OUT="/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
-SLURM_ERR="/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err"
+# Copy SLURM stdout/stderr and monitor log into the results folder. The
+# default --output / --error paths in the #SBATCH header are relative to
+# SLURM_SUBMIT_DIR (the directory `sbatch` was invoked from).
+SLURM_OUT="${SLURM_SUBMIT_DIR:-.}/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+SLURM_ERR="${SLURM_SUBMIT_DIR:-.}/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err"
 mkdir -p "$SCRATCH_OUT/logs"
 [ -f "$SLURM_OUT" ]   && cp "$SLURM_OUT" "$SCRATCH_OUT/logs/"
 [ -f "$SLURM_ERR" ]   && cp "$SLURM_ERR" "$SCRATCH_OUT/logs/"
