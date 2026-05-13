@@ -343,7 +343,7 @@ def main():
     """Run node deduplication on FLA mesh."""
 
     # Configuration
-    MESH_BASE_PATH = Path("/home/arhashemi/Workspace/welding/Edgar/FLA/post/0eule")
+    MESH_BASE_PATH = Path("/path/to/FLA/post/0eule")
     PVTU_FILE = MESH_BASE_PATH / "featurelessAvtk_120.pvtu"
     OUTPUT_FILE = MESH_BASE_PATH / "featurelessAvtk_120_merged.npz"
 

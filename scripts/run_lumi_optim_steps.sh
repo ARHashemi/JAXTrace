@@ -1,30 +1,34 @@
 #!/bin/bash
+# SLURM directives — fill in your project ID and log directory before
+# submitting, or override at submission time:
+#   sbatch --account=project_XXXXXXXXX --output=... run_lumi_optim_steps.sh
 #SBATCH --job-name=jaxtrace_optim
 #SBATCH --partition=small-g
-#SBATCH --account=project_465002752
+#SBATCH --account=project_XXXXXXXXX
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
 #SBATCH --mem=120G
 #SBATCH --time=04:00:00
-#SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%j.out
-#SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+PROJECT="${SLURM_JOB_ACCOUNT:-project_XXXXXXXXX}"
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
-JAXTRACE=/project/project_465002752/hashemia/JAXTrace
-PKGS=/project/project_465002752/hashemia/required-packages
-INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid/post
+JAXTRACE="/project/${PROJECT}/${USER}/JAXTrace"
+PKGS="/project/${PROJECT}/${USER}/required-packages"
+INPUT="/scratch/${PROJECT}/${USER}/data/<CASE>.gid/post"
 
-FLASH_BASE=/flash/project_465002752/hashemia/optim_$SLURM_JOB_ID
-SCRATCH_BASE=/scratch/project_465002752/hashemia/outputs/optim_$SLURM_JOB_ID
-MONITOR_LOG=/scratch/project_465002752/hashemia/logs/jaxtrace_optim_${SLURM_JOB_ID}_monitor.log
+FLASH_BASE="/flash/${PROJECT}/${USER}/optim_${SLURM_JOB_ID}"
+SCRATCH_BASE="/scratch/${PROJECT}/${USER}/outputs/optim_${SLURM_JOB_ID}"
+MONITOR_LOG="/scratch/${PROJECT}/${USER}/logs/jaxtrace_optim_${SLURM_JOB_ID}_monitor.log"
 
 mkdir -p $FLASH_BASE $SCRATCH_BASE
 
 # ── Environment ───────────────────────────────────────────────────────────────
-export MIOPEN_USER_DB_PATH="/tmp/hashemia-miopen-$SLURM_JOB_ID"
+export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-${SLURM_JOB_ID}"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p $MIOPEN_USER_DB_PATH
 
