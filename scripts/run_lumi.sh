@@ -23,20 +23,41 @@
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
 JAXTRACE=/project/project_465002752/hashemia/JAXTrace_stable
 PKGS=/project/project_465002752/hashemia/required-packages
-# INPUT: point at the FEMUSS case folder. Either '<case>.gid' or '<case>.gid/post'.
-# Mesh / particle file patterns auto-derive from the '<case>.gid' stem.
-# To override completely, set MESH_DIR and/or FEMUSS_DIR below.
+# INPUT: path to the case folder. Accepts either '<case>.gid' or
+# '<case>.gid/post'. Ignored when AUTO_DETECT_CASE=1.
 INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid
-MESH_SUBDIR=0eule             # subfolder under post/ with mesh PVTU
-FEMUSS_SUBDIR=1part           # subfolder under post/ with FEMUSS particles
-CASE_STEM=""                  # override auto-detected case stem (empty = auto)
-MESH_PATTERN=""               # override, e.g. "cylA_{timestep}.pvtu"  (empty = auto)
-FEMUSS_PATTERN=""             # override, e.g. "cylA_pt_{timestep}.pvtu" (empty = auto)
-# Direct path overrides — bypass INPUT/<case>.gid/post/<subdir> convention entirely.
-# When set, MESH_SUBDIR / FEMUSS_SUBDIR are ignored for the corresponding path.
-MESH_DIR=""                   # e.g. "/scratch/.../my_mesh_files"
-FEMUSS_DIR=""                 # e.g. "/scratch/.../my_particle_files"
-RUN_TAG=""                    # optional custom subfolder; empty = auto
+
+# AUTO_DETECT_CASE: when 1, INPUT is replaced by the directory containing
+# this script at runtime. Use this when a copy of the script is placed
+# inside each case folder (e.g. .../A1.gid/run_jaxtrace.sh).
+AUTO_DETECT_CASE=0
+
+# Subfolders inside <case>.gid/post/ that contain the mesh PVTU files and
+# the FEMUSS particle PVTU files. Set to "" when the files sit directly in
+# <case>.gid/post/ without an inner subfolder.
+MESH_SUBDIR=""                # mesh PVTU subfolder name; "" if none
+FEMUSS_SUBDIR=""              # FEMUSS particles subfolder name; "" if none
+
+# Auto-derivation overrides — leave blank to let the script infer them
+# from the case folder name (e.g. cylA.gid -> stem 'cylA').
+CASE_STEM=""                  # case-stem string used in file patterns
+MESH_PATTERN=""               # e.g. "cylA_{timestep}.pvtu"
+FEMUSS_PATTERN=""             # e.g. "cylA_pt_{timestep}.pvtu"
+
+# Absolute path overrides. When set, the corresponding *_SUBDIR is ignored
+# and the given path is used directly.
+MESH_DIR=""                   # directory containing the mesh PVTU files
+FEMUSS_DIR=""                 # directory containing the FEMUSS particle files
+
+# Optional tag appended to the auto-generated output folder name.
+RUN_TAG=""
+
+# OUTPUT_TARGET selects where JAXTrace results are written.
+#   scratch -- /flash/project_*/hashemia/run_<JOB_ID> during the run, then
+#              moved to /scratch/project_*/hashemia/outputs/<run_folder>.
+#   case    -- <case>.gid/<OUTPUT_CASE_SUBFOLDER>, written in place.
+OUTPUT_TARGET=scratch
+OUTPUT_CASE_SUBFOLDER=post_pt   # used when OUTPUT_TARGET=case
 
 # ── [2] Precision & velocity field ───────────────────────────────────────────
 PRECISION=float32             # float32 | float64
@@ -46,11 +67,12 @@ VELOCITY_FIELD=Displacement
 LEVELSET_FIELD=LEVEL
 
 # ── [3] Simulation control ───────────────────────────────────────────────────
-N_STEPS=2684
-DT=0.0025
-LOG_INTERVAL=10
-EXPORT_FREQ=1                 # every N steps; set 0 with NO_EXPORT=1 to disable
-NO_EXPORT=0                   # 1 = disable all VTU output (timing run)
+N_STEPS=2684                  # total number of RK4 steps
+DT=0.0025                     # RK4 timestep size [s]
+LOG_INTERVAL=10               # print + flush stats every N steps
+EXPORT_FREQ=1                 # export every N steps (combine with NO_EXPORT=1
+                              # to disable export entirely)
+NO_EXPORT=0                   # 1 = no particle export
 
 # ── [4] Particle seeding ─────────────────────────────────────────────────────
 # SEED_SOURCE: femuss | box | grid | box-frac | grid-frac | file
@@ -89,21 +111,26 @@ ENHANCED_SEARCH_BAND=0.0      # 0 = off; e.g. 1e-3 for ±1mm node-L1+5x5x5
 REGISTRATION=""               # "" = default | vertex_multi | parent_cube
 
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
-# Per-wall semantics for BOUNDARY_WALLS (comma-separated "wall=mode" pairs):
-#   <wall>=clamp   particles are pulled back inside (default for every wall)
-#   <wall>=outlet  the wall does NOT clamp; particles pass through and are
-#                  treated as escaped (their element_id becomes -1)
-# Any wall not listed uses the default 'clamp'. To clamp every wall, set "".
-#
-# Default for this case: only x_max is an outlet; everything else clamps,
-# including z_max (so particles leaving through the top get projected back
-# inside via the boundary-projection mechanism).
+# BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
+# where wall is one of {x_min, x_max, y_min, y_max, z_min, z_max} and mode
+# is either:
+#   clamp  -- particles crossing this wall are projected back inside the
+#             bounding box (default for any wall not listed)
+#   outlet -- particles crossing this wall leave the domain; their
+#             element_id is set to -1 and tracking stops for them
+# Set to "" to clamp every wall.
 BOUNDARY_WALLS="x_max=outlet"
-BOUNDARY_PROJ_TOL=1e-6                       # inward tolerance for boundary projection
-POINT_IN_TET_TOL=1e-6
-LEVELSET_MODE=zero_vel        # zero_vel | skip_step
-FAILED_SUBSTAGE=zero_vel      # zero_vel | last_valid_vel | skip_step
-INTERPOLATION_METHOD=direct_inverse   # direct_inverse | gram_matrix
+BOUNDARY_PROJ_TOL=1e-6        # inward offset applied when clamping to a wall [m]
+POINT_IN_TET_TOL=1e-6         # numerical tolerance for point-in-tet test
+LEVELSET_MODE=zero_vel        # how to handle a particle inside the tool region:
+                              #   zero_vel  -- velocity at that step is set to 0
+                              #   skip_step -- the RK4 step is skipped entirely
+FAILED_SUBSTAGE=zero_vel      # policy when an RK4 substage falls outside the mesh:
+                              #   zero_vel       -- treat the substage as v=0
+                              #   last_valid_vel -- reuse the last interpolated v
+                              #   skip_step      -- abandon the step, freeze particle
+INTERPOLATION_METHOD=direct_inverse   # P1 velocity interpolation method:
+                                      #   direct_inverse | gram_matrix
 
 # ── [8] Pin velocity (FEMUSS FSW equivalent) ─────────────────────────────────
 PIN_VELOCITY=1                # 1 = on, 0 = off
@@ -113,34 +140,40 @@ PIN_AXIS="0.0 0.0 1.0"
 PIN_TILT=0.0
 
 # ── [9] Particle export options ──────────────────────────────────────────────
-# EXPORT_FORMAT: vtkhdf | vtu
-#   vtkhdf (default) -- single transient .vtkhdf archive for the whole run.
-#                       Requires ParaView >= 6.0 / VTK >= 9.4.
-#                       Much faster to write and transfer than per-step VTUs.
-#   vtu              -- legacy: one .vtu per step, opened in ParaView as a
-#                       numbered series. Use this on older ParaView installs.
+# EXPORT_FORMAT: container format for the per-step particle output.
+#   vtkhdf -- single .vtkhdf archive containing all timesteps.
+#             Requires ParaView >= 6.0 / VTK >= 9.4 to read.
+#   vtu    -- one .vtu file per step, loaded in ParaView as a numbered
+#             series. Choose this for older ParaView installations.
 EXPORT_FORMAT=vtkhdf
-N_GROUPS=5                    # 0 disables group export
-EXPORT_ELEMENT_IDS=0          # 1 = include ElementID field
-EXPORT_ESCAPED_FLAG=0         # 1 = add 'Escaped' (0/1) per-particle flag set
-                              # when element_id<0 at any step; useful as a
-                              # Paraview Threshold filter to remove escapees
-TRACK_MAX_TEMPERATURE=0       # 1 = track per-particle max of TEMPERATURE_FIELD
-                              # over the trajectory (exported as 'MaxTemperature').
-                              # Adds ~1-3% per RK4 step and ~1.3 GB GPU memory
-                              # for the extra (n_timesteps, n_nodes) scalar stack.
-TEMPERATURE_FIELD=Temperature # PVTU field name when TRACK_MAX_TEMPERATURE=1
 
-# ── [10] Performance / benchmark tuning ──────────────────────────────────────
-# BENCHMARK_MODE=1: disables the background monitor and flips XLA to
-# preallocating allocator (faster but reserves ~75% of HBM up-front).
-# Use for pure timing runs; leave 0 for normal production.
+N_GROUPS=5                    # number of particle groups by initial X; 0 disables
+EXPORT_ELEMENT_IDS=0          # 1 = include each particle's host ElementID
+EXPORT_ESCAPED_FLAG=0         # 1 = include a per-particle 'Escaped' UInt8 field
+                              # (set to 1 the first time element_id<0; useful
+                              # for filtering out lost particles in ParaView)
+
+# Temperature export — both flags share the same per-step P1 evaluation, so
+# enabling both costs the same as enabling either one.
+TRACK_MAX_TEMPERATURE=0       # 1 = export running maximum of TEMPERATURE_FIELD
+                              # along each particle's trajectory as 'MaxTemperature'
+EXPORT_TEMPERATURE=0          # 1 = export the instantaneous TEMPERATURE_FIELD at
+                              # the current particle position as 'Temperature'
+TEMPERATURE_FIELD=Temperature # PVTU field name to read for the above flags
+
+# ── [10] Performance / monitoring ────────────────────────────────────────────
+# BENCHMARK_MODE: 1 forces XLA_PREALLOC=1 and disables the background
+# GPU/RAM monitor (eliminates monitor overhead for timing measurements).
 BENCHMARK_MODE=0
-# XLA_PREALLOC=1 forces XLA_PYTHON_CLIENT_PREALLOCATE=true regardless of mode.
-# 0 keeps the on-demand allocator (safer; matches validated runs).
+
+# XLA_PREALLOC controls JAX's GPU allocator strategy.
+#   1 -- preallocate ~75% of total HBM at startup (fixed pool)
+#   0 -- on-demand allocator, grows as needed
+# Preallocation is faster but blocks other processes from using that HBM.
 XLA_PREALLOC=0
-# Background monitor interval (seconds). Set high (e.g. 300) or 0 to disable
-# in production mode. BENCHMARK_MODE=1 forces monitor off regardless.
+
+# MONITOR_INTERVAL: seconds between GPU/RAM log entries. 0 disables the
+# background monitor. Ignored when BENCHMARK_MODE=1.
 MONITOR_INTERVAL=30
 
 # =============================================================================
@@ -159,6 +192,13 @@ if [ -f "$_LOCAL_OVERRIDES" ]; then
     source "$_LOCAL_OVERRIDES"
 fi
 
+# ── Auto-detect case folder from script location if requested ──────────────
+if [ "${AUTO_DETECT_CASE:-0}" = "1" ]; then
+  _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+  INPUT="$_SCRIPT_DIR"
+  echo "[case] AUTO_DETECT_CASE=1: INPUT='$INPUT'"
+fi
+
 # ── Derive case name (needed for default output folder) ─────────────────────
 if [ -n "$CASE_STEM" ]; then
   _CASE="$CASE_STEM"
@@ -167,18 +207,40 @@ else
   _CASE=$(basename "$_CASE" /post)   # strip trailing /post if present
 fi
 
-# ── Output paths (flash for active IO, scratch for long-term) ───────────────
-FLASH_OUT=/flash/project_465002752/hashemia/run_$SLURM_JOB_ID
-# SCRATCH_BASE: parent directory on scratch where the results folder is created.
-SCRATCH_BASE=/scratch/project_465002752/hashemia/outputs
-# SCRATCH_FOLDER: name of the results folder inside SCRATCH_BASE.
-# Default: <case>_jaxtrace_<jobid>. Override to use a custom name.
-SCRATCH_FOLDER=""             # empty = auto: "${_CASE}_jaxtrace_${SLURM_JOB_ID}"
-if [ -z "$SCRATCH_FOLDER" ]; then
-  SCRATCH_FOLDER="${_CASE}_jaxtrace_${SLURM_JOB_ID}"
+# ── Resolve absolute case directory (used by OUTPUT_TARGET=case) ───────────
+_CASE_DIR="$(cd "$INPUT" 2>/dev/null && pwd -P || echo "$INPUT")"
+if [ "$(basename "$_CASE_DIR")" = "post" ]; then
+  _CASE_DIR="$(dirname "$_CASE_DIR")"
 fi
-SCRATCH_OUT="${SCRATCH_BASE}/${SCRATCH_FOLDER}"
-MONITOR_LOG="${SCRATCH_BASE}/${SCRATCH_FOLDER}_monitor.log"
+
+# ── Output paths ────────────────────────────────────────────────────────────
+# Two layouts:
+#   OUTPUT_TARGET=scratch (default): /flash for active IO, then move to
+#                                    /scratch/project_*/hashemia/outputs/.
+#   OUTPUT_TARGET=case             : write straight into the case folder.
+FLASH_OUT=/flash/project_465002752/hashemia/run_$SLURM_JOB_ID
+case "${OUTPUT_TARGET:-scratch}" in
+  case)
+    SUB="${OUTPUT_CASE_SUBFOLDER:-post_pt}"
+    SCRATCH_OUT="${_CASE_DIR}/${SUB}"
+    SCRATCH_BASE="$(dirname "$SCRATCH_OUT")"
+    FLASH_OUT="$SCRATCH_OUT"   # python writes directly, no flash hop
+    echo "[output] OUTPUT_TARGET=case: writing to '$SCRATCH_OUT'"
+    ;;
+  scratch)
+    SCRATCH_BASE=/scratch/project_465002752/hashemia/outputs
+    SCRATCH_FOLDER=""             # auto: "${_CASE}_jaxtrace_${SLURM_JOB_ID}"
+    if [ -z "$SCRATCH_FOLDER" ]; then
+      SCRATCH_FOLDER="${_CASE}_jaxtrace_${SLURM_JOB_ID}"
+    fi
+    SCRATCH_OUT="${SCRATCH_BASE}/${SCRATCH_FOLDER}"
+    ;;
+  *)
+    echo "ERROR: OUTPUT_TARGET='${OUTPUT_TARGET}' not in {scratch, case}" >&2
+    exit 2
+    ;;
+esac
+MONITOR_LOG="${SCRATCH_BASE}/$(basename "$SCRATCH_OUT")_monitor.log"
 
 mkdir -p $FLASH_OUT $SCRATCH_OUT
 
@@ -280,7 +342,11 @@ ARGS=(
 ARGS+=( --export-format "$EXPORT_FORMAT" )
 [ "$EXPORT_ELEMENT_IDS" = "1" ] && ARGS+=( --export-element-ids )
 [ "$EXPORT_ESCAPED_FLAG" = "1" ] && ARGS+=( --export-escaped-flag )
-[ "$TRACK_MAX_TEMPERATURE" = "1" ] && ARGS+=( --track-max-temperature --temperature-field "$TEMPERATURE_FIELD" )
+[ "$TRACK_MAX_TEMPERATURE" = "1" ] && ARGS+=( --track-max-temperature )
+[ "$EXPORT_TEMPERATURE"     = "1" ] && ARGS+=( --export-temperature )
+if [ "$TRACK_MAX_TEMPERATURE" = "1" ] || [ "$EXPORT_TEMPERATURE" = "1" ]; then
+  ARGS+=( --temperature-field "$TEMPERATURE_FIELD" )
+fi
 [ "$PIN_VELOCITY" = "0" ] && ARGS+=( --no-pin-velocity )
 
 # Seed-source specific
@@ -369,9 +435,13 @@ echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
 
 # ── Move results to Scratch after job ───────────────────────────────────────
-echo "Moving results from flash to scratch..."
-mv $FLASH_OUT/* $SCRATCH_OUT/ 2>/dev/null
-rmdir $FLASH_OUT 2>/dev/null
+# When OUTPUT_TARGET=case, FLASH_OUT == SCRATCH_OUT and there's nothing to
+# move; python wrote directly into the case folder.
+if [ "$FLASH_OUT" != "$SCRATCH_OUT" ]; then
+  echo "Moving results from flash to scratch..."
+  mv $FLASH_OUT/* $SCRATCH_OUT/ 2>/dev/null
+  rmdir $FLASH_OUT 2>/dev/null
+fi
 
 # Copy SLURM stdout/stderr and monitor log into the results folder
 SLURM_OUT="/scratch/project_465002752/hashemia/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"

@@ -271,9 +271,17 @@ def parse_args():
                              "PVTU files (name set by --temperature-field). Loads an extra "
                              "(n_timesteps, n_nodes) scalar stack on GPU; per-step overhead is "
                              "one scalar P1 interpolation per particle (~1-3%% of RK4 step).")
+    parser.add_argument("--export-temperature", action="store_true", default=False,
+                        help="Export the *instantaneous* temperature interpolated at each "
+                             "particle's current position as the 'Temperature' point-data "
+                             "field on every exported step. Independent of "
+                             "--track-max-temperature; the two share the same on-GPU "
+                             "temperature stack and the same per-step P1 interpolation, so "
+                             "enabling both adds no measurable cost over enabling either one. "
+                             "Default off.")
     parser.add_argument("--temperature-field", type=str, default="Temperature",
                         help="Name of the per-node temperature field in PVTU files "
-                             "(used only when --track-max-temperature is set).")
+                             "(used when --track-max-temperature or --export-temperature is set).")
 
     # --- Tolerances ---
     parser.add_argument("--point-in-tet-tol", type=float, default=1e-6,
@@ -660,7 +668,8 @@ def main():
     # output is essentially free. With temperature off this loads only
     # Displacement, identical wall time to the legacy single-field path.
     fields_to_load = [VELOCITY_FIELD]
-    if args.track_max_temperature:
+    needs_temperature = args.track_max_temperature or args.export_temperature
+    if needs_temperature:
         fields_to_load.append(args.temperature_field)
 
     if len(fields_to_load) == 1:
@@ -965,21 +974,26 @@ def main():
     print(f"  Compilation: {stage_times['6_compile']:.1f}s")
     stage_times['6_build_rk4'] = time.time() - t_stage
 
-    # Build the per-step max-temperature update kernel (only when requested).
-    # The host element id and the new position from rk4_step are already known,
-    # so this is a single P1 scalar interpolation per particle — no fresh
-    # spatial search. Compiles once, runs each step.
-    update_max_temperature = None
-    if args.track_max_temperature:
+    # Build the per-step temperature interpolation kernel. Returns a tuple
+    # (T_at_pos, new_max) so a single P1 evaluation covers both
+    # --export-temperature (instantaneous field) and --track-max-temperature
+    # (running maximum). Enabling both costs the same as enabling either one.
+    # The host element id and the new position from rk4_step are already
+    # known, so this is just a P1 scalar interpolation per particle — no
+    # fresh spatial search.
+    interpolate_temperature_step = None
+    if needs_temperature:
         conn_gpu = jax.device_put(connectivity)
         node_pos_gpu = jax.device_put(node_positions.astype(config.FLOAT_DTYPE_NP))
 
         @jax.jit
-        def update_max_temperature(positions, element_ids, time_idx, max_so_far):
-            """For each particle, P1-interpolate temperature at the new position
-            in the cyclically-indexed temperature field, then take the elementwise
-            max against the running maximum. Particles with element_id<0 are
-            skipped (their max_so_far is unchanged)."""
+        def interpolate_temperature_step(positions, element_ids, time_idx, max_so_far):
+            """For each particle, P1-interpolate temperature at the current
+            position in the cyclically-indexed temperature field. Returns the
+            instantaneous values and the elementwise max against ``max_so_far``.
+            Particles with element_id<0 keep their previous max and report 0.0
+            for the instantaneous value (caller can ignore via the Escaped
+            flag)."""
             n_t = temperature_sequence_gpu.shape[0]
             T_field = temperature_sequence_gpu[time_idx % n_t]    # (n_nodes,)
 
@@ -1012,9 +1026,9 @@ def main():
                 b0 = 1.0 - b1 - b2 - b3
 
                 T_at_pos = b0 * node_T[0] + b1 * node_T[1] + b2 * node_T[2] + b3 * node_T[3]
-                # Only update when the particle is still inside a valid element.
+                T_instant = jnp.where(valid, T_at_pos, jnp.float32(0.0))
                 new_max = jnp.where(valid, jnp.maximum(prev_max, T_at_pos), prev_max)
-                return new_max
+                return T_instant, new_max
 
             return jax.vmap(per_particle)(positions, element_ids, max_so_far)
 
@@ -1093,10 +1107,15 @@ def main():
 
     extra_scalars = {'Group': particle_groups} if particle_groups is not None else None
 
-    # Per-particle trajectory flags (GPU-resident, updated every RK4 step).
-    # escaped_ever: True if element_id has ever been <0 at any step.
-    # max_temperature: running maximum of P1-interpolated temperature.
+    # Per-particle trajectory state (GPU-resident, updated every RK4 step).
+    #   escaped_ever_gpu     -- True if element_id has ever been <0
+    #   temperature_gpu      -- instantaneous P1-interpolated temperature at the
+    #                           current position (only populated when
+    #                           --export-temperature is set)
+    #   max_temperature_gpu  -- running maximum of the interpolated temperature
+    #                           (only populated when --track-max-temperature)
     escaped_ever_gpu = None
+    temperature_gpu = None
     max_temperature_gpu = None
     if args.export_escaped_flag:
         escaped_ever_gpu = jnp.zeros(n_particles, dtype=jnp.bool_)
@@ -1105,11 +1124,45 @@ def main():
         def _update_escaped(prev_flag, element_ids):
             return prev_flag | (element_ids < 0)
 
+    if args.export_temperature:
+        temperature_gpu = jnp.zeros((n_particles,), dtype=config.FLOAT_DTYPE_JNP)
     if args.track_max_temperature:
-        # Initialize to -inf so the first valid interpolation always overwrites.
         max_temperature_gpu = jnp.full(
-            (n_particles,), -jnp.inf, dtype=config.FLOAT_DTYPE_JNP
+            (n_particles,), -jnp.inf, dtype=config.FLOAT_DTYPE_JNP,
         )
+
+    def _run_temperature_step(positions, element_ids, time_idx):
+        """Wrapper that calls the joint T_instant/T_max kernel and updates
+        whichever globals are active. Returns nothing; mutates the GPU
+        state arrays declared above via assignment in the enclosing scope.
+
+        Centralises the per-step temperature work so it only happens once
+        per step regardless of whether one or both flags are on.
+        """
+        nonlocal temperature_gpu, max_temperature_gpu
+        if interpolate_temperature_step is None:
+            return
+        # When --track-max-temperature is off, the kernel still wants a valid
+        # max_so_far argument; pass a -inf placeholder we then discard.
+        prev_max = (max_temperature_gpu if max_temperature_gpu is not None
+                    else jnp.full((n_particles,), -jnp.inf,
+                                  dtype=config.FLOAT_DTYPE_JNP))
+        T_inst, new_max = interpolate_temperature_step(
+            positions, element_ids, time_idx, prev_max,
+        )
+        if args.export_temperature:
+            temperature_gpu = T_inst
+        if args.track_max_temperature:
+            max_temperature_gpu = new_max
+
+    def _collect_temperature_extras(extras: dict) -> None:
+        """Pull whichever temperature fields are enabled into ``extras``."""
+        if args.export_temperature and temperature_gpu is not None:
+            extras['Temperature'] = np.asarray(temperature_gpu, dtype=np.float32)
+        if args.track_max_temperature and max_temperature_gpu is not None:
+            extras['MaxTemperature'] = np.asarray(
+                max_temperature_gpu, dtype=np.float32,
+            )
 
     # Export initial state
     if exporter is not None:
@@ -1118,14 +1171,12 @@ def main():
         init_extras = dict(extra_scalars) if extra_scalars else {}
         if args.export_escaped_flag:
             init_extras['Escaped'] = np.zeros(n_particles, dtype=np.uint8)
-        if args.track_max_temperature:
-            # Take one temperature evaluation at t=0 so the initial export is non-empty.
-            max_temperature_gpu = update_max_temperature(
-                positions_gpu, element_ids_initial, 0, max_temperature_gpu,
-            )
-            init_extras['MaxTemperature'] = np.asarray(
-                max_temperature_gpu, dtype=np.float32,
-            )
+        if needs_temperature:
+            # One temperature evaluation at t=0 so the initial export is
+            # non-empty for the user (both Temperature and MaxTemperature if
+            # those fields are enabled).
+            _run_temperature_step(positions_gpu, element_ids_initial, 0)
+            _collect_temperature_extras(init_extras)
         exporter.enqueue_export(0, pos_cpu, particle_ids=particle_ids,
                                 element_ids=eid_cpu,
                                 extra_scalars=init_extras or extra_scalars)
@@ -1142,10 +1193,8 @@ def main():
         # Update per-step trajectory flags on GPU (cheap, fully fused).
         if args.export_escaped_flag:
             escaped_ever_gpu = _update_escaped(escaped_ever_gpu, element_ids_gpu)
-        if args.track_max_temperature:
-            max_temperature_gpu = update_max_temperature(
-                positions_gpu, element_ids_gpu, step - 1, max_temperature_gpu,
-            )
+        if needs_temperature:
+            _run_temperature_step(positions_gpu, element_ids_gpu, step - 1)
 
         do_log = (step % LOG_INTERVAL == 0) or (step == N_STEPS)
         do_export = ((exporter is not None)
@@ -1173,10 +1222,7 @@ def main():
                     step_extras['Escaped'] = np.asarray(
                         escaped_ever_gpu, dtype=np.uint8,
                     )
-                if args.track_max_temperature:
-                    step_extras['MaxTemperature'] = np.asarray(
-                        max_temperature_gpu, dtype=np.float32,
-                    )
+                _collect_temperature_extras(step_extras)
                 exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
                                         element_ids=eid_export,
                                         extra_scalars=step_extras or extra_scalars)
@@ -1256,6 +1302,8 @@ def main():
     }
     if args.export_escaped_flag and escaped_ever_gpu is not None:
         final_state['escaped_ever'] = np.asarray(escaped_ever_gpu, dtype=np.uint8)
+    if args.export_temperature and temperature_gpu is not None:
+        final_state['temperature'] = np.asarray(temperature_gpu, dtype=np.float32)
     if args.track_max_temperature and max_temperature_gpu is not None:
         final_state['max_temperature'] = np.asarray(max_temperature_gpu, dtype=np.float32)
     np.savez(output_subdir / "final_state.npz", **final_state)
