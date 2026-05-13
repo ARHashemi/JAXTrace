@@ -206,10 +206,21 @@ if [ -f "$_LOCAL_OVERRIDES" ]; then
 fi
 
 # ── Auto-detect case folder from script location if requested ──────────────
+# Under SLURM, $0 points at a temporary copy of the batch script under
+# /var/spool/slurmd/<jobdir>, not at the user-visible script path. SLURM
+# exposes the original working directory as $SLURM_SUBMIT_DIR, which is
+# the directory `sbatch` was invoked from -- that is what we want when
+# the user does `cd <case>.gid && sbatch run_jaxtrace.sh`.
+# Outside SLURM we fall back to $(dirname "$0").
 if [ "${AUTO_DETECT_CASE:-0}" = "1" ]; then
-  _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-  INPUT="$_SCRIPT_DIR"
-  echo "[case] AUTO_DETECT_CASE=1: INPUT='$INPUT'"
+  if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+    INPUT="$SLURM_SUBMIT_DIR"
+    echo "[case] AUTO_DETECT_CASE=1: using SLURM_SUBMIT_DIR='$INPUT'"
+  else
+    _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+    INPUT="$_SCRIPT_DIR"
+    echo "[case] AUTO_DETECT_CASE=1: INPUT='$INPUT'"
+  fi
 fi
 
 # ── Derive case name (needed for default output folder) ─────────────────────

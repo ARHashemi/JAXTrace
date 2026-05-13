@@ -212,15 +212,20 @@ fi
 RUN_ID="$(date +%Y%m%d_%H%M%S)_$$"
 
 # ── Auto-detect case folder from script location if requested ────────────────
-# When AUTO_DETECT_CASE=1, the script's own parent directory is used as
-# INPUT, regardless of whatever was set above. This is the pattern when you
-# copy run_workstation.sh into each case folder (e.g.
-#   /scratch/.../A1.gid/run_jaxtrace.sh
-# ) and want every case to "just work" without editing INPUT each time.
+# When AUTO_DETECT_CASE=1, INPUT is replaced by the directory containing
+# this script at runtime. Useful when a copy of the script is placed inside
+# each case folder, e.g. /scratch/.../A1.gid/run_jaxtrace.sh. When invoked
+# under SLURM, the script lives in a private staging dir and SLURM_SUBMIT_DIR
+# is the user-visible launch directory; prefer it when set.
 if [ "${AUTO_DETECT_CASE:-0}" = "1" ]; then
-    _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-    INPUT="$_SCRIPT_DIR"
-    echo "[case] AUTO_DETECT_CASE=1: INPUT='$INPUT'"
+    if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+        INPUT="$SLURM_SUBMIT_DIR"
+        echo "[case] AUTO_DETECT_CASE=1: using SLURM_SUBMIT_DIR='$INPUT'"
+    else
+        _SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+        INPUT="$_SCRIPT_DIR"
+        echo "[case] AUTO_DETECT_CASE=1: INPUT='$INPUT'"
+    fi
 fi
 
 # ── Derive case name ──────────────────────────────────────────────────────────
