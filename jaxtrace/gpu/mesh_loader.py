@@ -13,6 +13,7 @@ Key Functions:
 - assign_elements_to_blocks: Spatial partitioning (Level 2 search)
 """
 
+import os
 from pathlib import Path
 from typing import Tuple, Optional, Dict
 import numpy as np
@@ -383,8 +384,11 @@ def load_mesh_complete(
 if __name__ == "__main__":
     import sys
 
-    # Test with ThreadedA mesh if available
-    threadeda_path = Path("/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule")
+    # Test with ThreadedA mesh if available. Override via env var JAXTRACE_TEST_MESH.
+    threadeda_path = Path(os.environ.get(
+        "JAXTRACE_TEST_MESH",
+        "/path/to/ThreadedA/post/0eule",
+    ))
 
     if threadeda_path.exists():
         print("Testing with ThreadedA mesh...")

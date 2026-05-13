@@ -1,28 +1,32 @@
 #!/bin/bash
+# SLURM directives — fill in your project ID and log directory before
+# submitting, or override at submission time:
+#   sbatch --account=project_XXXXXXXXX --output=... run_lumi_diagnose.sh
 #SBATCH --job-name=jt-diagnose
 #SBATCH --partition=small-g
-#SBATCH --account=project_465002752
+#SBATCH --account=project_XXXXXXXXX
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
-#SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%j.out
-#SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+PROJECT="${SLURM_JOB_ACCOUNT:-project_XXXXXXXXX}"
 SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-community-0.5.0.sif
-JAXTRACE=/project/project_465002752/hashemia/JAXTrace
-PKGS=/project/project_465002752/hashemia/required-packages
-INPUT=/scratch/project_465001942/Cases-Edgar/new/cylA.gid/post
+JAXTRACE="/project/${PROJECT}/${USER}/JAXTrace"
+PKGS="/project/${PROJECT}/${USER}/required-packages"
+INPUT="/scratch/${PROJECT}/${USER}/data/<CASE>.gid/post"
 
 # Output
-SCRATCH_OUT=/scratch/project_465002752/hashemia/outputs/diagnose_$SLURM_JOB_ID
+SCRATCH_OUT="/scratch/${PROJECT}/${USER}/outputs/diagnose_${SLURM_JOB_ID}"
 mkdir -p $SCRATCH_OUT
 
 # ── MIOpen cache to RAM (avoids slow disk I/O for kernel tuning DB) ───────────
-export MIOPEN_USER_DB_PATH="/tmp/hashemia-miopen-$SLURM_JOB_ID"
+export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-${SLURM_JOB_ID}"
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p $MIOPEN_USER_DB_PATH
 

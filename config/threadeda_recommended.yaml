@@ -3,7 +3,7 @@
 
 mesh:
   name: "ThreadedA"
-  path: "/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule"
+  path: "/path/to/ThreadedA/post/0eule"
   pattern: "threadedAvtk_*.pvtu"
   n_elements: 3500000  # Approximate
   n_nodes: 900000      # Approximate

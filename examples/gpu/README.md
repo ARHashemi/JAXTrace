@@ -18,13 +18,13 @@ Comprehensive Jupyter notebook demonstrating all implemented phases:
 
 **To run:**
 ```bash
-cd /home/arhashemi/Workspace/welding/JAXTrace
+cd /path/to/JAXTrace
 source .venv/bin/activate
 jupyter notebook examples/gpu/phase_0_1_2_demo.ipynb
 ```
 
 **Requirements:**
-- ThreadedA mesh data at `/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule`
+- ThreadedA mesh data at `/path/to/ThreadedA/post/0eule` (set the path inside the notebook)
 - JAX with GPU support (optional, will fall back to CPU)
 - matplotlib for visualizations
 

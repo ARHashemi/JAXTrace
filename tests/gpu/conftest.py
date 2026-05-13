@@ -5,6 +5,7 @@ Provides common test fixtures for GPU implementation testing.
 Phase 0.3 of V3 Plan
 """
 
+import os
 import pytest
 import numpy as np
 from pathlib import Path
@@ -283,7 +284,11 @@ def threadeda_mesh_path():
     Returns:
         Path or None
     """
-    path = Path("/home/arhashemi/Workspace/welding/Edgar/ThreadedA/post/0eule")
+    # Override with env var JAXTRACE_TEST_MESH=/path/to/ThreadedA/post/0eule.
+    path = Path(os.environ.get(
+        "JAXTRACE_TEST_MESH",
+        "/path/to/ThreadedA/post/0eule",
+    ))
     if path.exists():
         return path
     return None
