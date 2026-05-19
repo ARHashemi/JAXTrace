@@ -1111,9 +1111,15 @@ def main():
     # left with element_id=-1 and zero drift (frozen). All active
     # particles have zero drift.
     # ------------------------------------------------------------------
+    # Pending-entry state is tracked by an explicit boolean array so it
+    # is independent of drift_vel (which a future ballistic/freeze mode
+    # may want to set non-zero on escaped particles too) and independent
+    # of element_id (which the kernel's boundary-projection recovery may
+    # flip back to >= 0 by snapping the particle to bbox+tol).
     inlet_wall = getattr(args, "inlet_wall", "none")
     inlet_velocity = float(getattr(args, "inlet_velocity", 0.0))
     drift_vel = np.zeros((n_particles, 3), dtype=config.FLOAT_DTYPE_NP)
+    pending_entry = np.zeros(n_particles, dtype=bool)
     n_pending_inlet = 0
     if inlet_wall != "none":
         if inlet_velocity == 0.0:
@@ -1135,10 +1141,11 @@ def main():
         if n_pending_inlet:
             drift_vec = (inward * inlet_velocity).astype(config.FLOAT_DTYPE_NP)
             drift_vel[is_pending] = drift_vec
+            pending_entry[is_pending] = True
             print(f"  [inlet] {n_pending_inlet:,} pending-entry particles on "
                   f"{inlet_wall} face")
             print(f"  [inlet] drift = {tuple(float(v) for v in drift_vec)} m/s")
-    n_frozen = int(((element_ids_initial < 0) & ~(drift_vel.any(axis=1))).sum()) \
+    n_frozen = int(((element_ids_initial < 0) & ~pending_entry).sum()) \
         if np.asarray(element_ids_initial < 0).any() else 0
     if n_frozen and inlet_wall != "none":
         # Frozen = failed assignment AND not pending-entry.
@@ -1146,6 +1153,7 @@ def main():
               f"inlet face; kept with element_id=-1 and zero drift.")
 
     drift_vel_gpu = jax.device_put(drift_vel)
+    pending_entry_gpu = jax.device_put(pending_entry)
 
     stage_times['5_initial_assign'] = time.time() - t_stage
     print(f"  Stage 5 time: {stage_times['5_initial_assign']:.1f}s")
@@ -1182,55 +1190,61 @@ def main():
         use_l2_vectorized=L2_VECTORIZED,
     )
 
-    # Per-step inlet drift helper. For any particle whose element_id is
-    # still negative AND has a non-zero drift velocity assigned at
-    # startup, position is advanced by dt * drift_vel. Particles whose
-    # drift_vel is zero (active particles, or off-inlet frozen particles)
-    # are unaffected.
+    # Per-step inlet drift helper. Drifts only particles whose
+    # pending_entry bit is set. The bit is one-shot: cleared by
+    # _suppress_pending_recovery the moment a particle's drifted
+    # position crosses the mesh bbox.
     @jax.jit
-    def _apply_inlet_drift(positions, element_ids, dt, drift):
-        is_pending = element_ids < 0
+    def _apply_inlet_drift(positions, pending, dt, drift):
         new_positions = positions + dt * drift
-        return jnp.where(is_pending[:, None], new_positions, positions)
+        return jnp.where(pending[:, None], new_positions, positions)
 
-    # Post-step recovery: the RK4 kernel's boundary-projection logic
-    # (--boundary-proj, on by default) snaps any particle with
-    # element_id<0 to the mesh bbox and runs a recovery search that
-    # almost always succeeds — so the kernel returns element_id >= 0
-    # even though geometrically the particle is still outside the mesh.
-    # We cannot rely on element_id<0 as the "still pending" signal.
-    # Instead we check whether the *pre-kernel* drifted position is
-    # strictly inside the mesh bbox. If it isn't, the particle has not
-    # crossed naturally yet — restore its pre-kernel position and force
-    # element_id back to -1 so the next step keeps drifting it.
-    # Particles whose pre-kernel position IS inside the bbox have
-    # crossed naturally; we keep the kernel's position + element AND
-    # zero their drift_vel so they never re-enter the drift branch.
+    # Post-step recovery for pending-entry particles.
+    #
+    # The RK4 kernel's boundary-projection logic (--boundary-proj, on by
+    # default) snaps any particle with element_id<0 to bbox+tol and runs
+    # a recovery search there that almost always succeeds — so the
+    # kernel returns element_id >= 0 even though geometrically the
+    # particle is still outside the mesh. We therefore cannot use
+    # element_id<0 as the "still pending" signal.
+    #
+    # The criterion used here is geometric: a pending particle remains
+    # pending while its *pre-kernel* drifted position lies outside the
+    # mesh bbox. The moment the drifted position crosses the bbox the
+    # pending bit is cleared and its drift_vel is zeroed; from then on
+    # the particle is handled by the normal active/lost path. This is a
+    # one-shot transition — if the particle later gets lost again, that
+    # is a separate concern (future ballistic/freeze mode), not a
+    # re-entry into inlet drift.
     bbox_min_gpu = jnp.asarray(mesh_bbox_min_cpu, dtype=config.FLOAT_DTYPE_NP)
     bbox_max_gpu = jnp.asarray(mesh_bbox_max_cpu, dtype=config.FLOAT_DTYPE_NP)
 
     @jax.jit
     def _suppress_pending_recovery(
-        positions_post, element_ids_post, positions_pre_kernel, drift,
+        positions_post, element_ids_post, positions_pre_kernel,
+        pending, drift,
     ):
-        had_drift = (drift != 0).any(axis=-1)
-        # Geometric "inside the mesh bbox" test on the drifted pre-kernel
-        # position — independent of whatever the kernel's recovery did.
         inside_bbox = (
             (positions_pre_kernel >= bbox_min_gpu).all(axis=-1)
             & (positions_pre_kernel <= bbox_max_gpu).all(axis=-1)
         )
-        still_pending = had_drift & (~inside_bbox)
+        # Still pending: was pending coming in AND drifted position is
+        # still outside the bbox. Restore the kernel-overwritten
+        # position and force element_id back to -1.
+        still_pending = pending & (~inside_bbox)
         positions_out = jnp.where(
             still_pending[:, None], positions_pre_kernel, positions_post,
         )
         element_ids_out = jnp.where(
             still_pending, jnp.int32(-1), element_ids_post,
         )
-        # Particle has crossed bbox: stop drifting it from now on.
-        entered = had_drift & inside_bbox
+        # Just-entered: was pending, now inside bbox. Zero its drift
+        # and clear the pending bit. From this step on it behaves like
+        # a normal particle.
+        entered = pending & inside_bbox
         new_drift = jnp.where(entered[:, None], jnp.zeros_like(drift), drift)
-        return positions_out, element_ids_out, new_drift
+        new_pending = pending & (~inside_bbox)
+        return positions_out, element_ids_out, new_drift, new_pending
 
     apply_inlet_drift = _apply_inlet_drift if n_pending_inlet else None
     suppress_pending_recovery = (
@@ -1241,7 +1255,7 @@ def main():
     t_compile = time.time()
     if apply_inlet_drift is not None:
         positions_gpu = apply_inlet_drift(
-            positions_gpu, element_ids_initial, DT, drift_vel_gpu,
+            positions_gpu, pending_entry_gpu, DT, drift_vel_gpu,
         )
     positions_gpu, element_ids_gpu = rk4_step(
         positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0
@@ -1398,8 +1412,12 @@ def main():
         escaped_ever_gpu = jnp.zeros(n_particles, dtype=jnp.bool_)
 
         @jax.jit
-        def _update_escaped(prev_flag, element_ids):
-            return prev_flag | (element_ids < 0)
+        def _update_escaped(prev_flag, element_ids, pending):
+            # Pending-entry particles legitimately have element_id<0 —
+            # they have not "escaped", they have not yet arrived. Mask
+            # them out so the flag flips only when a previously-active
+            # particle leaves the domain.
+            return prev_flag | ((element_ids < 0) & (~pending))
 
     if args.export_temperature:
         temperature_gpu = jnp.zeros((n_particles,), dtype=config.FLOAT_DTYPE_JNP)
@@ -1465,12 +1483,13 @@ def main():
     prev_lost = 0
     for step in range(1, N_STEPS + 1):
         if apply_inlet_drift is not None:
-            # Drift pending-entry particles by dt * drift_vel. Particles
-            # with element_id >= 0 are unchanged; the kernel's internal
-            # search will assign a real element to any drifted particle
-            # that has now crossed into the mesh.
+            # Drift pending-entry particles by dt * drift_vel. The
+            # pending_entry bit is the authoritative gate; particles
+            # with it clear are unaffected. The kernel's internal search
+            # will assign a real element to any drifted particle that
+            # has now crossed into the mesh.
             positions_gpu = apply_inlet_drift(
-                positions_gpu, element_ids_gpu, DT, drift_vel_gpu,
+                positions_gpu, pending_entry_gpu, DT, drift_vel_gpu,
             )
             # Snapshot pre-kernel positions so we can restore them for
             # any pending-entry particle that the kernel's boundary
@@ -1480,14 +1499,17 @@ def main():
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
         if suppress_pending_recovery is not None:
-            positions_gpu, element_ids_gpu, drift_vel_gpu = \
+            positions_gpu, element_ids_gpu, drift_vel_gpu, pending_entry_gpu = \
                 suppress_pending_recovery(
                     positions_gpu, element_ids_gpu,
-                    positions_pre_kernel, drift_vel_gpu,
+                    positions_pre_kernel,
+                    pending_entry_gpu, drift_vel_gpu,
                 )
         # Update per-step trajectory flags on GPU (cheap, fully fused).
         if args.export_escaped_flag:
-            escaped_ever_gpu = _update_escaped(escaped_ever_gpu, element_ids_gpu)
+            escaped_ever_gpu = _update_escaped(
+                escaped_ever_gpu, element_ids_gpu, pending_entry_gpu,
+            )
         if needs_temperature:
             _run_temperature_step(positions_gpu, element_ids_gpu, step - 1)
 
