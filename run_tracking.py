@@ -1195,30 +1195,40 @@ def main():
 
     # Post-step recovery: the RK4 kernel's boundary-projection logic
     # (--boundary-proj, on by default) snaps any particle with
-    # element_id<0 to the mesh bbox and runs a recovery search. For
-    # pending-entry particles drifting OUTSIDE the mesh this is wrong —
-    # they should stay where the drift put them until they cross
-    # naturally. This helper restores the pre-step drifted position and
-    # forces element_id back to -1 for any particle that was a
-    # pending-entry candidate (drift_vel != 0) and whose kernel-side
-    # search did not find a real element. Particles that successfully
-    # entered (elem_id >= 0 after kernel) keep their kernel result AND
-    # have their drift_vel zeroed so they no longer drift.
+    # element_id<0 to the mesh bbox and runs a recovery search that
+    # almost always succeeds — so the kernel returns element_id >= 0
+    # even though geometrically the particle is still outside the mesh.
+    # We cannot rely on element_id<0 as the "still pending" signal.
+    # Instead we check whether the *pre-kernel* drifted position is
+    # strictly inside the mesh bbox. If it isn't, the particle has not
+    # crossed naturally yet — restore its pre-kernel position and force
+    # element_id back to -1 so the next step keeps drifting it.
+    # Particles whose pre-kernel position IS inside the bbox have
+    # crossed naturally; we keep the kernel's position + element AND
+    # zero their drift_vel so they never re-enter the drift branch.
+    bbox_min_gpu = jnp.asarray(mesh_bbox_min_cpu, dtype=config.FLOAT_DTYPE_NP)
+    bbox_max_gpu = jnp.asarray(mesh_bbox_max_cpu, dtype=config.FLOAT_DTYPE_NP)
+
     @jax.jit
     def _suppress_pending_recovery(
         positions_post, element_ids_post, positions_pre_kernel, drift,
     ):
         had_drift = (drift != 0).any(axis=-1)
-        still_pending = had_drift & (element_ids_post < 0)
+        # Geometric "inside the mesh bbox" test on the drifted pre-kernel
+        # position — independent of whatever the kernel's recovery did.
+        inside_bbox = (
+            (positions_pre_kernel >= bbox_min_gpu).all(axis=-1)
+            & (positions_pre_kernel <= bbox_max_gpu).all(axis=-1)
+        )
+        still_pending = had_drift & (~inside_bbox)
         positions_out = jnp.where(
             still_pending[:, None], positions_pre_kernel, positions_post,
         )
         element_ids_out = jnp.where(
             still_pending, jnp.int32(-1), element_ids_post,
         )
-        # Once a particle has entered, zero its drift so future steps
-        # don't reapply the inlet velocity if it later escapes.
-        entered = had_drift & (element_ids_post >= 0)
+        # Particle has crossed bbox: stop drifting it from now on.
+        entered = had_drift & inside_bbox
         new_drift = jnp.where(entered[:, None], jnp.zeros_like(drift), drift)
         return positions_out, element_ids_out, new_drift
 
