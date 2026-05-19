@@ -121,6 +121,17 @@ REGISTRATION=""
 BOUNDARY_WALLS="x_max=outlet"
 BOUNDARY_PROJ_TOL=1e-6     # inward offset applied when clamping to a wall [m]
 POINT_IN_TET_TOL=1e-6      # numerical tolerance for point-in-tet test
+
+# INLET_WALL allows the seed box to extend outside the mesh on one named
+# wall. Particles seeded outside the mesh on that face are kept alive
+# with element_id=-1 and drift at INLET_VELOCITY along the inward normal
+# until they cross the wall and the kernel's spatial search assigns a
+# real host element. Other faces of the seed box are cropped to the mesh
+# bounding box; for SEED_SOURCE=grid the grid spacing is preserved and
+# the final particle count is reduced accordingly.
+# Set INLET_WALL="" to disable (no inlet, no cropping warnings).
+INLET_WALL=""              # "" | x_min | x_max | y_min | y_max | z_min | z_max
+INLET_VELOCITY=0.0         # signed scalar [m/s]; positive = into the mesh
 LEVELSET_MODE=zero_vel     # how to handle a particle inside the tool region:
                            #   zero_vel  -- velocity at that step is set to 0
                            #   skip_step -- the RK4 step is skipped entirely
@@ -424,6 +435,9 @@ ARGS=(
 [ -n "$FEMUSS_DIR"       ] && ARGS+=( --femuss-dir          "$FEMUSS_DIR"       )
 [ -n "$RUN_TAG"          ] && ARGS+=( --run-tag             "$RUN_TAG"          )
 [ -n "$BOUNDARY_WALLS"   ] && ARGS+=( --boundary-walls      "$BOUNDARY_WALLS"   )
+if [ -n "${INLET_WALL:-}" ]; then
+    ARGS+=( --inlet-wall "$INLET_WALL" --inlet-velocity "$INLET_VELOCITY" )
+fi
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
 [ "$NO_EXPORT"          = "1" ] && ARGS+=( --no-export           )
 ARGS+=( --export-format "$EXPORT_FORMAT" )
