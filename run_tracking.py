@@ -217,9 +217,17 @@ def parse_args():
                         help="Absolute seed box bounds (required for --seed-source=box or grid)")
     parser.add_argument("--seed-fraction", type=float, nargs=6, default=None,
                         metavar=("XLO", "XHI", "YLO", "YHI", "ZLO", "ZHI"),
-                        help="Per-axis fractions of mesh bbox in [0,1] "
+                        help="Per-axis fractions of mesh bbox "
                              "(required for --seed-source=box-frac or grid-frac). "
-                             "Example: 0.0 0.2 0.0 1.0 0.0 1.0 = first 20%% of X, full Y/Z.")
+                             "Each pair must satisfy lo < hi and 0 <= lo,hi <= 1 "
+                             "on every face EXCEPT the inlet face named by "
+                             "--inlet-wall: that face may extend outside [0, 1] "
+                             "for continuous particle entry. "
+                             "Example without inlet: 0.0 0.2 0.0 1.0 0.0 1.0 = "
+                             "first 20%% of X, full Y/Z. "
+                             "Example with --inlet-wall=x_min: -1.5 0.1 0 1 0 1 = "
+                             "seed box extends 1.5 mesh-widths outside the mesh on "
+                             "the x_min face, ends at 10%% of mesh extent on x_max.")
     parser.add_argument("--seed-grid", type=int, nargs=3, default=None,
                         metavar=("NX", "NY", "NZ"),
                         help="Grid resolution along each axis "
@@ -473,13 +481,16 @@ def _resolve_seed_bounds(args, mesh_bbox_min=None, mesh_bbox_max=None):
         if mesh_bbox_min is None or mesh_bbox_max is None:
             raise RuntimeError("Mesh bbox required for fraction-based seeding")
         xl, xh, yl, yh, zl, zh = args.seed_fraction
+        inlet_wall = getattr(args, "inlet_wall", "none")
+        # Fraction extension outside [0, 1] is permitted ONLY on the inlet
+        # face. bounds_from_fractions enforces this and raises a clear
+        # error if the user sets fractions outside [0, 1] without a
+        # matching inlet wall.
         bounds = bounds_from_fractions(
             mesh_bbox_min, mesh_bbox_max,
             x_frac=(xl, xh), y_frac=(yl, yh), z_frac=(zl, zh),
+            inlet_wall=inlet_wall,
         )
-        if getattr(args, "inlet_wall", "none") != "none":
-            print(f"  [inlet] WARNING: --inlet-wall={args.inlet_wall} is "
-                  f"ignored for fraction-based seed bounds (always inside mesh).")
         return bounds, False
 
     if args.seed_box is None:
@@ -545,9 +556,11 @@ def seed_from_grid(args, mesh_bbox_min=None, mesh_bbox_max=None):
     if min(nx, ny, nz) < 1:
         raise ValueError(f"--seed-grid values must be >= 1; got {args.seed_grid}")
 
-    # Original bounds (pre-crop) used as the reference for grid spacing.
-    # For frac-grid the bounds are inside the mesh by construction, so
-    # there is nothing to crop and bounds_orig is irrelevant.
+    # Original bounds (pre-crop) used as the reference for grid spacing
+    # when the absolute-box path is cropped against the mesh bbox. For
+    # the fraction-based path no cropping is applied (the user's fraction
+    # directly defines the seeded volume, including any inlet-axis
+    # extension outside [0, 1]), so bounds_orig is irrelevant.
     bounds, cropped = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
     if cropped and args.seed_box is not None:
         x0, x1, y0, y1, z0, z1 = args.seed_box
