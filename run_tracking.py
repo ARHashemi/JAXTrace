@@ -311,6 +311,24 @@ def parse_args():
     parser.add_argument("--boundary-walls", type=str, default=None,
                         help="Per-wall boundary projection: 'wall=mode,...'")
 
+    # --- Inlet (continuous influx of particles outside the inlet wall) ---
+    parser.add_argument("--inlet-wall", type=str, default="none",
+                        choices=["none", "x_min", "x_max", "y_min", "y_max",
+                                 "z_min", "z_max"],
+                        help="Name of the wall through which the seed box is "
+                             "allowed to protrude outside the mesh. Particles "
+                             "seeded outside the mesh on this wall are kept "
+                             "alive with element_id=-1 and drift at "
+                             "--inlet-velocity along the inward normal until "
+                             "they cross into the mesh and a real host element "
+                             "is found. Default 'none' disables the inlet.")
+    parser.add_argument("--inlet-velocity", type=float, default=0.0,
+                        help="Signed scalar drift speed for pending-entry "
+                             "particles, in m/s along the inward normal of "
+                             "--inlet-wall. Positive = toward the mesh, "
+                             "negative = away. Required when --inlet-wall is "
+                             "set and not 'none'.")
+
     # --- Level-set ---
     parser.add_argument("--no-levelset", action="store_true",
                         help="Disable level-set velocity masking")
@@ -377,12 +395,71 @@ def seed_from_femuss(args):
     return positions, particle_ids, femuss
 
 
+_WALL_TO_AXIS = {
+    "x_min": (0, "min"), "x_max": (0, "max"),
+    "y_min": (1, "min"), "y_max": (1, "max"),
+    "z_min": (2, "min"), "z_max": (2, "max"),
+}
+
+
+def _inlet_inward_normal(inlet_wall: str) -> np.ndarray:
+    """Return the inward-pointing unit normal for the named wall."""
+    axis, side = _WALL_TO_AXIS[inlet_wall]
+    n = np.zeros(3, dtype=np.float32)
+    n[axis] = 1.0 if side == "min" else -1.0
+    return n
+
+
+def _crop_seed_bounds_to_mesh(bounds, mesh_bbox_min, mesh_bbox_max,
+                              inlet_wall="none"):
+    """Crop a (2, 3) seed box to the mesh bounding box on every face except
+    the inlet face.
+
+    Returns
+    -------
+    cropped : np.ndarray, shape (2, 3)
+    changed : bool — True if any face was actually cropped
+    """
+    cropped = np.array(bounds, dtype=np.float32).copy()
+    mesh_bbox_min = np.asarray(mesh_bbox_min, dtype=np.float32)
+    mesh_bbox_max = np.asarray(mesh_bbox_max, dtype=np.float32)
+    inlet_face = _WALL_TO_AXIS.get(inlet_wall) if inlet_wall != "none" else None
+
+    changed = False
+    axis_names = ("x", "y", "z")
+    for axis in range(3):
+        # Lower face of this axis
+        if (inlet_face is None) or (inlet_face != (axis, "min")):
+            if cropped[0, axis] < mesh_bbox_min[axis]:
+                print(f"  [seed-crop] {axis_names[axis]}_min face "
+                      f"{cropped[0, axis]:.6g} -> {mesh_bbox_min[axis]:.6g}")
+                cropped[0, axis] = mesh_bbox_min[axis]
+                changed = True
+        # Upper face of this axis
+        if (inlet_face is None) or (inlet_face != (axis, "max")):
+            if cropped[1, axis] > mesh_bbox_max[axis]:
+                print(f"  [seed-crop] {axis_names[axis]}_max face "
+                      f"{cropped[1, axis]:.6g} -> {mesh_bbox_max[axis]:.6g}")
+                cropped[1, axis] = mesh_bbox_max[axis]
+                changed = True
+
+    if cropped[0].max() >= cropped[1].max() or np.any(cropped[0] >= cropped[1]):
+        raise ValueError(
+            f"Cropped seed bounds are degenerate: min={cropped[0]} max={cropped[1]}. "
+            f"Original bounds={bounds}, mesh bbox=[{mesh_bbox_min}, {mesh_bbox_max}]"
+        )
+    return cropped, changed
+
+
 def _resolve_seed_bounds(args, mesh_bbox_min=None, mesh_bbox_max=None):
     """Resolve absolute (2, 3) bounds for box-based seeding.
 
     Uses --seed-box for absolute bounds, or --seed-fraction (and the mesh
-    bbox passed in) for fraction-based bounds. Returns a (2, 3) array
-    [[x0,y0,z0],[x1,y1,z1]].
+    bbox passed in) for fraction-based bounds. When --inlet-wall is not
+    'none', the seed box is allowed to extend outside the mesh on that
+    one face; every other face is cropped to the mesh bounding box (with
+    a warning). Fraction-based bounds are always inside the mesh by
+    construction so no cropping is performed.
     """
     from jaxtrace.tracking.seeding import bounds_from_fractions
 
@@ -396,18 +473,30 @@ def _resolve_seed_bounds(args, mesh_bbox_min=None, mesh_bbox_max=None):
         if mesh_bbox_min is None or mesh_bbox_max is None:
             raise RuntimeError("Mesh bbox required for fraction-based seeding")
         xl, xh, yl, yh, zl, zh = args.seed_fraction
-        return bounds_from_fractions(
+        bounds = bounds_from_fractions(
             mesh_bbox_min, mesh_bbox_max,
             x_frac=(xl, xh), y_frac=(yl, yh), z_frac=(zl, zh),
         )
-    else:
-        if args.seed_box is None:
-            raise ValueError(
-                f"--seed-source={args.seed_source} requires "
-                "--seed-box XMIN XMAX YMIN YMAX ZMIN ZMAX"
-            )
-        x0, x1, y0, y1, z0, z1 = args.seed_box
-        return np.array([[x0, y0, z0], [x1, y1, z1]], dtype=np.float32)
+        if getattr(args, "inlet_wall", "none") != "none":
+            print(f"  [inlet] WARNING: --inlet-wall={args.inlet_wall} is "
+                  f"ignored for fraction-based seed bounds (always inside mesh).")
+        return bounds, False
+
+    if args.seed_box is None:
+        raise ValueError(
+            f"--seed-source={args.seed_source} requires "
+            "--seed-box XMIN XMAX YMIN YMAX ZMIN ZMAX"
+        )
+    x0, x1, y0, y1, z0, z1 = args.seed_box
+    bounds = np.array([[x0, y0, z0], [x1, y1, z1]], dtype=np.float32)
+
+    inlet_wall = getattr(args, "inlet_wall", "none")
+    if mesh_bbox_min is not None and mesh_bbox_max is not None:
+        bounds, cropped = _crop_seed_bounds_to_mesh(
+            bounds, mesh_bbox_min, mesh_bbox_max, inlet_wall=inlet_wall,
+        )
+        return bounds, cropped
+    return bounds, False
 
 
 def seed_from_box(args, mesh_bbox_min=None, mesh_bbox_max=None):
@@ -415,8 +504,11 @@ def seed_from_box(args, mesh_bbox_min=None, mesh_bbox_max=None):
 
     Box bounds come from --seed-box (absolute) when seed-source is 'box',
     or from --seed-fraction + mesh bbox when seed-source is 'box-frac'.
+    The box is cropped to the mesh bbox on every face except the inlet
+    face when --inlet-wall is set; particles falling outside the mesh on
+    the inlet face are kept and initialised with element_id=-1.
     """
-    bounds = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
+    bounds, _ = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
     rng = np.random.default_rng(args.seed)
     n = args.n_particles
     positions = np.stack([
@@ -436,10 +528,12 @@ def seed_from_box(args, mesh_bbox_min=None, mesh_bbox_max=None):
 def seed_from_grid(args, mesh_bbox_min=None, mesh_bbox_max=None):
     """Uniform-grid seeding inside an axis-aligned box.
 
-    Particle count = Nx*Ny*Nz (--seed-grid). Box bounds come from
-    --seed-box (absolute) when seed-source is 'grid', or from
-    --seed-fraction + mesh bbox when seed-source is 'grid-frac'.
-    --n-particles is ignored.
+    Particle count = Nx*Ny*Nz (--seed-grid) when no cropping is applied.
+    When the seed box is cropped against the mesh bounding box (any face
+    except --inlet-wall), the grid SPACING along each axis is preserved
+    and grid rows/columns falling outside the cropped bounds are dropped;
+    the final particle count is therefore lower than Nx*Ny*Nz and is
+    printed alongside the requested resolution.
     """
     from jaxtrace.tracking.seeding import uniform_grid_seeds
 
@@ -451,17 +545,54 @@ def seed_from_grid(args, mesh_bbox_min=None, mesh_bbox_max=None):
     if min(nx, ny, nz) < 1:
         raise ValueError(f"--seed-grid values must be >= 1; got {args.seed_grid}")
 
-    bounds = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
-    positions = uniform_grid_seeds(
-        resolution=(nx, ny, nz), bounds=bounds, include_boundaries=True,
-    ).astype(config.FLOAT_DTYPE_NP)
+    # Original bounds (pre-crop) used as the reference for grid spacing.
+    # For frac-grid the bounds are inside the mesh by construction, so
+    # there is nothing to crop and bounds_orig is irrelevant.
+    bounds, cropped = _resolve_seed_bounds(args, mesh_bbox_min, mesh_bbox_max)
+    if cropped and args.seed_box is not None:
+        x0, x1, y0, y1, z0, z1 = args.seed_box
+        bounds_orig = np.array([[x0, y0, z0], [x1, y1, z1]], dtype=np.float32)
+    else:
+        bounds_orig = None
+
+    if cropped and bounds_orig is not None:
+        # Preserve spacing from the user-requested grid; emit only the
+        # grid nodes that fall inside the cropped bounds.
+        spacing = (bounds_orig[1] - bounds_orig[0]) / np.maximum(
+            np.array([nx - 1, ny - 1, nz - 1]), 1
+        )
+        # Generate the full uncropped axis coordinates, then mask each axis.
+        axes_full = [
+            np.linspace(bounds_orig[0, a], bounds_orig[1, a],
+                        max(int([nx, ny, nz][a]), 1), dtype=np.float32)
+            for a in range(3)
+        ]
+        axes_kept = [
+            a[(a >= bounds[0, i] - 0.5 * spacing[i]) &
+              (a <= bounds[1, i] + 0.5 * spacing[i])]
+            for i, a in enumerate(axes_full)
+        ]
+        X, Y, Z = np.meshgrid(*axes_kept, indexing='ij')
+        positions = np.column_stack(
+            [X.ravel(), Y.ravel(), Z.ravel()]
+        ).astype(config.FLOAT_DTYPE_NP)
+        kept_counts = tuple(a.size for a in axes_kept)
+        print(f"  Seed source: uniform grid in cropped box ({args.seed_source})")
+        print(f"    Requested grid: {nx} x {ny} x {nz} = {nx*ny*nz:,} particles")
+        print(f"    After crop:     {kept_counts[0]} x {kept_counts[1]} x "
+              f"{kept_counts[2]} = {positions.shape[0]:,} particles")
+    else:
+        positions = uniform_grid_seeds(
+            resolution=(nx, ny, nz), bounds=bounds, include_boundaries=True,
+        ).astype(config.FLOAT_DTYPE_NP)
+        print(f"  Seed source: uniform grid in box ({args.seed_source})")
+        print(f"    Grid: {nx} x {ny} x {nz} = {positions.shape[0]:,} particles")
+
     n = positions.shape[0]
     if args.n_particles and args.n_particles != n:
-        print(f"  Note: --n-particles={args.n_particles:,} ignored; "
-              f"grid resolution {nx}x{ny}x{nz} = {n:,} particles")
+        print(f"    Note: --n-particles={args.n_particles:,} ignored; "
+              f"actual grid count = {n:,}")
     particle_ids = np.arange(n, dtype=np.int32)
-    print(f"  Seed source: uniform grid in box ({args.seed_source})")
-    print(f"    Grid: {nx} x {ny} x {nz} = {n:,} particles")
     print(f"    X=[{bounds[0,0]:.6g},{bounds[1,0]:.6g}]  "
           f"Y=[{bounds[0,1]:.6g},{bounds[1,1]:.6g}]  "
           f"Z=[{bounds[0,2]:.6g},{bounds[1,2]:.6g}]")
@@ -584,16 +715,38 @@ def main():
     LEVELSET_FIELD = args.levelset_field
     VELOCITY_FIELD = args.velocity_field
 
-    # Parse --boundary-walls
+    # Parse --boundary-walls (comma-separated 'wall=mode' pairs).
+    _valid_walls = set(_WALL_TO_AXIS.keys())
+    _valid_modes = {"clamp", "outlet"}
     if args.boundary_walls is not None:
         wall_dict = {}
         for pair in args.boundary_walls.split(','):
-            if '=' in pair:
-                w, m = pair.split('=', 1)
-                wall_dict[w.strip()] = m.strip()
+            if '=' not in pair:
+                continue
+            w, m = pair.split('=', 1)
+            w, m = w.strip(), m.strip()
+            if w not in _valid_walls:
+                raise ValueError(
+                    f"--boundary-walls: unknown wall '{w}'. "
+                    f"Valid walls: {sorted(_valid_walls)}"
+                )
+            if m not in _valid_modes:
+                raise ValueError(
+                    f"--boundary-walls: unknown mode '{m}' for wall '{w}'. "
+                    f"Valid modes: {sorted(_valid_modes)}"
+                )
+            wall_dict[w] = m
         config.RK4_BOUNDARY_WALLS = wall_dict or None
     else:
         config.RK4_BOUNDARY_WALLS = None
+
+    # Inlet flag validation (incompatible with femuss / file seed sources).
+    if getattr(args, "inlet_wall", "none") != "none":
+        if args.seed_source in ("femuss", "file"):
+            raise ValueError(
+                f"--inlet-wall is not supported with "
+                f"--seed-source={args.seed_source}"
+            )
 
     use_pin_velocity = args.pin_velocity and not args.no_pin_velocity
 
@@ -629,6 +782,11 @@ def main():
     print(f"  Boundary projection:  {'on' if config.RK4_BOUNDARY_PROJECTION else 'off'} "
           f"(tol={config.RK4_BOUNDARY_PROJECTION_TOL:.0e})")
     print(f"  Boundary walls:       {config.RK4_BOUNDARY_WALLS or 'all clamp (default)'}")
+    if getattr(args, "inlet_wall", "none") != "none":
+        print(f"  Inlet:                wall={args.inlet_wall}  "
+              f"v={args.inlet_velocity} m/s")
+    else:
+        print(f"  Inlet:                off")
     print(f"  Level-set mask:       {'on' if config.RK4_LEVELSET_MASK else 'off'} "
           f"(mode={config.RK4_LEVELSET_MODE}, field='{LEVELSET_FIELD}')")
     if use_pin_velocity:
@@ -929,6 +1087,53 @@ def main():
     print(f"  Assigned: {n_assigned:,}/{n_particles:,} ({100*n_assigned/n_particles:.2f}%)")
     if n_particles - n_assigned > 0:
         print(f"  WARNING: {n_particles - n_assigned:,} particles not assigned to any element")
+
+    # ------------------------------------------------------------------
+    # Inlet drift setup. Particles seeded outside the mesh on the inlet
+    # face are kept alive with element_id=-1 and given a drift velocity
+    # equal to INLET_VELOCITY * inward_normal. Pre-step driver hook
+    # advances those particles by dt*drift each step until the kernel's
+    # internal search finds a host element (element_id becomes >= 0).
+    # Particles whose initial assignment failed on a non-inlet face are
+    # left with element_id=-1 and zero drift (frozen). All active
+    # particles have zero drift.
+    # ------------------------------------------------------------------
+    inlet_wall = getattr(args, "inlet_wall", "none")
+    inlet_velocity = float(getattr(args, "inlet_velocity", 0.0))
+    drift_vel = np.zeros((n_particles, 3), dtype=config.FLOAT_DTYPE_NP)
+    n_pending_inlet = 0
+    if inlet_wall != "none":
+        if inlet_velocity == 0.0:
+            print(f"  [inlet] WARNING: --inlet-wall={inlet_wall} set but "
+                  f"--inlet-velocity=0; pending particles will never enter.")
+        axis, side = _WALL_TO_AXIS[inlet_wall]
+        inward = _inlet_inward_normal(inlet_wall)
+        eid_cpu_initial = np.asarray(element_ids_initial, dtype=np.int32)
+        positions_cpu_initial = np.asarray(particle_positions,
+                                           dtype=config.FLOAT_DTYPE_NP)
+        # A pending-entry particle is any failed-assignment particle that
+        # sits on the outside of the inlet face.
+        if side == "min":
+            is_outside = positions_cpu_initial[:, axis] < mesh_bbox_min_cpu[axis]
+        else:
+            is_outside = positions_cpu_initial[:, axis] > mesh_bbox_max_cpu[axis]
+        is_pending = (eid_cpu_initial < 0) & is_outside
+        n_pending_inlet = int(is_pending.sum())
+        if n_pending_inlet:
+            drift_vec = (inward * inlet_velocity).astype(config.FLOAT_DTYPE_NP)
+            drift_vel[is_pending] = drift_vec
+            print(f"  [inlet] {n_pending_inlet:,} pending-entry particles on "
+                  f"{inlet_wall} face")
+            print(f"  [inlet] drift = {tuple(float(v) for v in drift_vec)} m/s")
+    n_frozen = int(((element_ids_initial < 0) & ~(drift_vel.any(axis=1))).sum()) \
+        if np.asarray(element_ids_initial < 0).any() else 0
+    if n_frozen and inlet_wall != "none":
+        # Frozen = failed assignment AND not pending-entry.
+        print(f"  [inlet] {n_frozen:,} particles failed assignment off the "
+              f"inlet face; kept with element_id=-1 and zero drift.")
+
+    drift_vel_gpu = jax.device_put(drift_vel)
+
     stage_times['5_initial_assign'] = time.time() - t_stage
     print(f"  Stage 5 time: {stage_times['5_initial_assign']:.1f}s")
 
@@ -964,8 +1169,24 @@ def main():
         use_l2_vectorized=L2_VECTORIZED,
     )
 
+    # Per-step inlet drift helper. For any particle whose element_id is
+    # still negative, position is advanced by dt * drift_vel. Particles
+    # whose drift_vel is zero (active particles or non-inlet frozen ones)
+    # are unaffected. One vmapped jnp.where, no branching.
+    @jax.jit
+    def _apply_inlet_drift(positions, element_ids, dt, drift):
+        is_pending = element_ids < 0
+        new_positions = positions + dt * drift
+        return jnp.where(is_pending[:, None], new_positions, positions)
+
+    apply_inlet_drift = _apply_inlet_drift if n_pending_inlet else None
+
     print(f"  Compiling...")
     t_compile = time.time()
+    if apply_inlet_drift is not None:
+        positions_gpu = apply_inlet_drift(
+            positions_gpu, element_ids_initial, DT, drift_vel_gpu,
+        )
     positions_gpu, element_ids_gpu = rk4_step(
         positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0
     )
@@ -1187,6 +1408,14 @@ def main():
     t_start = time.time()
     prev_lost = 0
     for step in range(1, N_STEPS + 1):
+        if apply_inlet_drift is not None:
+            # Drift pending-entry particles by dt * drift_vel. Particles
+            # with element_id >= 0 are unchanged; the kernel's internal
+            # search will assign a real element to any drifted particle
+            # that has now crossed into the mesh.
+            positions_gpu = apply_inlet_drift(
+                positions_gpu, element_ids_gpu, DT, drift_vel_gpu,
+            )
         positions_gpu, element_ids_gpu = rk4_step(
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
