@@ -141,6 +141,7 @@ def bounds_from_fractions(
     x_frac: Tuple[float, float] = (0.0, 1.0),
     y_frac: Tuple[float, float] = (0.0, 1.0),
     z_frac: Tuple[float, float] = (0.0, 1.0),
+    inlet_wall: str = "none",
 ) -> np.ndarray:
     """
     Build absolute bounds from per-axis domain fractions.
@@ -155,8 +156,19 @@ def bounds_from_fractions(
     ----------
     domain_min, domain_max : array-like, length 3
         Absolute domain bounds (e.g. node_positions.min/max(axis=0)).
-    x_frac, y_frac, z_frac : (lo, hi) with 0 <= lo < hi <= 1
-        Per-axis sub-interval fractions.
+    x_frac, y_frac, z_frac : (lo, hi)
+        Per-axis sub-interval fractions. For walls that are NOT the inlet
+        wall, both values must satisfy ``0 <= lo < hi <= 1``. For the
+        inlet axis the corresponding face is allowed to extend outside
+        ``[0, 1]`` (``lo < 0`` for ``*_min`` inlets, ``hi > 1`` for ``*_max``
+        inlets); the opposite face on the same axis must still lie inside
+        ``[0, 1]``. This lets the user define a fraction-based seed box
+        that protrudes outside the mesh on the inlet face for continuous
+        particle entry.
+    inlet_wall : str
+        One of ``"none"``, ``"x_min"``, ``"x_max"``, ``"y_min"``, ``"y_max"``,
+        ``"z_min"``, ``"z_max"``. When non-``"none"``, relaxes the bounds
+        check on the named face only.
 
     Returns
     -------
@@ -169,11 +181,42 @@ def bounds_from_fractions(
     extent = domain_max - domain_min
 
     fracs = np.array([x_frac, y_frac, z_frac], dtype=np.float32)  # (3, 2)
-    for i, name in enumerate(('x', 'y', 'z')):
-        lo, hi = float(fracs[i, 0]), float(fracs[i, 1])
-        if not (0.0 <= lo < hi <= 1.0):
+    axis_names = ('x', 'y', 'z')
+
+    inlet_axis = None
+    inlet_side = None
+    if inlet_wall != "none":
+        try:
+            ax_str, side = inlet_wall.split('_')
+            inlet_axis = axis_names.index(ax_str)
+            assert side in ('min', 'max')
+            inlet_side = side
+        except (ValueError, AssertionError):
             raise ValueError(
-                f"{name}_frac=({lo}, {hi}) must satisfy 0 <= lo < hi <= 1"
+                f"inlet_wall={inlet_wall!r} must be one of 'none', "
+                f"'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max'"
+            )
+
+    for i, name in enumerate(axis_names):
+        lo, hi = float(fracs[i, 0]), float(fracs[i, 1])
+        if lo >= hi:
+            raise ValueError(
+                f"{name}_frac=({lo}, {hi}) must satisfy lo < hi"
+            )
+        # The face on the inlet wall may extend outside [0, 1]; the
+        # opposite face on the same axis must stay inside [0, 1].
+        lo_min_allowed = 0.0
+        hi_max_allowed = 1.0
+        if i == inlet_axis:
+            if inlet_side == 'min':
+                lo_min_allowed = -np.inf
+            else:
+                hi_max_allowed = np.inf
+        if not (lo_min_allowed <= lo and hi <= hi_max_allowed):
+            raise ValueError(
+                f"{name}_frac=({lo}, {hi}) violates "
+                f"{lo_min_allowed} <= lo < hi <= {hi_max_allowed} "
+                f"(inlet_wall={inlet_wall})"
             )
 
     bmin = domain_min + fracs[:, 0] * extent
