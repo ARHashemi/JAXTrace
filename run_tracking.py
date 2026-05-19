@@ -1183,16 +1183,49 @@ def main():
     )
 
     # Per-step inlet drift helper. For any particle whose element_id is
-    # still negative, position is advanced by dt * drift_vel. Particles
-    # whose drift_vel is zero (active particles or non-inlet frozen ones)
-    # are unaffected. One vmapped jnp.where, no branching.
+    # still negative AND has a non-zero drift velocity assigned at
+    # startup, position is advanced by dt * drift_vel. Particles whose
+    # drift_vel is zero (active particles, or off-inlet frozen particles)
+    # are unaffected.
     @jax.jit
     def _apply_inlet_drift(positions, element_ids, dt, drift):
         is_pending = element_ids < 0
         new_positions = positions + dt * drift
         return jnp.where(is_pending[:, None], new_positions, positions)
 
+    # Post-step recovery: the RK4 kernel's boundary-projection logic
+    # (--boundary-proj, on by default) snaps any particle with
+    # element_id<0 to the mesh bbox and runs a recovery search. For
+    # pending-entry particles drifting OUTSIDE the mesh this is wrong —
+    # they should stay where the drift put them until they cross
+    # naturally. This helper restores the pre-step drifted position and
+    # forces element_id back to -1 for any particle that was a
+    # pending-entry candidate (drift_vel != 0) and whose kernel-side
+    # search did not find a real element. Particles that successfully
+    # entered (elem_id >= 0 after kernel) keep their kernel result AND
+    # have their drift_vel zeroed so they no longer drift.
+    @jax.jit
+    def _suppress_pending_recovery(
+        positions_post, element_ids_post, positions_pre_kernel, drift,
+    ):
+        had_drift = (drift != 0).any(axis=-1)
+        still_pending = had_drift & (element_ids_post < 0)
+        positions_out = jnp.where(
+            still_pending[:, None], positions_pre_kernel, positions_post,
+        )
+        element_ids_out = jnp.where(
+            still_pending, jnp.int32(-1), element_ids_post,
+        )
+        # Once a particle has entered, zero its drift so future steps
+        # don't reapply the inlet velocity if it later escapes.
+        entered = had_drift & (element_ids_post >= 0)
+        new_drift = jnp.where(entered[:, None], jnp.zeros_like(drift), drift)
+        return positions_out, element_ids_out, new_drift
+
     apply_inlet_drift = _apply_inlet_drift if n_pending_inlet else None
+    suppress_pending_recovery = (
+        _suppress_pending_recovery if n_pending_inlet else None
+    )
 
     print(f"  Compiling...")
     t_compile = time.time()
@@ -1429,9 +1462,19 @@ def main():
             positions_gpu = apply_inlet_drift(
                 positions_gpu, element_ids_gpu, DT, drift_vel_gpu,
             )
+            # Snapshot pre-kernel positions so we can restore them for
+            # any pending-entry particle that the kernel's boundary
+            # projection would otherwise snap to the mesh bbox.
+            positions_pre_kernel = positions_gpu
         positions_gpu, element_ids_gpu = rk4_step(
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
+        if suppress_pending_recovery is not None:
+            positions_gpu, element_ids_gpu, drift_vel_gpu = \
+                suppress_pending_recovery(
+                    positions_gpu, element_ids_gpu,
+                    positions_pre_kernel, drift_vel_gpu,
+                )
         # Update per-step trajectory flags on GPU (cheap, fully fused).
         if args.export_escaped_flag:
             escaped_ever_gpu = _update_escaped(escaped_ever_gpu, element_ids_gpu)
