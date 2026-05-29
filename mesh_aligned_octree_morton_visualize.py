@@ -234,8 +234,8 @@ fig_a.update_yaxes(
     constrain="domain"
 )
 
-img_bytes = fig_a.to_image(format="svg", scale=2)
-with open("new_l2_multilevel_octree.svg", "wb") as f_img:
+img_bytes = fig_a.to_image(format="pdf", scale=2)
+with open("new_l2_multilevel_octree.pdf", "wb") as f_img:
     f_img.write(img_bytes)
 with open("new_l2_multilevel_octree.png.meta.json","w") as f:
     json.dump({"caption":

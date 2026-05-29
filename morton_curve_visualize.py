@@ -172,7 +172,7 @@ fig_a.update_yaxes(
 )
 
 # Write with 300 DPI
-fig_a.write_image("morton_curve_mesh_hires.svg", scale=2)
+fig_a.write_image("morton_curve_mesh_hires.pdf", scale=2)
 
 with open("morton_curve_mesh_hires.png.meta.json", "w") as f:
     json.dump({

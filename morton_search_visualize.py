@@ -218,7 +218,7 @@ fig_b.update_yaxes(
 )
 
 # Write with 300 DPI
-fig_b.write_image("morton_search_hires.svg", scale=2)
+fig_b.write_image("morton_search_hires.pdf", scale=2)
 
 with open("morton_search_hires.png.meta.json", "w") as f:
     json.dump({

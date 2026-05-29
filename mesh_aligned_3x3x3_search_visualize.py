@@ -302,8 +302,8 @@ fig_b.update_yaxes(
     constrain="domain"
 )
 
-img_bytes = fig_b.to_image(format="svg", scale=2)
-with open("new_l2_multilevel_3x3.svg", "wb") as f_img:
+img_bytes = fig_b.to_image(format="pdf", scale=2)
+with open("new_l2_multilevel_3x3.pdf", "wb") as f_img:
     f_img.write(img_bytes)
 with open("new_l2_multilevel_3x3.png.meta.json","w") as f:
     json.dump({"caption":
