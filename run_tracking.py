@@ -379,6 +379,56 @@ def parse_args():
                         choices=["vertex_multi", "parent_cube"],
                         help="Override octree registration method")
 
+    # --- density-field online estimation (opt-in) ---
+    # All --density-* args are inert unless --density-enable is passed. When
+    # disabled, the density runner is never constructed and adds zero overhead
+    # to tracking.
+    parser.add_argument("--density-enable", action="store_true", default=False,
+                        help="Enable online density-field estimation alongside particle tracking.")
+    parser.add_argument("--density-output-dir", type=str, default=None,
+                        help="Output directory for density files (default: <output_subdir>/density).")
+    parser.add_argument("--density-output-format", choices=["vtkhdf", "vti"], default="vtkhdf")
+    parser.add_argument("--density-filename-stem", default="density")
+    parser.add_argument("--density-kernel", default="wendland_c2",
+                        choices=["wendland_c2", "wendland_c4", "cubic_spline",
+                                 "gaussian", "epanechnikov", "quintic_spline"])
+    parser.add_argument("--density-bandwidth-mode", default="fixed",
+                        choices=["fixed", "scott", "silverman", "knn_adaptive"])
+    parser.add_argument("--density-bandwidth", type=float, default=None,
+                        help="Fixed bandwidth (fixed mode only). Default: bandwidth-factor*voxel_size.")
+    parser.add_argument("--density-bandwidth-factor", type=float, default=2.0)
+    parser.add_argument("--density-bandwidth-refresh-every", type=int, default=0)
+    parser.add_argument("--density-knn-k", type=int, default=32)
+    parser.add_argument("--density-knn-safety", type=float, default=1.2)
+    parser.add_argument("--density-bounds", type=float, nargs=6, default=None,
+                        metavar=("XMIN", "XMAX", "YMIN", "YMAX", "ZMIN", "ZMAX"),
+                        help="Explicit voxel grid bounds. Default: mesh bbox.")
+    parser.add_argument("--density-bounds-from", choices=["mesh", "particles"], default="mesh")
+    parser.add_argument("--density-resolution", type=int, default=128,
+                        help="Cubic voxel-grid resolution; ignored if --density-voxel-size is set.")
+    parser.add_argument("--density-voxel-size", type=float, default=None)
+    parser.add_argument("--density-pad-fraction", type=float, default=0.0)
+    parser.add_argument("--density-no-mask-inside-mesh", action="store_true")
+    parser.add_argument("--density-engine", choices=["auto", "brute", "octree"], default="auto")
+    parser.add_argument("--density-auto-threshold", type=float, default=5e10)
+    parser.add_argument("--density-brute-query-chunk", type=int, default=8192)
+    parser.add_argument("--density-octree-cells-per-dim", type=int, default=64)
+    parser.add_argument("--density-octree-max-neighbors", type=int, default=256)
+    parser.add_argument("--density-particle-bucket", type=int, default=4096)
+    parser.add_argument("--density-no-per-step", action="store_true")
+    parser.add_argument("--density-no-time-average", action="store_true")
+    parser.add_argument("--density-no-particle-density", action="store_true",
+                        help="Skip per-particle density samples in extra_scalars.")
+    parser.add_argument("--density-export-freq", type=int, default=None,
+                        help="Compute density every Nth step. Default: same as --export-freq.")
+    parser.add_argument("--density-normalization", choices=["pdf", "mass", "unnormalized"], default="pdf")
+    parser.add_argument("--density-compression", choices=["gzip", "lzf", "blosc", "none"], default="gzip",
+                        help="HDF5 compression filter for density files. Default gzip — "
+                             "only filter ParaView's bundled vtkhdf5 can decompress.")
+    parser.add_argument("--density-compression-opts", type=int, default=1,
+                        help="Compression level for gzip (1-9) or blosc clevel.")
+    parser.add_argument("--density-blosc-threads", type=int, default=4)
+
     return parser.parse_args()
 
 
@@ -729,8 +779,26 @@ def main():
     VELOCITY_FIELD = args.velocity_field
 
     # Parse --boundary-walls (comma-separated 'wall=mode' pairs).
+    #
+    # Modes:
+    #   clamp     — kernel snaps lost particles to bbox+tol and runs a
+    #               recovery search (today's default). Use for solid
+    #               walls / numerical jitter.
+    #   outlet    — kernel does NOT snap on this axis; particles cross
+    #               freely and stay element_id<0. No driver-side action.
+    #   ballistic — kernel treats it as outlet; driver detects escape,
+    #               snapshots the particle's last-step velocity, and
+    #               advances x += dt * last_vel every step from then on.
+    #   freeze    — kernel treats it as outlet; driver detects escape
+    #               and freezes the position at the escape point.
+    #
+    # The kernel's clamp_to_bbox honors the clamp masks per-axis, so
+    # only walls with mode='clamp' invoke the recovery snap. ballistic
+    # and freeze are handled entirely driver-side; the kernel does not
+    # see them. When no wall is ballistic or freeze, the driver attaches
+    # no helpers and per-step cost is byte-identical to today.
     _valid_walls = set(_WALL_TO_AXIS.keys())
-    _valid_modes = {"clamp", "outlet"}
+    _valid_modes = {"clamp", "outlet", "ballistic", "freeze"}
     if args.boundary_walls is not None:
         wall_dict = {}
         for pair in args.boundary_walls.split(','):
@@ -811,22 +879,43 @@ def main():
     print(f"  FEMUSS comparison:    {'on' if args.femuss_compare else 'off'}")
     print("=" * 80)
 
-    # Build per-wall clamp masks
+    # Build per-wall clamp masks for the kernel. Only walls with
+    # mode='clamp' invoke the kernel's snap-to-bbox recovery. Every
+    # other mode (outlet, ballistic, freeze) is non-clamp from the
+    # kernel's point of view — it leaves the particle lost. Ballistic
+    # and freeze are then picked up by driver-side helpers below.
     wall_config = config.RK4_BOUNDARY_WALLS
     if wall_config is None or not isinstance(wall_config, dict):
         clamp_min_mask = jnp.array([True, True, True])
         clamp_max_mask = jnp.array([True, True, True])
+        _wall_modes = {w: 'clamp' for w in _WALL_TO_AXIS}
     else:
+        _wall_modes = {w: wall_config.get(w, 'clamp') for w in _WALL_TO_AXIS}
         clamp_min_mask = jnp.array([
-            wall_config.get('x_min', 'clamp') == 'clamp',
-            wall_config.get('y_min', 'clamp') == 'clamp',
-            wall_config.get('z_min', 'clamp') == 'clamp',
+            _wall_modes['x_min'] == 'clamp',
+            _wall_modes['y_min'] == 'clamp',
+            _wall_modes['z_min'] == 'clamp',
         ])
         clamp_max_mask = jnp.array([
-            wall_config.get('x_max', 'clamp') == 'clamp',
-            wall_config.get('y_max', 'clamp') == 'clamp',
-            wall_config.get('z_max', 'clamp') == 'clamp',
+            _wall_modes['x_max'] == 'clamp',
+            _wall_modes['y_max'] == 'clamp',
+            _wall_modes['z_max'] == 'clamp',
         ])
+    # Per-wall mode arrays for driver-side ballistic/freeze logic.
+    # Encoding: 0=clamp, 1=outlet, 2=ballistic, 3=freeze. Six walls
+    # laid out as [x_min, y_min, z_min, x_max, y_max, z_max].
+    _MODE_CODE = {'clamp': 0, 'outlet': 1, 'ballistic': 2, 'freeze': 3}
+    wall_mode_codes = np.array([
+        _MODE_CODE[_wall_modes['x_min']],
+        _MODE_CODE[_wall_modes['y_min']],
+        _MODE_CODE[_wall_modes['z_min']],
+        _MODE_CODE[_wall_modes['x_max']],
+        _MODE_CODE[_wall_modes['y_max']],
+        _MODE_CODE[_wall_modes['z_max']],
+    ], dtype=np.int32)
+    has_ballistic_or_freeze = bool(
+        ((wall_mode_codes == 2) | (wall_mode_codes == 3)).any()
+    )
 
     # ==================================================================
     # [1/7] Load mesh
@@ -1155,6 +1244,22 @@ def main():
     drift_vel_gpu = jax.device_put(drift_vel)
     pending_entry_gpu = jax.device_put(pending_entry)
 
+    # Per-particle escape-mode state for ballistic/freeze walls.
+    # 0=normal (in domain or just lost waiting for kernel recovery),
+    # 1=ballistic (advance by stored escape_vel each step),
+    # 2=frozen (position never updates again).
+    # Latched on first escape; never reset.
+    if has_ballistic_or_freeze:
+        escape_mode_gpu = jnp.zeros(n_particles, dtype=jnp.uint8)
+        escape_vel_gpu = jnp.zeros((n_particles, 3),
+                                   dtype=config.FLOAT_DTYPE_NP)
+        last_vel_gpu = jnp.zeros((n_particles, 3),
+                                 dtype=config.FLOAT_DTYPE_NP)
+    else:
+        escape_mode_gpu = None
+        escape_vel_gpu = None
+        last_vel_gpu = None
+
     stage_times['5_initial_assign'] = time.time() - t_stage
     print(f"  Stage 5 time: {stage_times['5_initial_assign']:.1f}s")
 
@@ -1250,6 +1355,123 @@ def main():
     suppress_pending_recovery = (
         _suppress_pending_recovery if n_pending_inlet else None
     )
+
+    # ------------------------------------------------------------------
+    # Ballistic / freeze driver-side helpers. These are built only when
+    # at least one wall is ballistic or freeze, so all-outlet / all-clamp
+    # runs pay zero per-step cost from this block.
+    # ------------------------------------------------------------------
+    if has_ballistic_or_freeze:
+        # Per-wall mode codes as a JAX array, ordered as
+        # [x_min, y_min, z_min, x_max, y_max, z_max].
+        # 0=clamp, 1=outlet, 2=ballistic, 3=freeze.
+        wall_modes_gpu = jnp.asarray(wall_mode_codes, dtype=jnp.int32)
+
+        @jax.jit
+        def _classify_escape_mode(positions_post):
+            """For each particle return the wall mode it would inherit
+            if it escaped at this position. Uses axis priority: a
+            particle outside on multiple faces takes the first match in
+            order [x_min, y_min, z_min, x_max, y_max, z_max]. Returns
+            the per-particle uint8 mode code (0..3); for particles
+            inside the bbox the returned value is meaningless and is
+            masked away by the caller.
+            """
+            below = positions_post < bbox_min_gpu
+            above = positions_post > bbox_max_gpu
+            # 6-bit one-hot over [x_min,y_min,z_min,x_max,y_max,z_max].
+            # Priority via first-true selection on each face in order.
+            # Default mode for "no face matches" is 1 (outlet) — never
+            # actually used (gated by element_id<0 caller), but a sane
+            # neutral value if it leaks through.
+            mode = jnp.full(positions_post.shape[:-1], jnp.int32(1))
+            # Apply in reverse priority so earlier faces overwrite later.
+            faces = [
+                (above[..., 2], wall_modes_gpu[5]),  # z_max
+                (above[..., 1], wall_modes_gpu[4]),  # y_max
+                (above[..., 0], wall_modes_gpu[3]),  # x_max
+                (below[..., 2], wall_modes_gpu[2]),  # z_min
+                (below[..., 1], wall_modes_gpu[1]),  # y_min
+                (below[..., 0], wall_modes_gpu[0]),  # x_min
+            ]
+            for hit, code in faces:
+                mode = jnp.where(hit, code, mode)
+            return mode.astype(jnp.uint8)
+
+        @jax.jit
+        def _latch_and_advance_escape(
+            positions_post, positions_pre, element_ids_post,
+            escape_mode, escape_vel, last_vel, dt,
+        ):
+            """One JIT for the full ballistic/freeze step.
+
+            Inputs:
+              positions_post, element_ids_post: kernel output this step.
+              positions_pre: particle positions before this step's
+                rk4_step (and after apply_inlet_drift, if any).
+              escape_mode: per-particle latched mode (0=normal,
+                2=ballistic, 3=freeze).
+              escape_vel: per-particle stored ballistic velocity.
+              last_vel: per-particle running estimate of the last
+                in-domain velocity (updated for active particles).
+              dt: time step.
+
+            Returns updated (positions, element_ids, escape_mode,
+            escape_vel, last_vel).
+            """
+            # Update last_vel for particles that were active going into
+            # this step (element_ids_post >= 0 captures particles that
+            # the kernel kept; element_ids_post may be <0 for newly-
+            # escaped particles, in which case last_vel from a prior
+            # step is what we'll latch). Use the post-kernel position
+            # delta as the effective velocity.
+            active = element_ids_post >= 0
+            v_est = (positions_post - positions_pre) / dt
+            new_last_vel = jnp.where(active[:, None], v_est, last_vel)
+
+            # Detect freshly-escaped particles: lost this step and not
+            # already latched. Classify their face mode.
+            lost = element_ids_post < 0
+            not_latched = escape_mode == 0
+            newly_escaped = lost & not_latched
+            classified = _classify_escape_mode(positions_post)
+            # Latch only ballistic/freeze; outlet/clamp stay mode=0.
+            mode_is_active = (classified == 2) | (classified == 3)
+            latch_now = newly_escaped & mode_is_active
+            new_escape_mode = jnp.where(latch_now, classified, escape_mode)
+            # Snapshot the escape velocity for ballistic particles at
+            # the moment of latch. Use last_vel from PRIOR step (i.e.,
+            # before this step's update), since v_est for a newly-lost
+            # particle reflects its (probably erratic) motion outside.
+            latch_ballistic = latch_now & (classified == 2)
+            new_escape_vel = jnp.where(
+                latch_ballistic[:, None], last_vel, escape_vel,
+            )
+
+            # Advance already-latched particles. For ballistic, the
+            # kernel may have moved them — we override with the
+            # ballistic trajectory based on pre-step position. For
+            # freeze, restore the pre-step position.
+            is_ballistic = new_escape_mode == 2
+            is_freeze = new_escape_mode == 3
+            ballistic_pos = positions_pre + dt * new_escape_vel
+            positions_out = jnp.where(
+                is_ballistic[:, None], ballistic_pos, positions_post,
+            )
+            positions_out = jnp.where(
+                is_freeze[:, None], positions_pre, positions_out,
+            )
+            # Latched particles keep element_id = -1.
+            latched_now = is_ballistic | is_freeze
+            element_ids_out = jnp.where(
+                latched_now, jnp.int32(-1), element_ids_post,
+            )
+            return (positions_out, element_ids_out,
+                    new_escape_mode, new_escape_vel, new_last_vel)
+
+        latch_and_advance_escape = _latch_and_advance_escape
+    else:
+        latch_and_advance_escape = None
 
     print(f"  Compiling...")
     t_compile = time.time()
@@ -1361,6 +1583,9 @@ def main():
     # cleanly after the writer has drained.
     import signal as _signal
     _shutdown_called = [False]
+    # Predeclare density_runner so the signal handler's closure can see it
+    # even if the runner is never assigned (--density-enable not set).
+    density_runner = None
 
     def _graceful_shutdown(signum, frame):
         if _shutdown_called[0]:
@@ -1372,6 +1597,11 @@ def main():
                 exporter.stop()
         except Exception as e:
             print(f"  Exporter shutdown error: {e}")
+        try:
+            if density_runner is not None:
+                density_runner.close()
+        except Exception as e:
+            print(f"  Density runner shutdown error: {e}")
         # Re-raise so the interpreter exits with the conventional 128+signum.
         _signal.signal(signum, _signal.SIG_DFL)
         import os as _os
@@ -1459,6 +1689,71 @@ def main():
                 max_temperature_gpu, dtype=np.float32,
             )
 
+    # --- Density runner (opt-in; zero overhead when --density-enable is unset) -
+    density_runner = None
+    density_export_freq = args.density_export_freq or args.export_freq
+    if args.density_enable:
+        try:
+            from jaxtrace.density import DensityRunner, DensityRunnerConfig
+
+            density_output_dir = (
+                args.density_output_dir if args.density_output_dir is not None
+                else str(output_subdir / "density")
+            )
+            density_bounds = None
+            if args.density_bounds is not None:
+                bb = args.density_bounds
+                density_bounds = ((bb[0], bb[1]), (bb[2], bb[3]), (bb[4], bb[5]))
+
+            density_cfg = DensityRunnerConfig(
+                bounds_mode="explicit" if density_bounds is not None else args.density_bounds_from,
+                bounds=density_bounds,
+                resolution=None if args.density_voxel_size is not None else args.density_resolution,
+                voxel_size=args.density_voxel_size,
+                pad_fraction=args.density_pad_fraction,
+                mask_inside_mesh=not args.density_no_mask_inside_mesh,
+                kernel=args.density_kernel,
+                bandwidth_mode=args.density_bandwidth_mode,
+                bandwidth=args.density_bandwidth,
+                bandwidth_factor=args.density_bandwidth_factor,
+                bandwidth_refresh_every=args.density_bandwidth_refresh_every,
+                knn_k=args.density_knn_k,
+                knn_safety=args.density_knn_safety,
+                normalization=args.density_normalization,
+                engine=args.density_engine,
+                auto_threshold=args.density_auto_threshold,
+                brute_query_chunk=args.density_brute_query_chunk,
+                octree_cells_per_dim=args.density_octree_cells_per_dim,
+                octree_max_neighbors=args.density_octree_max_neighbors,
+                particle_bucket=args.density_particle_bucket,
+                eval_on_grid=True,
+                eval_at_particles=not args.density_no_particle_density,
+                write_per_step=not args.density_no_per_step,
+                write_time_average=not args.density_no_time_average,
+                output_format=args.density_output_format,
+                output_dir=density_output_dir,
+                filename_stem=args.density_filename_stem,
+                compression=args.density_compression,
+                compression_opts=args.density_compression_opts,
+                blosc_threads=args.density_blosc_threads,
+            )
+
+            density_runner = DensityRunner(
+                cfg=density_cfg,
+                mesh_octree_gpu=mesh_aligned_octree_multi_gpu,
+                mesh_bbox_min=mesh_bbox_min_cpu,
+                mesh_bbox_max=mesh_bbox_max_cpu,
+                initial_positions=particle_positions,
+            )
+            print(f"  Density estimation ENABLED: kernel={args.density_kernel}, "
+                  f"bandwidth_mode={args.density_bandwidth_mode}, "
+                  f"engine={args.density_engine}, grid={density_runner.voxel_grid.resolution}, "
+                  f"output={density_output_dir}")
+        except Exception as e:
+            print(f"  [!] Density runner construction failed: {e}")
+            print(f"  [!] Continuing tracking without density output.")
+            density_runner = None
+
     # Export initial state
     if exporter is not None:
         pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
@@ -1495,6 +1790,11 @@ def main():
             # any pending-entry particle that the kernel's boundary
             # projection would otherwise snap to the mesh bbox.
             positions_pre_kernel = positions_gpu
+        # Snapshot pre-step position for ballistic/freeze. For ballistic
+        # this is the launch point; for freeze this is the value we
+        # restore. Reference assignment — free when unused.
+        if latch_and_advance_escape is not None:
+            positions_pre_step = positions_gpu
         positions_gpu, element_ids_gpu = rk4_step(
             positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
         )
@@ -1504,6 +1804,13 @@ def main():
                     positions_gpu, element_ids_gpu,
                     positions_pre_kernel,
                     pending_entry_gpu, drift_vel_gpu,
+                )
+        if latch_and_advance_escape is not None:
+            (positions_gpu, element_ids_gpu,
+             escape_mode_gpu, escape_vel_gpu, last_vel_gpu) = \
+                latch_and_advance_escape(
+                    positions_gpu, positions_pre_step, element_ids_gpu,
+                    escape_mode_gpu, escape_vel_gpu, last_vel_gpu, DT,
                 )
         # Update per-step trajectory flags on GPU (cheap, fully fused).
         if args.export_escaped_flag:
@@ -1516,7 +1823,9 @@ def main():
         do_log = (step % LOG_INTERVAL == 0) or (step == N_STEPS)
         do_export = ((exporter is not None)
                      and ((step % EXPORT_FREQUENCY == 0) or (step == N_STEPS)))
-        if do_log or do_export:
+        do_density = (density_runner is not None
+                      and ((step % density_export_freq == 0) or (step == N_STEPS)))
+        if do_log or do_export or do_density:
             pos_cpu = np.array(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
             eid_cpu_raw = np.array(element_ids_gpu, dtype=np.int32)
             if do_log:
@@ -1532,6 +1841,32 @@ def main():
                 prev_lost = n_lost
                 if new_lost > 0 and exporter is not None:
                     do_export = True
+            # Density evaluation. Use only active particles (element_id >= 0)
+            # so escaped / pending particles don't contribute. Failures are
+            # logged but do not affect tracking throughput.
+            rho_part_np = None
+            if do_density:
+                try:
+                    active_mask = eid_cpu_raw >= 0
+                    if active_mask.any():
+                        active_pos = positions_gpu[active_mask]
+                    else:
+                        active_pos = positions_gpu[:0]
+                    _, rho_part_active = density_runner.step(
+                        active_pos, dt=float(DT),
+                        time_value=float(step * DT),
+                        step_index=int(step),
+                    )
+                    if rho_part_active is not None:
+                        rho_part_np = np.zeros((n_particles,), dtype=np.float32)
+                        rho_part_np[active_mask] = rho_part_active
+                except Exception as e:
+                    print(f"  [!] Density step failed at step {step}: {e} -- disabling density.")
+                    try:
+                        density_runner.close()
+                    except Exception:
+                        pass
+                    density_runner = None
             if do_export and exporter is not None:
                 eid_export = eid_cpu_raw if EXPORT_ELEMENT_IDS else None
                 step_extras = dict(extra_scalars) if extra_scalars else {}
@@ -1540,6 +1875,8 @@ def main():
                         escaped_ever_gpu, dtype=np.uint8,
                     )
                 _collect_temperature_extras(step_extras)
+                if rho_part_np is not None and not args.density_no_particle_density:
+                    step_extras['Density'] = rho_part_np
                 exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
                                         element_ids=eid_export,
                                         extra_scalars=step_extras or extra_scalars)
@@ -1554,6 +1891,13 @@ def main():
                   f"{exporter.output_path}")
         else:
             print(f"  Exported {exporter.n_exported} VTU files")
+    if density_runner is not None:
+        try:
+            density_runner.close()
+            print(f"  Density: wrote {density_runner.writer.n_written if density_runner.writer else 0} "
+                  f"step files + time-average to {density_runner.cfg.output_dir}")
+        except Exception as e:
+            print(f"  [!] Density runner close failed: {e}")
     print(f"  Stage 7 time: {t_elapsed:.1f}s")
 
     # ==================================================================

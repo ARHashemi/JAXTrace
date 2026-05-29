@@ -56,7 +56,11 @@ from jaxtrace.tracking import (
 )
 from jaxtrace.tracking.boundary import continuous_inlet_boundary_factory
 from jaxtrace.io import open_dataset, export_trajectory_to_vtk
-from jaxtrace.density import KDEEstimator, SPHDensityEstimator
+# NOTE: KDEEstimator / SPHDensityEstimator were removed in the density rewrite.
+# This legacy example is not updated; use DensityRunner from jaxtrace.density
+# (see scripts/run_density_postprocess.py) for the supported workflow.
+KDEEstimator = None  # type: ignore[assignment]
+SPHDensityEstimator = None  # type: ignore[assignment]
 from jaxtrace.visualization import (
     plot_particles_2d,
     plot_trajectory_2d
@@ -1109,7 +1113,9 @@ def create_yz_density_slice(trajectory, output_dir, x0=None, levels=None, cutoff
         Upper percentile cutoff for contour levels (default 95%, range: 0-100)
     """
     try:
-        from jaxtrace.density.kde import KDEEstimator
+        # Legacy import path removed. The 2-D slice analysis below is part of
+        # the legacy example and not supported by the new DensityRunner API.
+        return
 
         # Get final particle positions
         final_positions = trajectory.positions[-1]  # Shape: (N, 3)

@@ -68,9 +68,13 @@ def get_expected_core_modules():
         # Density estimation
         "jaxtrace/density/__init__.py",
         "jaxtrace/density/kernels.py",
-        "jaxtrace/density/neighbors.py",
-        "jaxtrace/density/kde.py",
-        "jaxtrace/density/sph.py",
+        "jaxtrace/density/bandwidth.py",
+        "jaxtrace/density/grid.py",
+        "jaxtrace/density/inside_mesh.py",
+        "jaxtrace/density/estimator.py",
+        "jaxtrace/density/time_accumulator.py",
+        "jaxtrace/density/writers.py",
+        "jaxtrace/density/runner.py",
 
         # Visualization
         "jaxtrace/visualization/__init__.py",

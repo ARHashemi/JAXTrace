@@ -112,12 +112,18 @@ REGISTRATION=""
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
 # BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
 # where wall is one of {x_min, x_max, y_min, y_max, z_min, z_max} and mode
-# is either:
-#   clamp  -- particles crossing this wall are projected back inside the
-#             bounding box (default for any wall not listed)
-#   outlet -- particles crossing this wall leave the domain; their
-#             element_id is set to -1 and tracking stops for them
-# Set to "" to clamp every wall.
+# is one of:
+#   clamp     -- particles crossing this wall are projected back inside
+#                the bounding box (default for any wall not listed)
+#   outlet    -- particles crossing this wall leave the domain; their
+#                element_id stays -1 and tracking stops for them
+#   ballistic -- particles crossing this wall continue with their last
+#                in-domain velocity; element_id stays -1, Escaped=1
+#   freeze    -- particles crossing this wall stop at the escape point;
+#                element_id stays -1, Escaped=1
+# Modes are independent per wall and do not interfere with each other.
+# Performance: with no wall set to ballistic or freeze, per-step cost is
+# identical to today. Set to "" to clamp every wall.
 BOUNDARY_WALLS="x_max=outlet"
 BOUNDARY_PROJ_TOL=1e-6     # inward offset applied when clamping to a wall [m]
 POINT_IN_TET_TOL=1e-6      # numerical tolerance for point-in-tet test
@@ -194,6 +200,57 @@ BENCHMARK_MODE=0
 # MONITOR_INTERVAL: seconds between GPU/RAM log entries. 0 disables the
 # background monitor.
 MONITOR_INTERVAL=30
+
+# ── [11] Online density estimation (opt-in) ──────────────────────────────────
+# When DENSITY_ENABLE=0 the runner is never constructed and adds zero overhead
+# to the tracking loop. When ON, a density field is computed on a uniform
+# voxel grid at the same cadence as EXPORT_FREQ (override with
+# DENSITY_EXPORT_FREQ) and written as VTKHDF ImageData or per-step VTI.
+# A time-averaged field with mean / coverage / peak fields is written at exit.
+DENSITY_ENABLE=0                  # 1 = enable, 0 = disable (default)
+
+# Output (default: <run output>/density)
+DENSITY_OUTPUT_DIR=""             # absolute path; "" = <output>/density
+DENSITY_OUTPUT_FORMAT=vtkhdf      # vtkhdf | vti
+DENSITY_FILENAME_STEM=density
+
+# Kernel + bandwidth
+DENSITY_KERNEL=wendland_c2        # wendland_c2|wendland_c4|cubic_spline|gaussian|epanechnikov|quintic_spline
+DENSITY_BANDWIDTH_MODE=fixed      # fixed | scott | silverman | knn_adaptive
+DENSITY_BANDWIDTH=""              # explicit h (fixed mode); "" = factor * voxel_size
+DENSITY_BANDWIDTH_FACTOR=2.0
+DENSITY_BANDWIDTH_REFRESH_EVERY=0 # 0 = compute once; N = recompute every N steps
+DENSITY_KNN_K=32                  # k-NN neighbors for knn_adaptive
+DENSITY_KNN_SAFETY=1.2
+
+# Voxel grid
+DENSITY_BOUNDS=""                 # "XMIN XMAX YMIN YMAX ZMIN ZMAX"; "" = use mesh bbox
+DENSITY_BOUNDS_FROM=mesh          # mesh | particles  (ignored if DENSITY_BOUNDS set)
+DENSITY_RESOLUTION=128            # cubic grid resolution; ignored if voxel-size set
+DENSITY_VOXEL_SIZE=""             # physical voxel edge length [m]; overrides resolution
+DENSITY_PAD_FRACTION=0.0
+DENSITY_NO_MASK_INSIDE_MESH=0     # 1 = skip inside-mesh masking
+
+# Engine
+DENSITY_ENGINE=auto               # auto | brute | octree
+DENSITY_AUTO_THRESHOLD=5e10
+DENSITY_BRUTE_QUERY_CHUNK=8192
+DENSITY_OCTREE_CELLS_PER_DIM=64
+DENSITY_OCTREE_MAX_NEIGHBORS=256
+DENSITY_PARTICLE_BUCKET=4096
+
+# Output toggles
+DENSITY_NO_PER_STEP=0             # 1 = no per-step grid file (still computes for time-avg)
+DENSITY_NO_TIME_AVERAGE=0         # 1 = skip the final time-average file
+DENSITY_NO_PARTICLE_DENSITY=0     # 1 = skip 'Density' scalar in particles export
+DENSITY_EXPORT_FREQ=""            # "" = same as EXPORT_FREQ
+DENSITY_NORMALIZATION=pdf         # pdf | mass | unnormalized
+
+# Compression: gzip | lzf | blosc | none
+DENSITY_COMPRESSION=gzip          # gzip | lzf | blosc | none. ParaView only
+                                  # reads gzip; lzf/blosc need a custom HDF5.
+DENSITY_COMPRESSION_OPTS=1
+DENSITY_BLOSC_THREADS=4
 
 # =============================================================================
 # END USER CONFIGURATION — below this line is infrastructure.
@@ -475,6 +532,42 @@ case "$SEED_SOURCE" in
         exit 2
         ;;
 esac
+
+# Density estimation flags (only appended when DENSITY_ENABLE=1).
+if [ "${DENSITY_ENABLE:-0}" = "1" ]; then
+    ARGS+=( --density-enable
+            --density-output-format    "$DENSITY_OUTPUT_FORMAT"
+            --density-filename-stem    "$DENSITY_FILENAME_STEM"
+            --density-kernel           "$DENSITY_KERNEL"
+            --density-bandwidth-mode   "$DENSITY_BANDWIDTH_MODE"
+            --density-bandwidth-factor "$DENSITY_BANDWIDTH_FACTOR"
+            --density-bandwidth-refresh-every "$DENSITY_BANDWIDTH_REFRESH_EVERY"
+            --density-knn-k            "$DENSITY_KNN_K"
+            --density-knn-safety       "$DENSITY_KNN_SAFETY"
+            --density-bounds-from      "$DENSITY_BOUNDS_FROM"
+            --density-resolution       "$DENSITY_RESOLUTION"
+            --density-pad-fraction     "$DENSITY_PAD_FRACTION"
+            --density-engine           "$DENSITY_ENGINE"
+            --density-auto-threshold   "$DENSITY_AUTO_THRESHOLD"
+            --density-brute-query-chunk     "$DENSITY_BRUTE_QUERY_CHUNK"
+            --density-octree-cells-per-dim  "$DENSITY_OCTREE_CELLS_PER_DIM"
+            --density-octree-max-neighbors  "$DENSITY_OCTREE_MAX_NEIGHBORS"
+            --density-particle-bucket  "$DENSITY_PARTICLE_BUCKET"
+            --density-normalization    "$DENSITY_NORMALIZATION"
+            --density-compression      "$DENSITY_COMPRESSION"
+            --density-compression-opts "$DENSITY_COMPRESSION_OPTS"
+            --density-blosc-threads    "$DENSITY_BLOSC_THREADS"
+    )
+    [ -n "$DENSITY_OUTPUT_DIR" ]  && ARGS+=( --density-output-dir  "$DENSITY_OUTPUT_DIR" )
+    [ -n "$DENSITY_BANDWIDTH" ]   && ARGS+=( --density-bandwidth   "$DENSITY_BANDWIDTH" )
+    [ -n "$DENSITY_BOUNDS" ]      && ARGS+=( --density-bounds      $DENSITY_BOUNDS )
+    [ -n "$DENSITY_VOXEL_SIZE" ]  && ARGS+=( --density-voxel-size  "$DENSITY_VOXEL_SIZE" )
+    [ -n "$DENSITY_EXPORT_FREQ" ] && ARGS+=( --density-export-freq "$DENSITY_EXPORT_FREQ" )
+    [ "$DENSITY_NO_MASK_INSIDE_MESH" = "1" ] && ARGS+=( --density-no-mask-inside-mesh )
+    [ "$DENSITY_NO_PER_STEP"         = "1" ] && ARGS+=( --density-no-per-step )
+    [ "$DENSITY_NO_TIME_AVERAGE"     = "1" ] && ARGS+=( --density-no-time-average )
+    [ "$DENSITY_NO_PARTICLE_DENSITY" = "1" ] && ARGS+=( --density-no-particle-density )
+fi
 
 # ── Print run summary ─────────────────────────────────────────────────────────
 VRAM_TOTAL=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)

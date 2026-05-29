@@ -1,203 +1,166 @@
 # jaxtrace/density/kernels.py
 """
-Kernel functions for density estimation.
+SPH/KDE kernel functions, pure JAX.
 
-Provides bandwidth selection rules and various kernel functions
-for both KDE and SPH applications with optional JAX acceleration.
+All kernels have the signature::
+
+    W(r, h, d) -> array
+
+where ``r`` and ``h`` broadcast against each other (scalar h or per-particle h),
+and ``d`` is the spatial dimensionality (2 or 3). All kernels are normalized so
+that ``integral_{R^d} W(|x|, h) dx == 1``.
+
+Two normalization conventions for the *output* of a density estimator are
+expressed *outside* this module:
+
+  - "pdf"  mode:  rho(x) = sum_i W(|x - x_i|, h_i, d) / N
+  - "mass" mode:  rho(x) = sum_i m_i * W(|x - x_i|, h_i, d)
+
+This file only provides the per-pair kernel evaluations.
 """
 
 from __future__ import annotations
-from typing import Tuple
+
 import math
-import numpy as np
 
-# Import JAX utilities with fallback
-from ..utils.jax_utils import JAX_AVAILABLE
-
-if JAX_AVAILABLE:
-    try:
-        import jax
-        import jax.numpy as jnp
-    except Exception:
-        JAX_AVAILABLE = False
-
-if not JAX_AVAILABLE:
-    import numpy as jnp  # type: ignore
+import jax
+import jax.numpy as jnp
 
 
-# ---------- Bandwidth rules ----------
+# -----------------------------------------------------------------------------
+# Kernel registry
+# -----------------------------------------------------------------------------
 
-def scott_bandwidth(data: np.ndarray) -> float:
-    """
-    Scott's rule: h ~ n^{-1/(d+4)} * sigma, using mean of per-dim std.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Data points, shape (N, D)
-        
-    Returns
-    -------
-    float
-        Optimal bandwidth estimate
-    """
-    x = np.asarray(data)
-    n, d = x.shape
-    sigma = np.std(x, axis=0, ddof=1).mean()
-    return sigma * n ** (-1.0 / (d + 4.0))
+KERNEL_NAMES = (
+    "gaussian",
+    "cubic_spline",
+    "wendland_c2",
+    "wendland_c4",
+    "epanechnikov",
+    "quintic_spline",
+)
 
-
-def silverman_bandwidth(data: np.ndarray) -> float:
-    """
-    Silverman's rule: h ~ ((4/(d+2))^(1/(d+4))) * n^{-1/(d+4)} * sigma
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Data points, shape (N, D)
-        
-    Returns
-    -------
-    float
-        Optimal bandwidth estimate
-    """
-    x = np.asarray(data)
-    n, d = x.shape
-    sigma = np.std(x, axis=0, ddof=1).mean()
-    factor = (4.0 / (d + 2.0)) ** (1.0 / (d + 4.0))
-    return factor * sigma * n ** (-1.0 / (d + 4.0))
+# Compact support radius of each kernel in units of h. A query at distance r
+# from a particle with smoothing length h contributes only if r < SUPPORT * h.
+# Gaussian has no compact support; we clip at 3*h for radius-query purposes.
+KERNEL_SUPPORT = {
+    "gaussian":       3.0,
+    "cubic_spline":   2.0,
+    "wendland_c2":    2.0,
+    "wendland_c4":    2.0,
+    "epanechnikov":   1.0,
+    "quintic_spline": 3.0,
+}
 
 
-# ---------- Gaussian kernel (for KDE) ----------
-
-def gaussian_kernel(r2_over_h2, d: int):
-    """
-    Normalized isotropic Gaussian kernel:
-      K = (2*pi)^(-d/2) * exp(-0.5 * r^2 / h^2)
-    Accepts NumPy or JAX arrays.
-    
-    Parameters
-    ----------
-    r2_over_h2 : array_like
-        Squared distance divided by squared bandwidth
-    d : int
-        Dimensionality
-        
-    Returns
-    -------
-    array_like
-        Kernel values
-    """
-    norm = (2.0 * math.pi) ** (-0.5 * d)
-    if JAX_AVAILABLE and isinstance(r2_over_h2, (jnp.ndarray, jax.Array)):
-        return norm * jnp.exp(-0.5 * r2_over_h2)
-    r2_over_h2 = np.asarray(r2_over_h2)
-    return norm * np.exp(-0.5 * r2_over_h2)
+def kernel_support(name: str) -> float:
+    """Return the compact-support radius in units of h for the named kernel."""
+    if name not in KERNEL_SUPPORT:
+        raise ValueError(f"unknown kernel {name!r}; choose from {KERNEL_NAMES}")
+    return KERNEL_SUPPORT[name]
 
 
-# ---------- SPH kernels (cubic spline, Wendland C2) ----------
+# -----------------------------------------------------------------------------
+# Per-kernel evaluators (JAX, broadcasting)
+# -----------------------------------------------------------------------------
 
-def cubic_spline_kernel_2d(r: np.ndarray, h: float) -> np.ndarray:
-    """
-    2D cubic spline kernel W(r,h) with normalization 10/(7*pi*h^2),
-    support radius 2h.
-    
-    Parameters
-    ----------
-    r : np.ndarray
-        Distances from kernel center
-    h : float
-        Smoothing length
-        
-    Returns
-    -------
-    np.ndarray
-        Kernel values
-    """
-    q = r / h
-    sigma = 10.0 / (7.0 * math.pi * h * h)
-    res = np.zeros_like(r)
-    m1 = (q >= 0) & (q < 1)
-    m2 = (q >= 1) & (q < 2)
-    res[m1] = 1.0 - 1.5 * q[m1]**2 + 0.75 * q[m1]**3
-    res[m2] = 0.25 * (2.0 - q[m2])**3
-    return sigma * res
+def _safe_h(h):
+    return jnp.maximum(h, jnp.asarray(1e-30, dtype=h.dtype) if hasattr(h, "dtype") else 1e-30)
 
 
-def cubic_spline_kernel_3d(r: np.ndarray, h: float) -> np.ndarray:
-    """
-    3D cubic spline kernel W(r,h) with normalization 1/(pi*h^3),
-    support radius 2h.
-    
-    Parameters
-    ----------
-    r : np.ndarray
-        Distances from kernel center
-    h : float
-        Smoothing length
-        
-    Returns
-    -------
-    np.ndarray
-        Kernel values
-    """
-    q = r / h
-    sigma = 1.0 / (math.pi * h**3)
-    res = np.zeros_like(r)
-    m1 = (q >= 0) & (q < 1)
-    m2 = (q >= 1) & (q < 2)
-    res[m1] = 1.0 - 1.5 * q[m1]**2 + 0.75 * q[m1]**3
-    res[m2] = 0.25 * (2.0 - q[m2])**3
-    return sigma * res
+def gaussian(r, h, d: int):
+    """Isotropic Gaussian: W = (2*pi*h^2)^(-d/2) * exp(-r^2 / (2 h^2))."""
+    hs = _safe_h(h)
+    sigma = (2.0 * math.pi) ** (-0.5 * d) * hs ** (-d)
+    return sigma * jnp.exp(-0.5 * (r / hs) ** 2)
 
 
-def wendland_c2_kernel_2d(r: np.ndarray, h: float) -> np.ndarray:
-    """
-    2D Wendland C2 kernel with compact support 2h, normalized:
-      W(q) = (7/(4*pi*h^2)) * (1 - q/2)^4 * (1 + 2q),  for 0 <= q <= 2
-      
-    Parameters
-    ----------
-    r : np.ndarray
-        Distances from kernel center
-    h : float
-        Smoothing length
-        
-    Returns
-    -------
-    np.ndarray
-        Kernel values
-    """
-    q = r / h
-    sigma = 7.0 / (4.0 * math.pi * h * h)
-    m = (q >= 0) & (q <= 2.0)
-    t = (1.0 - 0.5 * q[m])
-    out = np.zeros_like(r)
-    out[m] = sigma * (t**4) * (1.0 + 2.0 * q[m])
-    return out
+def cubic_spline(r, h, d: int):
+    """M4 cubic spline with compact support 2h."""
+    hs = _safe_h(h)
+    q = r / hs
+    if d == 2:
+        sigma = 10.0 / (7.0 * math.pi) * hs ** (-2)
+    elif d == 3:
+        sigma = 1.0 / math.pi * hs ** (-3)
+    else:
+        raise ValueError("cubic_spline supports d in {2,3}")
+    w1 = 1.0 - 1.5 * q ** 2 + 0.75 * q ** 3
+    w2 = 0.25 * (2.0 - q) ** 3
+    out = jnp.where(q < 1.0, w1, jnp.where(q < 2.0, w2, 0.0))
+    return sigma * out
 
 
-def wendland_c2_kernel_3d(r: np.ndarray, h: float) -> np.ndarray:
-    """
-    3D Wendland C2 kernel with compact support 2h, normalized:
-      W(q) = (21/(2*pi*h^3)) * (1 - q/2)^4 * (1 + 2q),  for 0 <= q <= 2
-      
-    Parameters
-    ----------
-    r : np.ndarray
-        Distances from kernel center
-    h : float
-        Smoothing length
-        
-    Returns
-    -------
-    np.ndarray
-        Kernel values
-    """
-    q = r / h
-    sigma = 21.0 / (2.0 * math.pi * h**3)
-    m = (q >= 0) & (q <= 2.0)
-    t = (1.0 - 0.5 * q[m])
-    out = np.zeros_like(r)
-    out[m] = sigma * (t**4) * (1.0 + 2.0 * q[m])
-    return out
+def wendland_c2(r, h, d: int):
+    """Wendland C2 with compact support 2h: (1 - q/2)^4 * (1 + 2 q)."""
+    hs = _safe_h(h)
+    q = r / hs
+    if d == 2:
+        sigma = 7.0 / (4.0 * math.pi) * hs ** (-2)
+    elif d == 3:
+        sigma = 21.0 / (16.0 * math.pi) * hs ** (-3)
+    else:
+        raise ValueError("wendland_c2 supports d in {2,3}")
+    t = jnp.maximum(1.0 - 0.5 * q, 0.0)
+    return sigma * (t ** 4) * (1.0 + 2.0 * q) * jnp.where(q < 2.0, 1.0, 0.0)
+
+
+def wendland_c4(r, h, d: int):
+    """Wendland C4 with compact support 2h: (1 - q/2)^6 * (1 + 3 q + 35/12 q^2)."""
+    hs = _safe_h(h)
+    q = r / hs
+    if d == 2:
+        sigma = 9.0 / (4.0 * math.pi) * hs ** (-2)
+    elif d == 3:
+        sigma = 495.0 / (256.0 * math.pi) * hs ** (-3)
+    else:
+        raise ValueError("wendland_c4 supports d in {2,3}")
+    t = jnp.maximum(1.0 - 0.5 * q, 0.0)
+    inner = 1.0 + 3.0 * q + (35.0 / 12.0) * q ** 2
+    return sigma * (t ** 6) * inner * jnp.where(q < 2.0, 1.0, 0.0)
+
+
+def epanechnikov(r, h, d: int):
+    """Epanechnikov kernel with compact support 1*h: max(0, 1 - q^2)."""
+    hs = _safe_h(h)
+    q = r / hs
+    if d == 2:
+        sigma = 2.0 / math.pi * hs ** (-2)
+    elif d == 3:
+        sigma = 15.0 / (8.0 * math.pi) * hs ** (-3)
+    else:
+        raise ValueError("epanechnikov supports d in {2,3}")
+    return sigma * jnp.maximum(1.0 - q ** 2, 0.0)
+
+
+def quintic_spline(r, h, d: int):
+    """M6 quintic spline with compact support 3h."""
+    hs = _safe_h(h)
+    q = r / hs
+    if d == 2:
+        sigma = 7.0 / (478.0 * math.pi) * hs ** (-2)
+    elif d == 3:
+        sigma = 1.0 / (120.0 * math.pi) * hs ** (-3)
+    else:
+        raise ValueError("quintic_spline supports d in {2,3}")
+    a = jnp.maximum(3.0 - q, 0.0) ** 5
+    b = jnp.where(q < 2.0, 6.0 * jnp.maximum(2.0 - q, 0.0) ** 5, 0.0)
+    c = jnp.where(q < 1.0, 15.0 * jnp.maximum(1.0 - q, 0.0) ** 5, 0.0)
+    return sigma * (a - b + c) * jnp.where(q < 3.0, 1.0, 0.0)
+
+
+_DISPATCH = {
+    "gaussian": gaussian,
+    "cubic_spline": cubic_spline,
+    "wendland_c2": wendland_c2,
+    "wendland_c4": wendland_c4,
+    "epanechnikov": epanechnikov,
+    "quintic_spline": quintic_spline,
+}
+
+
+def evaluate_kernel(name: str, r, h, d: int):
+    """Dispatch by name. Use this from JIT-traced code with a static name."""
+    if name not in _DISPATCH:
+        raise ValueError(f"unknown kernel {name!r}; choose from {KERNEL_NAMES}")
+    return _DISPATCH[name](r, h, d)

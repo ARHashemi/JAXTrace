@@ -30,7 +30,7 @@ def test_core_imports():
         from jaxtrace.io import open_dataset
         from jaxtrace.fields import TimeSeriesField
         from jaxtrace.tracking import create_tracker, random_seeds
-        from jaxtrace.density import KDEEstimator, SPHDensityEstimator
+        from jaxtrace.density import DensityRunner, DensityRunnerConfig, DensityEstimator
 
         print("✅ Core modules imported successfully")
         return True
