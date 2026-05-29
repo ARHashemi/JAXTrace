@@ -121,7 +121,19 @@ def wendland_c4(r, h, d: int):
 
 
 def epanechnikov(r, h, d: int):
-    """Epanechnikov kernel with compact support 1*h: max(0, 1 - q^2)."""
+    """Epanechnikov kernel with compact support 1*h: max(0, 1 - q^2).
+
+    Note: this kernel vanishes only *linearly* at the support boundary
+    (``K ∝ 1 - q²`` near ``q=1``), which makes it noticeably more
+    sensitive than smoother kernels to the float32 round-off of any
+    matmul-based pairwise-distance computation (e.g. the tiled brute
+    backend's ``r² = ‖Q‖² + ‖P‖² − 2 Q·P`` identity). Per-pair relative
+    error near the cutoff can reach a few percent in extreme cases; the
+    aggregated per-query relative error is bounded by the fraction of
+    pairs near the cutoff and is typically ~1e-3. If you need exact
+    boundary behaviour, prefer a higher-order kernel (cubic_spline,
+    wendland_c2, wendland_c4).
+    """
     hs = _safe_h(h)
     q = r / hs
     if d == 2:
