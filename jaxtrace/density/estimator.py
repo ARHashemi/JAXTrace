@@ -166,6 +166,7 @@ def _build_particle_hash(
     P: jnp.ndarray, weights: jnp.ndarray, support_radius: float,
     target_n_per_cell: int = 9,
     min_cs: float = 1e-6,
+    fixed_bbox: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> ParticleHash:
     """
     Build a uniform 3-D cell hash over the particle cloud, sized to a target
@@ -183,6 +184,15 @@ def _build_particle_hash(
 
     Caller passes per-particle weights so zero-weight ghosts (from
     pad_particles) are ignored when computing the bbox / occupancy.
+
+    ``fixed_bbox=(lo, hi)``: if provided, use the given fixed bounding
+    box (and the implied fixed ``cs`` / ``dims``) instead of recomputing
+    from the per-step particle min/max. This is essential when calling
+    the octree on a *trajectory* — the per-step bbox drifts, the dims
+    drift with it, the cell_starts array shape drifts, and the JIT
+    *recompiles every step* (we measured ~12 s of compile per step on
+    a 360k-particle case). With a fixed bbox the JIT cache hits on
+    every step after the first.
     """
     P_np = np.asarray(P)
     w_np = np.asarray(weights)
@@ -192,12 +202,18 @@ def _build_particle_hash(
         return _empty_hash()
 
     Pv = P_np[valid]
-    bbox_min = Pv.min(axis=0).astype(np.float32) - np.float32(1e-3)
-    bbox_max = Pv.max(axis=0).astype(np.float32) + np.float32(1e-3)
+    if fixed_bbox is not None:
+        bbox_min = np.asarray(fixed_bbox[0], dtype=np.float32)
+        bbox_max = np.asarray(fixed_bbox[1], dtype=np.float32)
+    else:
+        bbox_min = Pv.min(axis=0).astype(np.float32) - np.float32(1e-3)
+        bbox_max = Pv.max(axis=0).astype(np.float32) + np.float32(1e-3)
     extent = (bbox_max - bbox_min).astype(np.float64)
 
     # Isotropic cell-size by occupancy target. The trailing ``max(., min_cs)``
-    # guards against degenerate (zero-volume) clouds.
+    # guards against degenerate (zero-volume) clouds. Note: when fixed_bbox
+    # is set, ``cs`` is dictated by V_bbox/N_valid — if N_valid stays
+    # constant across steps, ``cs`` is also constant ⇒ stable JIT shapes.
     V_bbox = float(np.prod(extent))
     cs_target = (V_bbox * float(target_n_per_cell) / float(n_valid)) ** (1.0 / 3.0)
     cs_scalar = max(cs_target, float(min_cs))
@@ -364,6 +380,12 @@ class DensityEstimator:
     cfg: EstimatorConfig
     # Voxel-grid query set (flat (M_active, 3) device array, already masked)
     query_points: Optional[jnp.ndarray] = None
+    # Fixed bounding box for the particle hash (lo, hi as host ndarrays).
+    # When set, the hash uses this for its dims / cell_size instead of the
+    # per-step particle min/max — critical for trajectory-replay workflows
+    # where per-step bbox drift would otherwise trigger a JIT recompile
+    # every step.
+    fixed_bbox: Optional[Tuple[np.ndarray, np.ndarray]] = None
     _brute_fn: Optional[callable] = field(default=None, init=False, repr=False)
     _octree_fn: Optional[callable] = field(default=None, init=False, repr=False)
     _n_padded_last: int = field(default=-1, init=False, repr=False)
@@ -445,7 +467,11 @@ class DensityEstimator:
 
         if engine == "brute":
             return self._eval_brute(Pp, hp, wp, Q)
-        return self._eval_octree(Pp, hp, wp, Q, h_max_real=h_max_real)
+        return self._eval_octree(
+            Pp, hp, wp, Q,
+            h_max_real=h_max_real,
+            fixed_bbox=self.fixed_bbox,
+        )
 
     # --- backends -------------------------------------------------------------
 
@@ -467,7 +493,11 @@ class DensityEstimator:
                 out.append(self._brute_fn(Qc, P, h, w))
         return jnp.concatenate(out, axis=0)
 
-    def _eval_octree(self, P, h, w, Q, h_max_real: Optional[float] = None):
+    def _eval_octree(
+        self, P, h, w, Q,
+        h_max_real: Optional[float] = None,
+        fixed_bbox: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    ):
         """Backend P: particle hash + per-axis stencil + fori_loop sum.
 
         Parameters
@@ -479,6 +509,12 @@ class DensityEstimator:
             it overrides ``jnp.max(h)``; required when ``pad_particles``
             inserts ghost particles whose h values would otherwise inflate
             ``jnp.max(h)`` and make the support_radius far too large.
+        fixed_bbox : (np.ndarray, np.ndarray), optional
+            Fixed bounding box (lo, hi) to use for the hash geometry. When
+            set, the hash dims and cell_size are stable across calls, which
+            is *required* for the JIT cache to hit across timesteps —
+            otherwise the per-step bbox drift triggers a fresh ~12 s compile
+            every step. The runner passes the trajectory-union bbox here.
 
         Steps:
           1. Build the particle hash on host (numpy sort + CSR offsets — cheap).
@@ -498,6 +534,7 @@ class DensityEstimator:
         ph = _build_particle_hash(
             P, w, support_radius=support * h_max,
             target_n_per_cell=self.cfg.octree_target_n_per_cell,
+            fixed_bbox=fixed_bbox,
         )
 
         # If the hash is degenerate (no valid particles) just return zeros.
@@ -544,18 +581,27 @@ class DensityEstimator:
         # Threshold 0.9 of brute keeps a moderate octree win in scope; the
         # inner fori_loop is cheap so even 20-30% savings amortise.
         if est_cost > 0.9 * n_valid:
-            print(f"[density] octree fallback to brute: "
-                  f"stencil_vol={stencil_vol}, mean_per_cell={ph.mean_per_cell:.1f}, "
-                  f"V_sup/V_bbox={occupancy_frac:.3f}, "
-                  f"est_neighbours/N_valid={est_cost/n_valid:.2f}")
+            # Print once per fallback "signature" so a steady-state run
+            # doesn't dump one line per call.
+            sig = ("fallback", ph.grid_dims, stencil_vol, round(occupancy_frac, 3))
+            if sig != getattr(self, "_last_octree_sig", None):
+                print(f"[density] octree fallback to brute: "
+                      f"stencil_vol={stencil_vol}, mean_per_cell={ph.mean_per_cell:.1f}, "
+                      f"V_sup/V_bbox={occupancy_frac:.3f}, "
+                      f"est_neighbours/N_valid={est_cost/n_valid:.2f}")
+                self._last_octree_sig = sig
             return self._eval_brute(P, h, w, Q)
-        print(f"[density] octree built: dims={ph.grid_dims}, "
-              f"cs={cs_v:.4g} m, "
-              f"stencil_radius={ph.stencil_radius} (vol={stencil_vol}), "
-              f"mean_per_cell={ph.mean_per_cell:.1f}, max_per_cell={ph.max_per_cell}, "
-              f"V_sup/V_bbox={occupancy_frac:.3f}, "
-              f"est_neighbours/query={est_cost:.0f} "
-              f"(brute would do {n_valid})")
+        # Same deduplication for the "octree built" line.
+        sig = ("built", ph.grid_dims, stencil_vol, round(occupancy_frac, 3))
+        if sig != getattr(self, "_last_octree_sig", None):
+            print(f"[density] octree built: dims={ph.grid_dims}, "
+                  f"cs={cs_v:.4g} m, "
+                  f"stencil_radius={ph.stencil_radius} (vol={stencil_vol}), "
+                  f"mean_per_cell={ph.mean_per_cell:.1f}, max_per_cell={ph.max_per_cell}, "
+                  f"V_sup/V_bbox={occupancy_frac:.3f}, "
+                  f"est_neighbours/query={est_cost:.0f} "
+                  f"(brute would do {n_valid})")
+            self._last_octree_sig = sig
 
         grid_dims = jnp.asarray(ph.grid_dims, dtype=jnp.int32)
         stencil_offsets = _stencil_offsets(ph.stencil_radius)

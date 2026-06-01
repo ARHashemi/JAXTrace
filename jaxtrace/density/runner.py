@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from . import bandwidth, grid as grid_mod, inside_mesh, writers
+from . import bandwidth, grid as grid_mod, inside_mesh, kernels, writers
 from .estimator import DensityEstimator, EstimatorConfig
 from .time_accumulator import TimeAccumulator
 
@@ -151,7 +151,40 @@ class DensityRunner:
             octree_target_n_per_cell=self.cfg.octree_target_n_per_cell,
             particle_bucket=self.cfg.particle_bucket,
         )
-        self.estimator = DensityEstimator(cfg=est_cfg, query_points=self.query_points)
+        # Fix the octree's particle-hash bbox to the voxel-grid bbox so the
+        # hash dims/cell_size stay constant across timesteps. This is
+        # required for the JIT cache to hit step-over-step — otherwise the
+        # per-step particle min/max drifts by ~1e-7 each step, dims jitter,
+        # cell_starts shape changes, and XLA recompiles the ~12s kernel
+        # every single step (the bottleneck that bricked the previous run).
+        # Pad the bbox by support_radius so the hash actually covers every
+        # particle: a particle right at the grid edge can be touched by
+        # queries up to support_radius away, and we want its hash cell to
+        # be a valid one.
+        _support = kernels.kernel_support(self.cfg.kernel)
+        # Worst-case h_max for the bbox padding. With fixed bandwidth this
+        # is exactly the configured h; for adaptive modes it can drift, but
+        # the pad-by-support_radius is an upper bound either way.
+        # Use a generous heuristic for the pad to be safe across modes.
+        if self.cfg.bandwidth_mode == "fixed":
+            _h_max_est = (
+                self.cfg.bandwidth
+                if self.cfg.bandwidth is not None
+                else self.cfg.bandwidth_factor * float(np.max(self.voxel_grid.spacing))
+            )
+        else:
+            # Adaptive — pick a generous upper bound from the bbox extent.
+            _h_max_est = 0.25 * float(
+                np.max(np.asarray(self.voxel_grid.bbox_max) - np.asarray(self.voxel_grid.bbox_min))
+            )
+        _support_pad = float(_support) * float(_h_max_est)
+        _fixed_lo = np.asarray(self.voxel_grid.bbox_min, dtype=np.float32) - _support_pad
+        _fixed_hi = np.asarray(self.voxel_grid.bbox_max, dtype=np.float32) + _support_pad
+        self.estimator = DensityEstimator(
+            cfg=est_cfg,
+            query_points=self.query_points,
+            fixed_bbox=(_fixed_lo, _fixed_hi),
+        )
 
         if self.cfg.write_time_average:
             self.accumulator = TimeAccumulator(n_voxels=M)
