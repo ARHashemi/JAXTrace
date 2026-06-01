@@ -428,6 +428,16 @@ class DensityEstimator:
         else:
             raise ValueError(f"unknown normalization {self.cfg.normalization!r}")
 
+        # Compute h_max from the REAL particles before padding. The
+        # pad_particles helper inserts ghost particles with h=1.0 (to keep
+        # the kernel's r/h finite for the all-zero ghost positions), which
+        # would poison jnp.max(hp). The octree backend uses h_max to size
+        # the kernel support — a polluted value sized support_radius up to
+        # ~1 m and made the entire bbox land inside support, defeating the
+        # whole point of the octree. Carrying the real h_max around the
+        # padding fixes that.
+        h_max_real = float(jnp.max(h))
+
         # Shape-stabilize: pad particles to a fixed bucket so JIT compiles once.
         n_padded = _bucket_round(N, self.cfg.particle_bucket)
         Pp, hp, wp = pad_particles(positions, h, w_eff, n_padded)
@@ -435,7 +445,7 @@ class DensityEstimator:
 
         if engine == "brute":
             return self._eval_brute(Pp, hp, wp, Q)
-        return self._eval_octree(Pp, hp, wp, Q)
+        return self._eval_octree(Pp, hp, wp, Q, h_max_real=h_max_real)
 
     # --- backends -------------------------------------------------------------
 
@@ -457,20 +467,34 @@ class DensityEstimator:
                 out.append(self._brute_fn(Qc, P, h, w))
         return jnp.concatenate(out, axis=0)
 
-    def _eval_octree(self, P, h, w, Q):
+    def _eval_octree(self, P, h, w, Q, h_max_real: Optional[float] = None):
         """Backend P: particle hash + per-axis stencil + fori_loop sum.
+
+        Parameters
+        ----------
+        P, h, w : padded particle arrays (length n_padded)
+        Q       : query positions
+        h_max_real : float, optional
+            Max bandwidth across the *real* (unpadded) particles. When set,
+            it overrides ``jnp.max(h)``; required when ``pad_particles``
+            inserts ghost particles whose h values would otherwise inflate
+            ``jnp.max(h)`` and make the support_radius far too large.
 
         Steps:
           1. Build the particle hash on host (numpy sort + CSR offsets — cheap).
-          2. Sanity-check the resulting geometry: if any axis has dims < 1
-             we can't form a stencil; if the projected stencil_volume is
-             larger than 50 % of N_valid the octree provides no real speedup
-             over brute. In either case we degrade gracefully to brute.
+          2. Sanity-check the resulting geometry: degrade to brute if the
+             octree would do more work than brute.
           3. JIT-launch the per-chunk kernel with the static stencil_offsets
              baked in.
         """
         support = kernels.kernel_support(self.cfg.kernel)
-        h_max = float(jnp.max(h))
+        # Use the caller-supplied h_max if available so we don't pick up the
+        # padding ghosts' h=1.0 default. Falls back to jnp.max(h) for direct
+        # callers (e.g. unit tests that call _eval_octree without padding).
+        if h_max_real is not None:
+            h_max = float(h_max_real)
+        else:
+            h_max = float(jnp.max(h))
         ph = _build_particle_hash(
             P, w, support_radius=support * h_max,
             target_n_per_cell=self.cfg.octree_target_n_per_cell,
