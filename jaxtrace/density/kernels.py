@@ -40,9 +40,14 @@ KERNEL_NAMES = (
     "quintic_spline",
 )
 
-# Compact support radius of each kernel in units of h. A query at distance r
-# from a particle with smoothing length h contributes only if r < SUPPORT * h.
-# Gaussian has no compact support; we clip at 3*h for radius-query purposes.
+# Compact-support radius (in units of h) for each kernel. A query at distance r
+# from a particle with smoothing length h contributes only if r < SUPPORT * h
+# — but only for kernels whose mathematical form is EXACTLY ZERO past that
+# radius. Gaussian has no compact support; the 3*h figure here is a
+# numerical-truncation convenience for radius queries, NOT a hard analytic
+# cutoff. Code that wants to skip pairs / cells outside a radius (e.g. the
+# octree per-cell pre-filter) must check ``kernel_has_compact_support`` first
+# or it will silently truncate the Gaussian tails.
 KERNEL_SUPPORT = {
     "gaussian":       3.0,
     "cubic_spline":   2.0,
@@ -52,12 +57,35 @@ KERNEL_SUPPORT = {
     "quintic_spline": 3.0,
 }
 
+# Whether the kernel is mathematically zero beyond ``SUPPORT * h``.
+# False for Gaussian (asymptotic decay only); True for everything else.
+KERNEL_HAS_COMPACT_SUPPORT = {
+    "gaussian":       False,
+    "cubic_spline":   True,
+    "wendland_c2":    True,
+    "wendland_c4":    True,
+    "epanechnikov":   True,
+    "quintic_spline": True,
+}
+
 
 def kernel_support(name: str) -> float:
-    """Return the compact-support radius in units of h for the named kernel."""
+    """Return the compact-support radius in units of h for the named kernel.
+
+    For Gaussian (no compact support) this returns the 3*h numerical
+    truncation radius; callers that need exact arithmetic must consult
+    :func:`kernel_has_compact_support` before using this for cutoff logic.
+    """
     if name not in KERNEL_SUPPORT:
         raise ValueError(f"unknown kernel {name!r}; choose from {KERNEL_NAMES}")
     return KERNEL_SUPPORT[name]
+
+
+def kernel_has_compact_support(name: str) -> bool:
+    """True iff the kernel evaluates to exactly zero for r >= SUPPORT * h."""
+    if name not in KERNEL_HAS_COMPACT_SUPPORT:
+        raise ValueError(f"unknown kernel {name!r}; choose from {KERNEL_NAMES}")
+    return KERNEL_HAS_COMPACT_SUPPORT[name]
 
 
 # -----------------------------------------------------------------------------

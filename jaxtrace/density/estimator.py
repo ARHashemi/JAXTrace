@@ -25,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Tuple
 
+import math
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -250,14 +252,20 @@ def _make_octree_kernel(kernel_name: str, d: int):
     Per query, we scan a fixed (2*sr+1)^3 stencil of cells around the query's
     home cell, and for each cell we run a ``fori_loop`` over its particles
     accumulating the kernel sum into a scalar ``rho``. There is no candidate
-    buffer; the result is exact regardless of cell occupancy (a particle
-    outside the kernel's support contributes exactly zero via the kernel's
-    own support cut-off).
+    buffer; the result is exact regardless of cell occupancy.
+
+    For kernels with compact support (cubic_spline, wendland_*, epanechnikov,
+    quintic_spline) we additionally pre-filter the stencil: cells whose AABB
+    is fully outside the kernel's support sphere are skipped (the inner
+    fori_loop becomes a zero-trip no-op). This filter is omitted for the
+    Gaussian, which has no analytic cut-off — applying it there would
+    silently truncate ~1% of the integral.
 
     The stencil offsets are passed as a runtime ``jnp.ndarray`` whose length
     is the static stencil_volume; the JIT cache keys on shape, so as long as
     the stencil shape is stable across calls there is no recompile.
     """
+    use_pre_filter = kernels.kernel_has_compact_support(kernel_name)
 
     def per_query(
         q: jnp.ndarray,                  # (3,) float32
@@ -270,7 +278,7 @@ def _make_octree_kernel(kernel_name: str, d: int):
         sorted_idx: jnp.ndarray,         # (N_valid,)   int32
         grid_dims: jnp.ndarray,          # (3,) int32
         stencil_offsets: jnp.ndarray,    # (S, 3) int32, S = (2sr+1)^3
-        support_radius_sq: jnp.ndarray,  # () float32 — (SUPPORT * h_max)^2
+        support_radius_sq: jnp.ndarray,  # () float32 — (SUPPORT * h_max)^2; unused for non-compact kernels
     ):
         ijk_home = jnp.floor((q - bbox_min) / cell_size).astype(jnp.int32)
         # The home cell may legitimately be outside the bbox when the query
@@ -285,26 +293,24 @@ def _make_octree_kernel(kernel_name: str, d: int):
             s = cell_starts[cell_id]
             e = cell_starts[cell_id + 1]
 
-            # Per-cell pre-filter: compute the cell's AABB and check whether
-            # the closest point of that AABB to the query is within the
-            # kernel support. If not, no particle in this cell can
-            # contribute (the kernel returns exactly zero past support_radius),
-            # so we skip the inner fori_loop entirely. This is the dominant
-            # speedup at large stencil_volume because most stencil cells lie
-            # outside the support sphere even though they're inside the
-            # support cube.
-            cell_lo = bbox_min + cijk.astype(jnp.float32) * cell_size
-            cell_hi = cell_lo + cell_size
-            # Closest point in AABB to q: clip q into the box.
-            closest = jnp.clip(q, cell_lo, cell_hi)
-            d2 = jnp.sum((closest - q) ** 2)
-            cell_in_support = d2 < support_radius_sq
+            cell_mask = in_range
+            if use_pre_filter:
+                # Per-cell pre-filter: compute the cell's AABB and check
+                # whether the closest point of that AABB to the query is
+                # within the kernel support. If not, no particle in this
+                # cell can contribute (the kernel returns *exactly zero*
+                # past support_radius for compact-support kernels), so we
+                # skip the inner fori_loop entirely. This is the dominant
+                # speedup at large stencil_volume because most stencil
+                # cells lie outside the support sphere even though they're
+                # inside the support cube.
+                cell_lo = bbox_min + cijk.astype(jnp.float32) * cell_size
+                cell_hi = cell_lo + cell_size
+                closest = jnp.clip(q, cell_lo, cell_hi)
+                d2 = jnp.sum((closest - q) ** 2)
+                cell_mask = jnp.logical_and(cell_mask, d2 < support_radius_sq)
 
-            n_in_cell = jnp.where(
-                jnp.logical_and(in_range, cell_in_support),
-                e - s,
-                jnp.int32(0),
-            )
+            n_in_cell = jnp.where(cell_mask, e - s, jnp.int32(0))
 
             def acc_one(j, partial):
                 pid = sorted_idx[s + j]
@@ -474,36 +480,58 @@ class DensityEstimator:
         if ph.sorted_particle_idx.shape[0] == 0:
             return jnp.zeros((Q.shape[0],), dtype=jnp.float32)
 
-        # Geometry-based fall-back to brute. The auto-selector picked octree
-        # on N*M cost only; here we know the actual hash dims and can decide
-        # whether the work saving is real.
-        #
-        # ``expected_neighbours`` upper-bounds the per-query neighbour count
-        # by ``stencil_vol * mean_per_cell``. The cubic stencil overcounts
-        # the spherical kernel support by ~6/pi ~ 1.9x, so the true cost is
-        # capped at ``min(expected_neighbours, n_valid)``. We only fall back
-        # to brute when even the upper-bound estimate isn't usefully smaller
-        # than brute's N — i.e. when there is genuinely no work to skip.
+        # Geometry-based fall-back to brute. The previous heuristic used
+        # ``stencil_vol * mean_per_cell`` to bound the per-query work, but
+        # that vastly overcounts when the cubic stencil dwarfs the actual
+        # support ball (e.g. stencil_vol=80k cells × 7.5 mean = 600k >>
+        # N_valid). Use a physics-based estimate instead: the number of
+        # particles actually within the kernel's support is bounded by the
+        # cloud's local number density times the support-ball volume.
         n_valid = int(ph.sorted_particle_idx.shape[0])
         stencil_vol = int(
             (2 * ph.stencil_radius[0] + 1)
             * (2 * ph.stencil_radius[1] + 1)
             * (2 * ph.stencil_radius[2] + 1)
         )
-        expected_neighbours = stencil_vol * ph.mean_per_cell
-        # Threshold 0.9 (rather than 0.5): if the stencil work is even 10%
-        # less than brute we take it — the inner ``fori_loop`` is cheap
-        # relative to the kernel evaluation, so any FLOPs saved compound.
-        if expected_neighbours > 0.9 * n_valid:
-            print(f"[density] octree fallback to brute: stencil_vol={stencil_vol}, "
-                  f"mean_per_cell={ph.mean_per_cell:.1f}, "
-                  f"expected_neighbours/N_valid={expected_neighbours/n_valid:.2f}")
+        cs_v = float(ph.cell_size[0])  # cs is isotropic
+        # Particle bbox volume from the hash (V_bbox_particles is what the
+        # cloud spans, not the user-set voxel-grid bbox). dims*cs is exactly
+        # that bbox.
+        V_bbox_particles = (
+            ph.grid_dims[0] * ph.grid_dims[1] * ph.grid_dims[2]
+        ) * (cs_v ** 3)
+        support_radius = support * h_max
+        V_sup = (4.0 / 3.0) * math.pi * (support_radius ** 3)
+        # Average occupancy fraction: how much of bbox volume the support
+        # ball covers. Capped at 1 (a tiny cloud with huge h leaves the
+        # support ball encompassing everything).
+        occupancy_frac = min(V_sup / max(V_bbox_particles, 1e-30), 1.0)
+        n_actual = occupancy_frac * n_valid
+        # Octree cost is roughly n_actual (after the per-cell pre-filter
+        # prunes the cubic stencil down to its inscribed sphere). With the
+        # filter off (Gaussian) octree cost is ~stencil_vol * mean_per_cell,
+        # capped at n_valid.
+        use_filter = kernels.kernel_has_compact_support(self.cfg.kernel)
+        if use_filter:
+            est_cost = n_actual
+        else:
+            est_cost = min(stencil_vol * ph.mean_per_cell, float(n_valid))
+        # Fall back if the octree wouldn't save substantially over brute.
+        # Threshold 0.9 of brute keeps a moderate octree win in scope; the
+        # inner fori_loop is cheap so even 20-30% savings amortise.
+        if est_cost > 0.9 * n_valid:
+            print(f"[density] octree fallback to brute: "
+                  f"stencil_vol={stencil_vol}, mean_per_cell={ph.mean_per_cell:.1f}, "
+                  f"V_sup/V_bbox={occupancy_frac:.3f}, "
+                  f"est_neighbours/N_valid={est_cost/n_valid:.2f}")
             return self._eval_brute(P, h, w, Q)
         print(f"[density] octree built: dims={ph.grid_dims}, "
-              f"cs={float(ph.cell_size[0]):.4g} m, "
+              f"cs={cs_v:.4g} m, "
               f"stencil_radius={ph.stencil_radius} (vol={stencil_vol}), "
               f"mean_per_cell={ph.mean_per_cell:.1f}, max_per_cell={ph.max_per_cell}, "
-              f"~neighbours/query={expected_neighbours:.0f}")
+              f"V_sup/V_bbox={occupancy_frac:.3f}, "
+              f"est_neighbours/query={est_cost:.0f} "
+              f"(brute would do {n_valid})")
 
         grid_dims = jnp.asarray(ph.grid_dims, dtype=jnp.int32)
         stencil_offsets = _stencil_offsets(ph.stencil_radius)
