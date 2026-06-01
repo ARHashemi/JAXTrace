@@ -270,6 +270,7 @@ def _make_octree_kernel(kernel_name: str, d: int):
         sorted_idx: jnp.ndarray,         # (N_valid,)   int32
         grid_dims: jnp.ndarray,          # (3,) int32
         stencil_offsets: jnp.ndarray,    # (S, 3) int32, S = (2sr+1)^3
+        support_radius_sq: jnp.ndarray,  # () float32 — (SUPPORT * h_max)^2
     ):
         ijk_home = jnp.floor((q - bbox_min) / cell_size).astype(jnp.int32)
         # The home cell may legitimately be outside the bbox when the query
@@ -283,7 +284,27 @@ def _make_octree_kernel(kernel_name: str, d: int):
             cell_id = (cijk_c[0] * grid_dims[1] + cijk_c[1]) * grid_dims[2] + cijk_c[2]
             s = cell_starts[cell_id]
             e = cell_starts[cell_id + 1]
-            n_in_cell = jnp.where(in_range, e - s, jnp.int32(0))
+
+            # Per-cell pre-filter: compute the cell's AABB and check whether
+            # the closest point of that AABB to the query is within the
+            # kernel support. If not, no particle in this cell can
+            # contribute (the kernel returns exactly zero past support_radius),
+            # so we skip the inner fori_loop entirely. This is the dominant
+            # speedup at large stencil_volume because most stencil cells lie
+            # outside the support sphere even though they're inside the
+            # support cube.
+            cell_lo = bbox_min + cijk.astype(jnp.float32) * cell_size
+            cell_hi = cell_lo + cell_size
+            # Closest point in AABB to q: clip q into the box.
+            closest = jnp.clip(q, cell_lo, cell_hi)
+            d2 = jnp.sum((closest - q) ** 2)
+            cell_in_support = d2 < support_radius_sq
+
+            n_in_cell = jnp.where(
+                jnp.logical_and(in_range, cell_in_support),
+                e - s,
+                jnp.int32(0),
+            )
 
             def acc_one(j, partial):
                 pid = sorted_idx[s + j]
@@ -301,12 +322,12 @@ def _make_octree_kernel(kernel_name: str, d: int):
     @jax.jit
     def per_chunk(
         Q, P, h, w, bbox_min, cell_size, cell_starts, sorted_idx, grid_dims,
-        stencil_offsets,
+        stencil_offsets, support_radius_sq,
     ):
         return jax.vmap(
             lambda q: per_query(
                 q, P, h, w, bbox_min, cell_size, cell_starts, sorted_idx,
-                grid_dims, stencil_offsets,
+                grid_dims, stencil_offsets, support_radius_sq,
             ),
         )(Q)
 
@@ -456,6 +477,13 @@ class DensityEstimator:
         # Geometry-based fall-back to brute. The auto-selector picked octree
         # on N*M cost only; here we know the actual hash dims and can decide
         # whether the work saving is real.
+        #
+        # ``expected_neighbours`` upper-bounds the per-query neighbour count
+        # by ``stencil_vol * mean_per_cell``. The cubic stencil overcounts
+        # the spherical kernel support by ~6/pi ~ 1.9x, so the true cost is
+        # capped at ``min(expected_neighbours, n_valid)``. We only fall back
+        # to brute when even the upper-bound estimate isn't usefully smaller
+        # than brute's N — i.e. when there is genuinely no work to skip.
         n_valid = int(ph.sorted_particle_idx.shape[0])
         stencil_vol = int(
             (2 * ph.stencil_radius[0] + 1)
@@ -463,8 +491,10 @@ class DensityEstimator:
             * (2 * ph.stencil_radius[2] + 1)
         )
         expected_neighbours = stencil_vol * ph.mean_per_cell
-        if expected_neighbours > 0.5 * n_valid:
-            # Octree wouldn't save much; fall back to brute.
+        # Threshold 0.9 (rather than 0.5): if the stencil work is even 10%
+        # less than brute we take it — the inner ``fori_loop`` is cheap
+        # relative to the kernel evaluation, so any FLOPs saved compound.
+        if expected_neighbours > 0.9 * n_valid:
             print(f"[density] octree fallback to brute: stencil_vol={stencil_vol}, "
                   f"mean_per_cell={ph.mean_per_cell:.1f}, "
                   f"expected_neighbours/N_valid={expected_neighbours/n_valid:.2f}")
@@ -477,6 +507,7 @@ class DensityEstimator:
 
         grid_dims = jnp.asarray(ph.grid_dims, dtype=jnp.int32)
         stencil_offsets = _stencil_offsets(ph.stencil_radius)
+        support_radius_sq = jnp.float32((support * h_max) ** 2)
 
         chunk = self.cfg.brute_query_chunk
         M = int(Q.shape[0])
@@ -493,6 +524,7 @@ class DensityEstimator:
                     Qc_pad, P, h, w,
                     ph.bbox_min, ph.cell_size, ph.cell_starts,
                     ph.sorted_particle_idx, grid_dims, stencil_offsets,
+                    support_radius_sq,
                 )
                 out.append(rho_pad[:Qc.shape[0]])
             else:
@@ -500,5 +532,6 @@ class DensityEstimator:
                     Qc, P, h, w,
                     ph.bbox_min, ph.cell_size, ph.cell_starts,
                     ph.sorted_particle_idx, grid_dims, stencil_offsets,
+                    support_radius_sq,
                 ))
         return jnp.concatenate(out, axis=0)
