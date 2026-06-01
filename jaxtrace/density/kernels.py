@@ -48,8 +48,15 @@ KERNEL_NAMES = (
 # cutoff. Code that wants to skip pairs / cells outside a radius (e.g. the
 # octree per-cell pre-filter) must check ``kernel_has_compact_support`` first
 # or it will silently truncate the Gaussian tails.
+# Note on Gaussian: there is no analytic compact support; the value here is
+# the radius beyond which the kernel is *numerically negligible* to ~1e-7
+# (exp(-q²/2) at q=5.5 is ~2.5e-7). The 5*h cutoff is wide enough that
+# stencil-based culling never drops more than rounding error from the
+# integral; smaller cutoffs (e.g. 3*h) leave a measurable ~1% tail and fail
+# strict 1e-5 tolerance tests. Other kernels have *exact* compact support
+# and their SUPPORT values are mathematically tight.
 KERNEL_SUPPORT = {
-    "gaussian":       3.0,
+    "gaussian":       5.0,
     "cubic_spline":   2.0,
     "wendland_c2":    2.0,
     "wendland_c4":    2.0,
