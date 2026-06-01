@@ -70,8 +70,7 @@ KNN_SAFETY=1.2
 ENGINE=auto                       # auto | brute | octree
 AUTO_THRESHOLD=5e10
 BRUTE_QUERY_CHUNK=8192
-OCTREE_CELLS_PER_DIM=64
-OCTREE_MAX_NEIGHBORS=256
+OCTREE_TARGET_N_PER_CELL=9
 PARTICLE_BUCKET=4096
 
 # ── [5] Output toggles ───────────────────────────────────────────────────────
@@ -187,8 +186,7 @@ ARGS=(
     --engine         "$ENGINE"
     --auto-threshold "$AUTO_THRESHOLD"
     --brute-query-chunk    "$BRUTE_QUERY_CHUNK"
-    --octree-cells-per-dim "$OCTREE_CELLS_PER_DIM"
-    --octree-max-neighbors "$OCTREE_MAX_NEIGHBORS"
+    --octree-target-n-per-cell "$OCTREE_TARGET_N_PER_CELL"
     --particle-bucket "$PARTICLE_BUCKET"
     --normalization  "$NORMALIZATION"
     --step-stride    "$STEP_STRIDE"

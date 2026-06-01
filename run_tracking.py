@@ -410,10 +410,15 @@ def parse_args():
     parser.add_argument("--density-pad-fraction", type=float, default=0.0)
     parser.add_argument("--density-no-mask-inside-mesh", action="store_true")
     parser.add_argument("--density-engine", choices=["auto", "brute", "octree"], default="auto")
-    parser.add_argument("--density-auto-threshold", type=float, default=5e10)
+    parser.add_argument("--density-auto-threshold", type=float, default=1e10)
     parser.add_argument("--density-brute-query-chunk", type=int, default=8192)
-    parser.add_argument("--density-octree-cells-per-dim", type=int, default=64)
-    parser.add_argument("--density-octree-max-neighbors", type=int, default=256)
+    parser.add_argument("--density-octree-target-n-per-cell", type=int, default=9,
+                        help="Particle-hash target average particles per cell.")
+    # Deprecated CLI knobs accepted for back-compat; ignored at runtime.
+    parser.add_argument("--density-octree-cells-per-dim", type=int, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--density-octree-max-neighbors", type=int, default=None,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--density-particle-bucket", type=int, default=4096)
     parser.add_argument("--density-no-per-step", action="store_true")
     parser.add_argument("--density-no-time-average", action="store_true")
@@ -1723,8 +1728,7 @@ def main():
                 engine=args.density_engine,
                 auto_threshold=args.density_auto_threshold,
                 brute_query_chunk=args.density_brute_query_chunk,
-                octree_cells_per_dim=args.density_octree_cells_per_dim,
-                octree_max_neighbors=args.density_octree_max_neighbors,
+                octree_target_n_per_cell=args.density_octree_target_n_per_cell,
                 particle_bucket=args.density_particle_bucket,
                 eval_on_grid=True,
                 eval_at_particles=not args.density_no_particle_density,

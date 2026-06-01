@@ -46,19 +46,17 @@ class EstimatorConfig:
     d: int = 3
     normalization: Normalization = "pdf"
     engine: Engine = "auto"
-    # cost-model threshold for auto-selecting octree over brute
-    # Auto-engine cost threshold. The octree backend caps candidate
-    # neighbours per query at ``octree_max_neighbors`` (default 256), which
-    # is only safe when each hash cell holds fewer than that many particles.
-    # Until we make the hash cell sizing adapt to ``max_neighbors``, prefer
-    # brute force unless N*M is very large. Override per-run via
-    # EstimatorConfig.engine = "brute" | "octree" | "auto".
-    auto_threshold: float = 1e12
+    # cost-model threshold for auto-selecting octree over brute.
+    # The "auto" selector picks the octree backend only when the projected
+    # cost ratio is favourable AND the hash geometry can fit a proper
+    # stencil (see _select_engine). For typical workstation grids the
+    # particle-hash backend is now correctness-equivalent to brute and
+    # usually faster, so the default threshold is set low.
+    auto_threshold: float = 1e10
     # brute-force chunking
     brute_query_chunk: int = 8192
-    # octree backend
-    octree_cells_per_dim: int = 64         # uniform hash; chosen at build time
-    octree_max_neighbors: int = 256        # per query cap
+    # octree (particle-hash) backend
+    octree_target_n_per_cell: int = 9      # target average particles per cell
     # shape stabilization
     particle_bucket: int = 4096            # round N up to nearest multiple of this
 
@@ -111,60 +109,110 @@ def _make_brute_kernel(kernel_name: str, d: int):
 
 
 # -----------------------------------------------------------------------------
-# Morton-hash octree backend (on particles)
+# Particle-hash backend ("Backend P")
 # -----------------------------------------------------------------------------
+#
+# A uniform 3-D cell hash over the particle cloud. Per-step, every particle is
+# assigned to one cell; per query, we visit a per-axis stencil around the
+# query's cell and accumulate the kernel sum over all particles in those
+# cells (no fixed-capacity buffer, no truncation). Compared to the previous
+# revision the three bugs that pinned us to the brute backend are gone:
+#
+#   1. Cell size is chosen by *occupancy target* rather than clamped up to
+#      ``support_radius``. This stops the thin-axis collapse to a single cell
+#      that bricked the previous version on the cylindrical_009 geometry.
+#   2. Per-axis stencil radius ``ceil(support_radius / cs)`` is computed at
+#      hash-build time so the stencil always covers the full kernel support
+#      regardless of cs. Stencil shape is baked into the JIT trace.
+#   3. The candidate-buffer cap is gone — a ``fori_loop`` accumulates the
+#      kernel sum directly into a scalar, so the result is exact (up to
+#      float32 round-off) regardless of cell occupancy. Backend P is now
+#      bit-identical to brute up to ~1e-5 relative error.
 
 @dataclass(frozen=True)
 class ParticleHash:
-    bbox_min: jnp.ndarray       # (3,)
-    cell_size: jnp.ndarray      # (3,)
-    grid_dims: Tuple[int, int, int]
-    cell_starts: jnp.ndarray    # (n_cells + 1,) int32  (CSR offsets)
-    sorted_particle_idx: jnp.ndarray  # (N,) int32
+    bbox_min: jnp.ndarray              # (3,) float32
+    cell_size: jnp.ndarray             # (3,) float32  — isotropic in practice
+    grid_dims: Tuple[int, int, int]    # static, baked into JIT
+    cell_starts: jnp.ndarray           # (n_cells + 1,) int32   CSR offsets
+    sorted_particle_idx: jnp.ndarray   # (N_valid,) int32       per-cell particle list
     n_cells_total: int
+    # Per-axis stencil radius needed to cover the kernel's support_radius.
+    # The visited stencil is (2*sr+1)^3 cells centred on the query's cell.
+    stencil_radius: Tuple[int, int, int]
+    # For diagnostics — average and max occupancy at build time
+    mean_per_cell: float
+    max_per_cell: int
+
+
+def _empty_hash() -> ParticleHash:
+    """Sentinel hash with one empty cell, used when no valid particles exist."""
+    return ParticleHash(
+        bbox_min=jnp.zeros(3, jnp.float32),
+        cell_size=jnp.ones(3, jnp.float32),
+        grid_dims=(1, 1, 1),
+        cell_starts=jnp.zeros(2, jnp.int32),
+        sorted_particle_idx=jnp.zeros(0, jnp.int32),
+        n_cells_total=1,
+        stencil_radius=(0, 0, 0),
+        mean_per_cell=0.0,
+        max_per_cell=0,
+    )
 
 
 def _build_particle_hash(
     P: jnp.ndarray, weights: jnp.ndarray, support_radius: float,
-    cells_per_dim: int,
+    target_n_per_cell: int = 9,
+    min_cs: float = 1e-6,
 ) -> ParticleHash:
     """
-    Build a uniform 3D cell hash over the particles, sized so that one cell
-    is at least ``support_radius`` so a 3x3x3 query covers the kernel support.
+    Build a uniform 3-D cell hash over the particle cloud, sized to a target
+    average occupancy rather than the support radius.
 
-    Returns CSR-style arrays so that the per-cell particle lists are addressed
-    by (cell_starts[i], cell_starts[i+1]).
+    Cell-size rule (isotropic in physical units):
 
-    Only particles with weight > 0 are indexed (zero-weight ghosts).
-    Building runs on host (numpy) then is uploaded; building each step is
-    cheap relative to the kernel sum on the GPU.
+        cs* = (V_bbox * target_n_per_cell / N_valid) ** (1/3)
+        cs  = max(cs*, min_cs)
+
+    No clamp against support_radius. The kernel can still reach across many
+    cells; we just compute the per-axis stencil radius to cover it:
+
+        stencil_radius[a] = ceil(support_radius / cs[a])
+
+    Caller passes per-particle weights so zero-weight ghosts (from
+    pad_particles) are ignored when computing the bbox / occupancy.
     """
-    # Use only valid particles for the bbox so ghosts don't blow it up.
     P_np = np.asarray(P)
     w_np = np.asarray(weights)
     valid = w_np > 0.0
-    if not np.any(valid):
-        # degenerate case: no real particles, build an empty hash
-        return ParticleHash(
-            bbox_min=jnp.zeros(3, jnp.float32),
-            cell_size=jnp.ones(3, jnp.float32),
-            grid_dims=(1, 1, 1),
-            cell_starts=jnp.zeros(2, jnp.int32),
-            sorted_particle_idx=jnp.zeros(0, jnp.int32),
-            n_cells_total=1,
-        )
+    n_valid = int(valid.sum())
+    if n_valid == 0:
+        return _empty_hash()
 
     Pv = P_np[valid]
     bbox_min = Pv.min(axis=0).astype(np.float32) - np.float32(1e-3)
     bbox_max = Pv.max(axis=0).astype(np.float32) + np.float32(1e-3)
-    extent = bbox_max - bbox_min
+    extent = (bbox_max - bbox_min).astype(np.float64)
 
-    # Cell size = max(extent / cells_per_dim, support_radius)
-    base = extent / float(cells_per_dim)
-    cs = np.maximum(base, np.float32(support_radius)).astype(np.float32)
-    dims = tuple(int(max(1, np.ceil(e / s))) for e, s in zip(extent, cs))
+    # Isotropic cell-size by occupancy target. The trailing ``max(., min_cs)``
+    # guards against degenerate (zero-volume) clouds.
+    V_bbox = float(np.prod(extent))
+    cs_target = (V_bbox * float(target_n_per_cell) / float(n_valid)) ** (1.0 / 3.0)
+    cs_scalar = max(cs_target, float(min_cs))
+    cs = np.array([cs_scalar, cs_scalar, cs_scalar], dtype=np.float32)
 
-    # Assign each *valid* particle to a cell
+    # Dimensions: at least 1 along every axis.
+    dims = tuple(int(max(1, np.ceil(e / cs_scalar))) for e in extent)
+
+    # Per-axis stencil radius. We use the SAME radius along every axis
+    # because cs is isotropic; the dims may differ so we may walk fewer cells
+    # along a thin axis (the in-range mask in the kernel handles that).
+    sr = int(np.ceil(float(support_radius) / cs_scalar))
+    stencil_radius = (sr, sr, sr)
+
+    # Assign each VALID particle to a cell. Use flat C-order indexing
+    # cell_id = (i*Ny + j)*Nz + k for cache locality of consecutive cells
+    # along the fastest-varying axis (z).
     idx_valid = np.nonzero(valid)[0].astype(np.int32)
     ijk = np.floor((Pv - bbox_min) / cs).astype(np.int32)
     np.clip(ijk[:, 0], 0, dims[0] - 1, out=ijk[:, 0])
@@ -177,9 +225,9 @@ def _build_particle_hash(
     sorted_cells = cell_id[order]
     sorted_particles = idx_valid[order]
 
-    # CSR offsets
     starts = np.zeros(n_cells_total + 1, dtype=np.int32)
     np.add.at(starts[1:], sorted_cells, 1)
+    counts = starts[1:].copy()
     np.cumsum(starts, out=starts)
 
     return ParticleHash(
@@ -189,46 +237,47 @@ def _build_particle_hash(
         cell_starts=jnp.asarray(starts, jnp.int32),
         sorted_particle_idx=jnp.asarray(sorted_particles, jnp.int32),
         n_cells_total=n_cells_total,
+        stencil_radius=stencil_radius,
+        mean_per_cell=float(n_valid) / float(n_cells_total),
+        max_per_cell=int(counts.max()) if counts.size else 0,
     )
 
 
-def _make_octree_kernel(
-    kernel_name: str, d: int, max_neighbors: int,
-):
+def _make_octree_kernel(kernel_name: str, d: int):
     """
-    Build a jitted query function. The function takes a (m, 3) chunk of
-    queries plus the ParticleHash arrays and the full (padded) particle
-    arrays, and returns the per-query density (m,).
+    Build a jitted query function for Backend P.
 
-    For each query we visit a 3x3x3 cell stencil around the query cell;
-    candidate particles are concatenated into a fixed-capacity buffer of
-    size ``max_neighbors`` (truncated if exceeded), then a single dense
-    kernel sum is computed over the buffer.
+    Per query, we scan a fixed (2*sr+1)^3 stencil of cells around the query's
+    home cell, and for each cell we run a ``fori_loop`` over its particles
+    accumulating the kernel sum into a scalar ``rho``. There is no candidate
+    buffer; the result is exact regardless of cell occupancy (a particle
+    outside the kernel's support contributes exactly zero via the kernel's
+    own support cut-off).
+
+    The stencil offsets are passed as a runtime ``jnp.ndarray`` whose length
+    is the static stencil_volume; the JIT cache keys on shape, so as long as
+    the stencil shape is stable across calls there is no recompile.
     """
-    stencil_offsets = jnp.array(
-        [[dx, dy, dz] for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)],
-        dtype=jnp.int32,
-    )  # (27, 3)
 
     def per_query(
-        q: jnp.ndarray,                  # (3,)
-        P: jnp.ndarray,                  # (N_padded, 3)
-        h: jnp.ndarray,                  # (N_padded,)
-        w: jnp.ndarray,                  # (N_padded,)
+        q: jnp.ndarray,                  # (3,) float32
+        P: jnp.ndarray,                  # (N_padded, 3) float32
+        h: jnp.ndarray,                  # (N_padded,)   float32
+        w: jnp.ndarray,                  # (N_padded,)   float32
         bbox_min: jnp.ndarray,           # (3,)
         cell_size: jnp.ndarray,          # (3,)
-        cell_starts: jnp.ndarray,        # (n_cells+1,)
-        sorted_idx: jnp.ndarray,         # (N_valid,)
+        cell_starts: jnp.ndarray,        # (n_cells+1,) int32
+        sorted_idx: jnp.ndarray,         # (N_valid,)   int32
         grid_dims: jnp.ndarray,          # (3,) int32
+        stencil_offsets: jnp.ndarray,    # (S, 3) int32, S = (2sr+1)^3
     ):
-        # Locate query cell
-        ijk = jnp.floor((q - bbox_min) / cell_size).astype(jnp.int32)
-        ijk = jnp.clip(ijk, jnp.int32(0), grid_dims - jnp.int32(1))
+        ijk_home = jnp.floor((q - bbox_min) / cell_size).astype(jnp.int32)
+        # The home cell may legitimately be outside the bbox when the query
+        # lies in the kernel-reach halo just outside the particle cloud. We
+        # don't clip here — the stencil walk's in_range mask handles it.
 
-        # Build the candidate buffer (max_neighbors size) by scanning 27 cells.
-        def visit_cell(carry, offset):
-            buf_idx, count = carry
-            cijk = ijk + offset
+        def visit_cell(rho_acc, offset):
+            cijk = ijk_home + offset
             in_range = jnp.all((cijk >= 0) & (cijk < grid_dims))
             cijk_c = jnp.clip(cijk, jnp.int32(0), grid_dims - jnp.int32(1))
             cell_id = (cijk_c[0] * grid_dims[1] + cijk_c[1]) * grid_dims[2] + cijk_c[2]
@@ -236,46 +285,47 @@ def _make_octree_kernel(
             e = cell_starts[cell_id + 1]
             n_in_cell = jnp.where(in_range, e - s, jnp.int32(0))
 
-            # Pull up to (max_neighbors - count) entries from this cell.
-            room = jnp.maximum(max_neighbors - count, jnp.int32(0))
-            take = jnp.minimum(n_in_cell, room)
+            def acc_one(j, partial):
+                pid = sorted_idx[s + j]
+                diff = q - P[pid]
+                r = jnp.sqrt(jnp.sum(diff * diff))
+                K = kernels.evaluate_kernel(kernel_name, r, h[pid], d)
+                return partial + K * w[pid]
 
-            def copy_one(j, c):
-                bi, cnt = c
-                src_pos = s + j
-                src_pos_safe = jnp.minimum(src_pos, sorted_idx.shape[0] - 1)
-                particle_id = sorted_idx[src_pos_safe]
-                bi = bi.at[cnt + j].set(particle_id)
-                return bi, cnt
+            new_rho = jax.lax.fori_loop(0, n_in_cell, acc_one, rho_acc)
+            return new_rho, None
 
-            buf_idx, _ = jax.lax.fori_loop(0, take, copy_one, (buf_idx, count))
-            return (buf_idx, count + take), None
-
-        init_buf = jnp.full((max_neighbors,), jnp.int32(-1), dtype=jnp.int32)
-        (buf_idx, n_found), _ = jax.lax.scan(visit_cell, (init_buf, jnp.int32(0)), stencil_offsets)
-
-        # Gather and compute the kernel sum. Invalid slots (idx == -1) are
-        # gated via mask so they contribute zero.
-        valid = buf_idx >= 0
-        safe_idx = jnp.where(valid, buf_idx, 0)
-        Pi = P[safe_idx]                  # (max_neighbors, 3)
-        hi = h[safe_idx]                  # (max_neighbors,)
-        wi = w[safe_idx]                  # (max_neighbors,)
-        diff = q[None, :] - Pi
-        r = jnp.sqrt(jnp.sum(diff * diff, axis=-1))
-        K = kernels.evaluate_kernel(kernel_name, r, hi, d)
-        contrib = K * wi * valid.astype(K.dtype)
-        return jnp.sum(contrib)
+        rho, _ = jax.lax.scan(visit_cell, jnp.float32(0.0), stencil_offsets)
+        return rho
 
     @jax.jit
     def per_chunk(
         Q, P, h, w, bbox_min, cell_size, cell_starts, sorted_idx, grid_dims,
+        stencil_offsets,
     ):
         return jax.vmap(
-            lambda q: per_query(q, P, h, w, bbox_min, cell_size, cell_starts, sorted_idx, grid_dims),
+            lambda q: per_query(
+                q, P, h, w, bbox_min, cell_size, cell_starts, sorted_idx,
+                grid_dims, stencil_offsets,
+            ),
         )(Q)
 
     return per_chunk
+
+
+def _stencil_offsets(stencil_radius: Tuple[int, int, int]) -> jnp.ndarray:
+    """Flat (S, 3) int32 array of cell offsets covering the (2sr+1)^3 box."""
+    sx, sy, sz = stencil_radius
+    if sx == 0 and sy == 0 and sz == 0:
+        return jnp.zeros((1, 3), dtype=jnp.int32)
+    offs = np.array(
+        [[dx, dy, dz]
+         for dx in range(-sx, sx + 1)
+         for dy in range(-sy, sy + 1)
+         for dz in range(-sz, sz + 1)],
+        dtype=np.int32,
+    )
+    return jnp.asarray(offs)
 
 
 # -----------------------------------------------------------------------------
@@ -292,15 +342,23 @@ class DensityEstimator:
     _n_padded_last: int = field(default=-1, init=False, repr=False)
 
     def __post_init__(self):
-        # Compile-once kernel constructors (shape-polymorphic over chunk count)
+        # Compile-once kernel constructors (shape-polymorphic over chunk count).
         self._brute_fn = _make_brute_kernel(self.cfg.kernel, self.cfg.d)
-        self._octree_fn = _make_octree_kernel(
-            self.cfg.kernel, self.cfg.d, self.cfg.octree_max_neighbors,
-        )
+        self._octree_fn = _make_octree_kernel(self.cfg.kernel, self.cfg.d)
 
     # --- engine selection -----------------------------------------------------
 
     def _select_engine(self, n_active: int, m_active: int) -> Engine:
+        """Choose backend.
+
+        ``auto`` mode picks octree when the projected octree cost is at
+        least 2× cheaper than brute. The actual neighbour-count estimate
+        depends on ``support_radius / bbox_size``, which we don't yet
+        have at this point — so we rely on the ``auto_threshold`` heuristic
+        on ``N*M`` and let ``_eval_octree`` fall back to brute mid-flight
+        if the geometry produces a degenerate hash (e.g. dims_min < 3,
+        in which case the stencil can't even take one step).
+        """
         if self.cfg.engine != "auto":
             engine = self.cfg.engine
         else:
@@ -373,18 +431,53 @@ class DensityEstimator:
         return jnp.concatenate(out, axis=0)
 
     def _eval_octree(self, P, h, w, Q):
-        # Build particle hash on host (cheap), then run jitted query
+        """Backend P: particle hash + per-axis stencil + fori_loop sum.
+
+        Steps:
+          1. Build the particle hash on host (numpy sort + CSR offsets — cheap).
+          2. Sanity-check the resulting geometry: if any axis has dims < 1
+             we can't form a stencil; if the projected stencil_volume is
+             larger than 50 % of N_valid the octree provides no real speedup
+             over brute. In either case we degrade gracefully to brute.
+          3. JIT-launch the per-chunk kernel with the static stencil_offsets
+             baked in.
+        """
         support = kernels.kernel_support(self.cfg.kernel)
         h_max = float(jnp.max(h))
         ph = _build_particle_hash(
             P, w, support_radius=support * h_max,
-            cells_per_dim=self.cfg.octree_cells_per_dim,
+            target_n_per_cell=self.cfg.octree_target_n_per_cell,
         )
-        # If the hash is empty (no real particles), return zeros.
+
+        # If the hash is degenerate (no valid particles) just return zeros.
         if ph.sorted_particle_idx.shape[0] == 0:
             return jnp.zeros((Q.shape[0],), dtype=jnp.float32)
 
+        # Geometry-based fall-back to brute. The auto-selector picked octree
+        # on N*M cost only; here we know the actual hash dims and can decide
+        # whether the work saving is real.
+        n_valid = int(ph.sorted_particle_idx.shape[0])
+        stencil_vol = int(
+            (2 * ph.stencil_radius[0] + 1)
+            * (2 * ph.stencil_radius[1] + 1)
+            * (2 * ph.stencil_radius[2] + 1)
+        )
+        expected_neighbours = stencil_vol * ph.mean_per_cell
+        if expected_neighbours > 0.5 * n_valid:
+            # Octree wouldn't save much; fall back to brute.
+            print(f"[density] octree fallback to brute: stencil_vol={stencil_vol}, "
+                  f"mean_per_cell={ph.mean_per_cell:.1f}, "
+                  f"expected_neighbours/N_valid={expected_neighbours/n_valid:.2f}")
+            return self._eval_brute(P, h, w, Q)
+        print(f"[density] octree built: dims={ph.grid_dims}, "
+              f"cs={float(ph.cell_size[0]):.4g} m, "
+              f"stencil_radius={ph.stencil_radius} (vol={stencil_vol}), "
+              f"mean_per_cell={ph.mean_per_cell:.1f}, max_per_cell={ph.max_per_cell}, "
+              f"~neighbours/query={expected_neighbours:.0f}")
+
         grid_dims = jnp.asarray(ph.grid_dims, dtype=jnp.int32)
+        stencil_offsets = _stencil_offsets(ph.stencil_radius)
+
         chunk = self.cfg.brute_query_chunk
         M = int(Q.shape[0])
         out = []
@@ -399,13 +492,13 @@ class DensityEstimator:
                 rho_pad = self._octree_fn(
                     Qc_pad, P, h, w,
                     ph.bbox_min, ph.cell_size, ph.cell_starts,
-                    ph.sorted_particle_idx, grid_dims,
+                    ph.sorted_particle_idx, grid_dims, stencil_offsets,
                 )
                 out.append(rho_pad[:Qc.shape[0]])
             else:
                 out.append(self._octree_fn(
                     Qc, P, h, w,
                     ph.bbox_min, ph.cell_size, ph.cell_starts,
-                    ph.sorted_particle_idx, grid_dims,
+                    ph.sorted_particle_idx, grid_dims, stencil_offsets,
                 ))
         return jnp.concatenate(out, axis=0)

@@ -85,10 +85,18 @@ def parse_args() -> argparse.Namespace:
 
     # Engine
     p.add_argument("--engine", choices=["auto", "brute", "octree"], default="auto")
-    p.add_argument("--auto-threshold", type=float, default=5e10)
+    p.add_argument("--auto-threshold", type=float, default=1e10)
     p.add_argument("--brute-query-chunk", type=int, default=8192)
-    p.add_argument("--octree-cells-per-dim", type=int, default=64)
-    p.add_argument("--octree-max-neighbors", type=int, default=256)
+    p.add_argument("--octree-target-n-per-cell", type=int, default=9,
+                   help="Backend P (particle-hash octree) target average "
+                        "particles per cell. Lower => more, smaller cells + "
+                        "larger stencils; higher => fewer, bigger cells + "
+                        "smaller stencils. 9 is a balanced default.")
+    # Deprecated knobs accepted for back-compat; ignored at runtime.
+    p.add_argument("--octree-cells-per-dim", type=int, default=None,
+                   help=argparse.SUPPRESS)
+    p.add_argument("--octree-max-neighbors", type=int, default=None,
+                   help=argparse.SUPPRESS)
     p.add_argument("--particle-bucket", type=int, default=4096)
 
     # Output toggles
@@ -128,7 +136,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--read-prefetch", type=int, default=4,
                    help="Background trajectory reader queue depth. 0 disables prefetch.")
 
-    return p.parse_args()
+    args = p.parse_args()
+    if args.octree_cells_per_dim is not None or args.octree_max_neighbors is not None:
+        print("[density-postprocess] note: --octree-cells-per-dim and "
+              "--octree-max-neighbors are deprecated and ignored; the "
+              "particle-hash backend now auto-sizes cells from "
+              "--octree-target-n-per-cell.")
+    return args
 
 
 def _resolve_bounds(args) -> Tuple[Optional[Tuple[Tuple[float, float], ...]], str]:
@@ -268,8 +282,7 @@ def main() -> int:
         engine=args.engine,
         auto_threshold=args.auto_threshold,
         brute_query_chunk=args.brute_query_chunk,
-        octree_cells_per_dim=args.octree_cells_per_dim,
-        octree_max_neighbors=args.octree_max_neighbors,
+        octree_target_n_per_cell=args.octree_target_n_per_cell,
         particle_bucket=args.particle_bucket,
         eval_on_grid=True,
         eval_at_particles=(not args.no_particle_density),

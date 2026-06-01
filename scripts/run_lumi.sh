@@ -240,8 +240,7 @@ DENSITY_NO_MASK_INSIDE_MESH=0     # 1 = skip inside-mesh masking
 DENSITY_ENGINE=auto               # auto | brute | octree
 DENSITY_AUTO_THRESHOLD=5e10
 DENSITY_BRUTE_QUERY_CHUNK=8192
-DENSITY_OCTREE_CELLS_PER_DIM=64
-DENSITY_OCTREE_MAX_NEIGHBORS=256
+DENSITY_OCTREE_TARGET_N_PER_CELL=9
 DENSITY_PARTICLE_BUCKET=4096
 
 # Output toggles
@@ -502,8 +501,7 @@ if [ "${DENSITY_ENABLE:-0}" = "1" ]; then
           --density-engine           "$DENSITY_ENGINE"
           --density-auto-threshold   "$DENSITY_AUTO_THRESHOLD"
           --density-brute-query-chunk     "$DENSITY_BRUTE_QUERY_CHUNK"
-          --density-octree-cells-per-dim  "$DENSITY_OCTREE_CELLS_PER_DIM"
-          --density-octree-max-neighbors  "$DENSITY_OCTREE_MAX_NEIGHBORS"
+          --density-octree-target-n-per-cell "$DENSITY_OCTREE_TARGET_N_PER_CELL"
           --density-particle-bucket  "$DENSITY_PARTICLE_BUCKET"
           --density-normalization    "$DENSITY_NORMALIZATION"
           --density-compression      "$DENSITY_COMPRESSION"

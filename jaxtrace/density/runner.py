@@ -68,10 +68,14 @@ class DensityRunnerConfig:
 
     # --- engine ---------------------------------------------------------------
     engine: str = "auto"                     # auto | brute | octree
-    auto_threshold: float = 5e10
+    auto_threshold: float = 1e10             # lowered after the cell-sizing fix
     brute_query_chunk: int = 8192
-    octree_cells_per_dim: int = 64
-    octree_max_neighbors: int = 256
+    # Backend P (particle-hash octree) cell-sizing target.
+    # See estimator.py:_build_particle_hash for the math.
+    octree_target_n_per_cell: int = 9
+    # Deprecated knobs kept for CLI back-compat; ignored. Will be removed.
+    octree_cells_per_dim: int = 0
+    octree_max_neighbors: int = 0
     particle_bucket: int = 4096
 
     # --- outputs --------------------------------------------------------------
@@ -144,8 +148,7 @@ class DensityRunner:
             engine=self.cfg.engine,
             auto_threshold=self.cfg.auto_threshold,
             brute_query_chunk=self.cfg.brute_query_chunk,
-            octree_cells_per_dim=self.cfg.octree_cells_per_dim,
-            octree_max_neighbors=self.cfg.octree_max_neighbors,
+            octree_target_n_per_cell=self.cfg.octree_target_n_per_cell,
             particle_bucket=self.cfg.particle_bucket,
         )
         self.estimator = DensityEstimator(cfg=est_cfg, query_points=self.query_points)
