@@ -24,9 +24,18 @@ JAXTRACE=/flash/shared/jax/JAXTrace
 # line, e.g. PARTICLES=/path/to/particles.vtkhdf bash <this-script>
 PARTICLES="${PARTICLES:-/scratch/users/${USER}/outputs/<RUN>/particles.vtkhdf}"
 
-# OUTPUT_DIR: destination directory. Defaults to a 'density' folder next to
-# the particles file.
+# OUTPUT_DIR: FINAL destination for the density outputs (typically on the
+# scratch / case folder). Defaults to a 'density' folder next to the
+# particles file.
 OUTPUT_DIR="${OUTPUT_DIR:-$(dirname "$PARTICLES")/density}"
+
+# FLASH_DIR: optional fast-disk staging directory. When set, Python writes
+# the density files into a per-run subfolder under here, and the shell
+# moves them to OUTPUT_DIR at the end of the run. Empty disables staging
+# (Python writes directly to OUTPUT_DIR).
+#   recommended: /flash/users/$USER
+# Leave empty to skip staging.
+FLASH_DIR="${FLASH_DIR:-/flash/users/${USER}}"
 
 # Optional: a velocity mesh PVTU/PVD used ONLY for inside-mesh masking.
 VELOCITY_MESH=""                  # e.g. /scratch/.../<case>.gid/post/0eule/<case>_159.pvtu
@@ -125,6 +134,22 @@ fi
 
 RUN_ID="$(date +%Y%m%d_%H%M%S)_$$"
 mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/logs"
+
+# Flash-staging logic. When FLASH_DIR is set AND writable AND not the same
+# physical location as OUTPUT_DIR, Python writes to a per-run subfolder
+# under FLASH_DIR. We mv to OUTPUT_DIR at the end of the run, regardless
+# of whether Python exited normally or via SIGTERM. Empty FLASH_DIR or an
+# unwritable one skips staging and Python writes directly to OUTPUT_DIR.
+if [ -n "$FLASH_DIR" ] && mkdir -p "$FLASH_DIR" 2>/dev/null && [ -w "$FLASH_DIR" ]; then
+    _FLASH_RUN_DIR="${FLASH_DIR}/density_${RUN_ID}"
+    mkdir -p "$_FLASH_RUN_DIR"
+    EFFECTIVE_OUTPUT_DIR="$_FLASH_RUN_DIR"
+    echo "[stage] writing density to flash: $EFFECTIVE_OUTPUT_DIR"
+    echo "[stage] will move to final dir at end: $OUTPUT_DIR"
+else
+    EFFECTIVE_OUTPUT_DIR="$OUTPUT_DIR"
+    echo "[stage] no flash staging (FLASH_DIR='$FLASH_DIR'); writing directly to $OUTPUT_DIR"
+fi
 MONITOR_LOG="${OUTPUT_DIR}/logs/density_pp_${RUN_ID}_monitor.log"
 RUN_LOG="${OUTPUT_DIR}/logs/density_pp_${RUN_ID}.log"
 
@@ -195,7 +220,7 @@ trap _cleanup_monitor EXIT INT TERM
 # ── Build CLI argument list ──────────────────────────────────────────────────
 ARGS=(
     --particles      "$PARTICLES"
-    --output-dir     "$OUTPUT_DIR"
+    --output-dir     "$EFFECTIVE_OUTPUT_DIR"
     --output-format  "$OUTPUT_FORMAT"
     --filename-stem  "$FILENAME_STEM"
     --resolution     "$RESOLUTION"
@@ -278,6 +303,18 @@ _cleanup_monitor
 
 echo ""
 echo "Density post-processing exited with code $PP_EXIT at $(date)"
+
+# Move from flash to final OUTPUT_DIR. Done regardless of exit code so a
+# partially-completed run still leaves recoverable output in scratch.
+if [ "$EFFECTIVE_OUTPUT_DIR" != "$OUTPUT_DIR" ]; then
+    echo "[stage] moving outputs $EFFECTIVE_OUTPUT_DIR -> $OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+    # Use mv -f so existing same-name files in OUTPUT_DIR get overwritten
+    # cleanly. Handles the case where a previous run wrote intermediate
+    # artefacts (e.g. a partial density.vtkhdf) that this run is replacing.
+    mv -f "$EFFECTIVE_OUTPUT_DIR"/* "$OUTPUT_DIR"/ 2>/dev/null
+    rmdir "$EFFECTIVE_OUTPUT_DIR" 2>/dev/null || true
+fi
 
 rm -rf "$CUDA_CACHE_DIR"
 

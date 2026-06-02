@@ -73,18 +73,25 @@ def _bucket_round(n: int, bucket: int) -> int:
 
 def pad_particles(
     positions: jnp.ndarray,            # (N, 3)
-    h: jnp.ndarray,                    # (N,)
+    h: jnp.ndarray,                    # (N, 3) per-axis
     weights: jnp.ndarray,              # (N,)
     n_padded: int,
 ):
-    """Pad to ``n_padded`` length by appending zero-weight ghost particles."""
+    """Pad to ``n_padded`` length by appending zero-weight ghost particles.
+
+    The ghost particles get ``h = 1.0`` along every axis (nonzero so the
+    division ``r/h`` stays finite) and ``w = 0`` so they contribute nothing
+    to any kernel sum. The ghost values won't affect the result regardless
+    of the actual h_pad choice because of the zero weight.
+    """
     N = positions.shape[0]
     if N == n_padded:
         return positions, h, weights
     pad = n_padded - N
-    pos_pad = jnp.zeros((pad, 3), dtype=positions.dtype)
-    h_pad = jnp.ones((pad,), dtype=h.dtype)            # nonzero to avoid /0
-    w_pad = jnp.zeros((pad,), dtype=weights.dtype)     # zero weight = invisible
+    d = positions.shape[1]
+    pos_pad = jnp.zeros((pad, d), dtype=positions.dtype)
+    h_pad = jnp.ones((pad, d), dtype=h.dtype)         # nonzero per-axis to avoid /0
+    w_pad = jnp.zeros((pad,), dtype=weights.dtype)    # zero weight = invisible
     return (
         jnp.concatenate([positions, pos_pad], axis=0),
         jnp.concatenate([h, h_pad], axis=0),
@@ -97,15 +104,20 @@ def pad_particles(
 # -----------------------------------------------------------------------------
 
 def _make_brute_kernel(kernel_name: str, d: int):
-    """Return a jitted (queries_chunk, P, h, w) -> rho_chunk function."""
+    """Return a jitted (queries_chunk, P, h, w) -> rho_chunk function.
+
+    ``h`` has shape ``(N, d)`` — per-particle, per-axis bandwidth. The
+    kernel call computes ``q = sqrt(Σ (Δx_a / h_a)^2)`` and applies the
+    anisotropic normalisation ``1/(h_x h_y h_z)`` inside
+    :func:`kernels.evaluate_kernel`.
+    """
 
     def per_chunk(Q, P, h, w):
-        # Q: (m, 3), P: (N, 3), h: (N,), w: (N,)
-        # diff: (m, N, 3)
-        diff = Q[:, None, :] - P[None, :, :]
-        r = jnp.sqrt(jnp.sum(diff * diff, axis=-1))      # (m, N)
-        K = kernels.evaluate_kernel(kernel_name, r, h[None, :], d)  # (m, N)
-        return jnp.sum(K * w[None, :], axis=1)            # (m,)
+        # Q: (m, d), P: (N, d), h: (N, d), w: (N,)
+        diff = Q[:, None, :] - P[None, :, :]              # (m, N, d)
+        h_b = h[None, :, :]                                # (1, N, d) broadcast over m
+        K = kernels.evaluate_kernel(kernel_name, diff, h_b, d)   # (m, N)
+        return jnp.sum(K * w[None, :], axis=1)              # (m,)
 
     return jax.jit(per_chunk)
 
@@ -286,7 +298,7 @@ def _make_octree_kernel(kernel_name: str, d: int):
     def per_query(
         q: jnp.ndarray,                  # (3,) float32
         P: jnp.ndarray,                  # (N_padded, 3) float32
-        h: jnp.ndarray,                  # (N_padded,)   float32
+        h: jnp.ndarray,                  # (N_padded, 3) float32 per-axis bandwidth
         w: jnp.ndarray,                  # (N_padded,)   float32
         bbox_min: jnp.ndarray,           # (3,)
         cell_size: jnp.ndarray,          # (3,)
@@ -294,7 +306,7 @@ def _make_octree_kernel(kernel_name: str, d: int):
         sorted_idx: jnp.ndarray,         # (N_valid,)   int32
         grid_dims: jnp.ndarray,          # (3,) int32
         stencil_offsets: jnp.ndarray,    # (S, 3) int32, S = (2sr+1)^3
-        support_radius_sq: jnp.ndarray,  # () float32 — (SUPPORT * h_max)^2; unused for non-compact kernels
+        support_radius_sq: jnp.ndarray,  # () float32 — isotropic-h approximation of the support^2; unused for non-compact kernels
     ):
         ijk_home = jnp.floor((q - bbox_min) / cell_size).astype(jnp.int32)
         # The home cell may legitimately be outside the bbox when the query
@@ -330,9 +342,8 @@ def _make_octree_kernel(kernel_name: str, d: int):
 
             def acc_one(j, partial):
                 pid = sorted_idx[s + j]
-                diff = q - P[pid]
-                r = jnp.sqrt(jnp.sum(diff * diff))
-                K = kernels.evaluate_kernel(kernel_name, r, h[pid], d)
+                diff = q - P[pid]                                   # (3,)
+                K = kernels.evaluate_kernel(kernel_name, diff, h[pid], d)
                 return partial + K * w[pid]
 
             new_rho = jax.lax.fori_loop(0, n_in_cell, acc_one, rho_acc)

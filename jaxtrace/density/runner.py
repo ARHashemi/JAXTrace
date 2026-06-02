@@ -47,8 +47,13 @@ class DensityRunnerConfig:
     # --- grid -----------------------------------------------------------------
     bounds_mode: BoundsMode = "mesh"        # mesh | particles | explicit | prepass
     bounds: Optional[Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]] = None
+    # Voxel grid resolution. Either a scalar (isotropic Nx=Ny=Nz=N) or a
+    # 3-tuple (Nx, Ny, Nz). The 3-tuple overrides ``resolution`` if both
+    # are set via the CLI.
     resolution: Optional[Union[int, Tuple[int, int, int]]] = 128
-    voxel_size: Optional[float] = None
+    # Per-axis voxel size in metres. Scalar or 3-tuple, just like resolution.
+    # When set, overrides ``resolution`` (see grid.make_voxel_grid).
+    voxel_size: Optional[Union[float, Tuple[float, float, float]]] = None
     pad_fraction: float = 0.0
 
     # --- inside-mesh masking --------------------------------------------------
@@ -57,7 +62,13 @@ class DensityRunnerConfig:
     # --- kernel / bandwidth ---------------------------------------------------
     kernel: str = "wendland_c2"
     bandwidth_mode: str = "fixed"            # fixed | scott | silverman | knn_adaptive
-    bandwidth: Optional[float] = None        # for fixed mode
+    # Fixed bandwidth value. Either a scalar (isotropic h) or a 3-tuple
+    # (hx, hy, hz). Per-axis bandwidth is honoured for all kernels —
+    # the kernel is normalised by 1/(h_x · h_y · h_z) so it still
+    # integrates to 1. Scott / Silverman automatically compute per-axis
+    # values from the cloud's per-dimension std; k-NN is scalar per
+    # particle and broadcast across axes.
+    bandwidth: Optional[Union[float, Tuple[float, float, float]]] = None
     bandwidth_factor: float = 2.0
     knn_k: int = 32
     knn_safety: float = 1.2
@@ -162,16 +173,18 @@ class DensityRunner:
         # queries up to support_radius away, and we want its hash cell to
         # be a valid one.
         _support = kernels.kernel_support(self.cfg.kernel)
-        # Worst-case h_max for the bbox padding. With fixed bandwidth this
-        # is exactly the configured h; for adaptive modes it can drift, but
-        # the pad-by-support_radius is an upper bound either way.
-        # Use a generous heuristic for the pad to be safe across modes.
+        # Worst-case scalar h_max for the support-pad on the hash bbox. With
+        # per-axis bandwidth the support shape is actually an ellipsoid; we
+        # use the largest axis bandwidth as a conservative ball radius
+        # (cheaper than per-axis padding and only slightly larger).
         if self.cfg.bandwidth_mode == "fixed":
-            _h_max_est = (
-                self.cfg.bandwidth
-                if self.cfg.bandwidth is not None
-                else self.cfg.bandwidth_factor * float(np.max(self.voxel_grid.spacing))
-            )
+            if self.cfg.bandwidth is not None:
+                _h_arr = np.asarray(self.cfg.bandwidth, dtype=np.float32).reshape(-1)
+                _h_max_est = float(_h_arr.max())
+            else:
+                _h_max_est = self.cfg.bandwidth_factor * float(
+                    np.max(self.voxel_grid.spacing)
+                )
         else:
             # Adaptive — pick a generous upper bound from the bbox extent.
             _h_max_est = 0.25 * float(
@@ -235,16 +248,20 @@ class DensityRunner:
     # Bandwidth handling
     # -------------------------------------------------------------------------
     def _compute_h(self, positions: jnp.ndarray) -> jnp.ndarray:
-        # Reference voxel size for the bandwidth default. Use the largest axis
-        # spacing rather than the smallest so the kernel always spans multiple
-        # voxels even on anisotropic grids — picking min(spacing) on a strongly
-        # anisotropic bbox (e.g. dz << dx, dy) leaves the kernel narrower than
-        # the in-plane voxel size and produces an almost-empty density field.
-        vs = float(np.max(self.voxel_grid.spacing))
+        # Per-axis reference for the fixed-bandwidth default. When the user
+        # doesn't supply ``bandwidth`` explicitly we fall back to
+        # ``bandwidth_factor * voxel_spacing_per_axis``, which keeps the
+        # kernel locally adapted to the grid even when the grid is
+        # anisotropic. (Earlier code took ``max(spacing)`` as a scalar; that
+        # works for isotropic h but defeats the purpose when the user wants
+        # per-axis h to follow the grid.) The bandwidth.resolve_bandwidth
+        # call accepts either a scalar or a 3-vector for voxel_size /
+        # fixed_h, and broadcasts/validates internally.
+        vs_per_axis = np.asarray(self.voxel_grid.spacing, dtype=np.float32)
         return bandwidth.resolve_bandwidth(
             positions,
             mode=self.cfg.bandwidth_mode,
-            voxel_size=vs,
+            voxel_size=vs_per_axis,
             fixed_h=self.cfg.bandwidth,
             bandwidth_factor=self.cfg.bandwidth_factor,
             knn_k=self.cfg.knn_k,

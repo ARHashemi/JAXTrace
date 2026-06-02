@@ -36,9 +36,17 @@ PKGS="/project/${PROJECT}/${USER}/required-packages"
 # `--export=ALL,PARTICLES=...` on the sbatch line, or edit below.
 PARTICLES="${PARTICLES:-/scratch/${PROJECT}/${USER}/outputs/<RUN>/particles.vtkhdf}"
 
-# OUTPUT_DIR: destination directory for density_*.vtkhdf / .vti and the
-# time-averaged file. Defaults to a sibling 'density' folder next to PARTICLES.
+# OUTPUT_DIR: FINAL destination directory (on /scratch typically) for the
+# density_*.vtkhdf / .vti files and the time-averaged file. Defaults to a
+# sibling 'density' folder next to PARTICLES.
 OUTPUT_DIR="${OUTPUT_DIR:-$(dirname "$PARTICLES")/density}"
+
+# FLASH_DIR: optional fast-disk staging directory (LUMI /flash). When set,
+# the Python writer puts output here during the run and the shell moves it
+# to OUTPUT_DIR at the end. Empty disables staging. On LUMI the per-project
+# /flash partition is /flash/${PROJECT} so the default mirrors what
+# run_lumi.sh does for tracking output.
+FLASH_DIR="${FLASH_DIR:-/flash/${PROJECT:-project_XXXXXXXXX}/${USER}}"
 
 # Optional: a velocity mesh PVTU/PVD used ONLY for inside-mesh masking. Leave
 # empty to disable masking (the voxel grid then evaluates everywhere within
@@ -119,6 +127,19 @@ if [ ! -f "$PARTICLES" ]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
+
+# Flash staging — same pattern as the workstation script.
+if [ -n "$FLASH_DIR" ] && mkdir -p "$FLASH_DIR" 2>/dev/null && [ -w "$FLASH_DIR" ]; then
+    _FLASH_RUN_DIR="${FLASH_DIR}/density_${SLURM_JOB_ID}"
+    mkdir -p "$_FLASH_RUN_DIR"
+    EFFECTIVE_OUTPUT_DIR="$_FLASH_RUN_DIR"
+    echo "[stage] writing density to flash: $EFFECTIVE_OUTPUT_DIR"
+    echo "[stage] will move to final dir at end: $OUTPUT_DIR"
+else
+    EFFECTIVE_OUTPUT_DIR="$OUTPUT_DIR"
+    echo "[stage] no flash staging (FLASH_DIR='$FLASH_DIR'); writing directly to $OUTPUT_DIR"
+fi
+
 MONITOR_LOG="${OUTPUT_DIR}/density_pp_${SLURM_JOB_ID}_monitor.log"
 
 # ── MIOpen cache to RAM ──────────────────────────────────────────────────────
@@ -172,7 +193,7 @@ trap _cleanup_monitor EXIT
 # ── Build CLI argument list ─────────────────────────────────────────────────
 ARGS=(
     --particles      "$PARTICLES"
-    --output-dir     "$OUTPUT_DIR"
+    --output-dir     "$EFFECTIVE_OUTPUT_DIR"
     --output-format  "$OUTPUT_FORMAT"
     --filename-stem  "$FILENAME_STEM"
     --resolution     "$RESOLUTION"
@@ -272,6 +293,14 @@ _cleanup_monitor
 
 echo ""
 echo "Density post-processing exited with code $PP_EXIT at $(date)"
+
+# Move from flash to final OUTPUT_DIR (no-op if no staging was used).
+if [ "$EFFECTIVE_OUTPUT_DIR" != "$OUTPUT_DIR" ]; then
+    echo "[stage] moving outputs $EFFECTIVE_OUTPUT_DIR -> $OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR"
+    mv -f "$EFFECTIVE_OUTPUT_DIR"/* "$OUTPUT_DIR"/ 2>/dev/null
+    rmdir "$EFFECTIVE_OUTPUT_DIR" 2>/dev/null || true
+fi
 
 # Stash the monitor log next to the outputs for traceability.
 [ -f "$MONITOR_LOG" ] && mv "$MONITOR_LOG" "${OUTPUT_DIR}/logs/" 2>/dev/null || true

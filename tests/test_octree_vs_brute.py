@@ -77,7 +77,10 @@ def _run_one(kernel_name: str, N: int, M_side: int, h_val: float, seed: int = 0)
     Q_np = np.stack([Qx.ravel(), Qy.ravel(), Qz.ravel()], axis=1)
     M = Q_np.shape[0]
 
-    h_np = np.full((N,), h_val, dtype=np.float32)
+    # Per-axis bandwidth (N, 3). For an isotropic comparison test we use the
+    # same h_val on every axis; the new kernel pipeline still works with
+    # anisotropic h, that just isn't what this test exercises.
+    h_np = np.full((N, 3), h_val, dtype=np.float32)
     w_np = np.ones((N,), dtype=np.float32)
 
     # Pad particles to the bucket size — the estimator does this internally

@@ -396,6 +396,10 @@ def parse_args():
                         choices=["fixed", "scott", "silverman", "knn_adaptive"])
     parser.add_argument("--density-bandwidth", type=float, default=None,
                         help="Fixed bandwidth (fixed mode only). Default: bandwidth-factor*voxel_size.")
+    parser.add_argument("--density-bandwidth-xyz", type=float, nargs=3, default=None,
+                        metavar=("HX", "HY", "HZ"),
+                        help="Per-axis fixed bandwidth. Overrides --density-bandwidth. "
+                             "Kernel is normalised by 1/(hx hy hz).")
     parser.add_argument("--density-bandwidth-factor", type=float, default=2.0)
     parser.add_argument("--density-bandwidth-refresh-every", type=int, default=0)
     parser.add_argument("--density-knn-k", type=int, default=32)
@@ -405,8 +409,17 @@ def parse_args():
                         help="Explicit voxel grid bounds. Default: mesh bbox.")
     parser.add_argument("--density-bounds-from", choices=["mesh", "particles"], default="mesh")
     parser.add_argument("--density-resolution", type=int, default=128,
-                        help="Cubic voxel-grid resolution; ignored if --density-voxel-size is set.")
+                        help="Cubic voxel-grid resolution; ignored if "
+                             "--density-resolution-xyz / --density-voxel-size(-xyz) is set.")
+    parser.add_argument("--density-resolution-xyz", type=int, nargs=3, default=None,
+                        metavar=("NX", "NY", "NZ"),
+                        help="Per-axis voxel-grid resolution. "
+                             "Overrides --density-resolution.")
     parser.add_argument("--density-voxel-size", type=float, default=None)
+    parser.add_argument("--density-voxel-size-xyz", type=float, nargs=3, default=None,
+                        metavar=("HX", "HY", "HZ"),
+                        help="Per-axis voxel edge length. Overrides --density-voxel-size "
+                             "and --density-resolution.")
     parser.add_argument("--density-pad-fraction", type=float, default=0.0)
     parser.add_argument("--density-no-mask-inside-mesh", action="store_true")
     parser.add_argument("--density-engine", choices=["auto", "brute", "octree"], default="auto")
@@ -1710,16 +1723,32 @@ def main():
                 bb = args.density_bounds
                 density_bounds = ((bb[0], bb[1]), (bb[2], bb[3]), (bb[4], bb[5]))
 
+            # Resolve per-axis variants — when set they override the scalar form.
+            _density_resolution_cfg = (
+                args.density_resolution_xyz
+                if args.density_resolution_xyz is not None
+                else args.density_resolution
+            )
+            _density_voxel_size_cfg = (
+                args.density_voxel_size_xyz
+                if args.density_voxel_size_xyz is not None
+                else args.density_voxel_size
+            )
+            _density_bandwidth_cfg = (
+                args.density_bandwidth_xyz
+                if args.density_bandwidth_xyz is not None
+                else args.density_bandwidth
+            )
             density_cfg = DensityRunnerConfig(
                 bounds_mode="explicit" if density_bounds is not None else args.density_bounds_from,
                 bounds=density_bounds,
-                resolution=None if args.density_voxel_size is not None else args.density_resolution,
-                voxel_size=args.density_voxel_size,
+                resolution=None if _density_voxel_size_cfg is not None else _density_resolution_cfg,
+                voxel_size=_density_voxel_size_cfg,
                 pad_fraction=args.density_pad_fraction,
                 mask_inside_mesh=not args.density_no_mask_inside_mesh,
                 kernel=args.density_kernel,
                 bandwidth_mode=args.density_bandwidth_mode,
-                bandwidth=args.density_bandwidth,
+                bandwidth=_density_bandwidth_cfg,
                 bandwidth_factor=args.density_bandwidth_factor,
                 bandwidth_refresh_every=args.density_bandwidth_refresh_every,
                 knn_k=args.density_knn_k,

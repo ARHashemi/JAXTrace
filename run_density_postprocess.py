@@ -64,9 +64,17 @@ def parse_args() -> argparse.Namespace:
 
     # Resolution
     p.add_argument("--resolution", type=int, default=128,
-                   help="Cubic voxel-grid resolution; ignored if --voxel-size is set.")
+                   help="Cubic voxel-grid resolution; ignored if "
+                        "--resolution-xyz or --voxel-size(-xyz) is set.")
+    p.add_argument("--resolution-xyz", type=int, nargs=3, default=None,
+                   metavar=("NX", "NY", "NZ"),
+                   help="Per-axis voxel-grid resolution. Overrides --resolution.")
     p.add_argument("--voxel-size", type=float, default=None,
                    help="Target physical voxel edge length. Overrides --resolution.")
+    p.add_argument("--voxel-size-xyz", type=float, nargs=3, default=None,
+                   metavar=("HX", "HY", "HZ"),
+                   help="Per-axis voxel edge length. Overrides --voxel-size "
+                        "and --resolution.")
 
     # Kernel / bandwidth
     p.add_argument("--kernel", default="wendland_c2",
@@ -76,7 +84,12 @@ def parse_args() -> argparse.Namespace:
                    choices=["fixed", "scott", "silverman", "knn_adaptive"])
     p.add_argument("--bandwidth", type=float, default=None,
                    help="Fixed bandwidth (only if --bandwidth-mode fixed). "
-                        "Default = bandwidth-factor * voxel_size.")
+                        "Default = bandwidth-factor * voxel_size. "
+                        "Use --bandwidth-xyz for anisotropic h.")
+    p.add_argument("--bandwidth-xyz", type=float, nargs=3, default=None,
+                   metavar=("HX", "HY", "HZ"),
+                   help="Per-axis fixed bandwidth. Overrides --bandwidth. "
+                        "Kernel is normalised by 1/(hx hy hz).")
     p.add_argument("--bandwidth-factor", type=float, default=2.0)
     p.add_argument("--bandwidth-refresh-every", type=int, default=0,
                    help="Recompute bandwidth every N steps. 0 = once (default).")
@@ -263,17 +276,26 @@ def main() -> int:
                         (float(lo[2]), float(hi[2])))
         print(f"  bbox = {bounds_tuple}   ({time.time() - t0:.2f}s)")
 
+    # Resolve per-axis variants (override the scalar versions when set).
+    _resolution_cfg = args.resolution_xyz if args.resolution_xyz is not None else args.resolution
+    _voxel_size_cfg = (
+        args.voxel_size_xyz if args.voxel_size_xyz is not None else args.voxel_size
+    )
+    _bandwidth_cfg = args.bandwidth_xyz if args.bandwidth_xyz is not None else args.bandwidth
+
     # Build runner config
     cfg = DensityRunnerConfig(
         bounds_mode="explicit",
         bounds=bounds_tuple,
-        resolution=None if args.voxel_size is not None else args.resolution,
-        voxel_size=args.voxel_size,
+        # resolution is ignored when voxel_size is set; runner.make_voxel_grid
+        # accepts None for the unused field.
+        resolution=None if _voxel_size_cfg is not None else _resolution_cfg,
+        voxel_size=_voxel_size_cfg,
         pad_fraction=args.pad_fraction,
         mask_inside_mesh=(mesh_octree_gpu is not None) and (not args.no_mask_inside_mesh),
         kernel=args.kernel,
         bandwidth_mode=args.bandwidth_mode,
-        bandwidth=args.bandwidth,
+        bandwidth=_bandwidth_cfg,
         bandwidth_factor=args.bandwidth_factor,
         bandwidth_refresh_every=args.bandwidth_refresh_every,
         knn_k=args.knn_k,

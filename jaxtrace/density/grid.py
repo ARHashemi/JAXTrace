@@ -68,7 +68,7 @@ def make_voxel_grid(
     bbox_max: np.ndarray,
     *,
     resolution: Optional[Union[int, Tuple[int, int, int]]] = None,
-    voxel_size: Optional[float] = None,
+    voxel_size: Optional[Union[float, Tuple[float, float, float]]] = None,
     pad_fraction: float = 0.0,
 ) -> VoxelGrid:
     """
@@ -76,6 +76,11 @@ def make_voxel_grid(
 
     Either ``resolution`` or ``voxel_size`` must be given. If both are given,
     ``voxel_size`` wins and resolution is recomputed.
+
+    Both arguments accept either a scalar (isotropic) or a 3-tuple
+    ``(x, y, z)`` (per-axis). A per-axis ``voxel_size`` lets you make the
+    grid finer along one axis without changing the others; per-axis
+    ``resolution`` is the same idea expressed as cell counts.
 
     ``pad_fraction`` enlarges the bbox by that fraction in each direction.
     """
@@ -91,13 +96,29 @@ def make_voxel_grid(
 
     extent = bbox_max - bbox_min
     if voxel_size is not None:
-        vs = float(voxel_size)
-        nx, ny, nz = (max(1, int(np.ceil(e / vs))) for e in extent)
+        vs_arr = np.asarray(voxel_size, dtype=np.float32).reshape(-1)
+        if vs_arr.size == 1:
+            vs_per_axis = np.full((3,), float(vs_arr[0]), dtype=np.float32)
+        elif vs_arr.size == 3:
+            vs_per_axis = vs_arr.astype(np.float32)
+        else:
+            raise ValueError(
+                f"voxel_size must be a scalar or a 3-vector, got shape {vs_arr.shape}"
+            )
+        nx, ny, nz = (max(1, int(np.ceil(e / vs))) for e, vs in zip(extent, vs_per_axis))
     elif resolution is not None:
-        if isinstance(resolution, int):
+        if isinstance(resolution, (int, np.integer)):
             nx = ny = nz = int(resolution)
         else:
-            nx, ny, nz = (int(v) for v in resolution)
+            res_arr = np.asarray(resolution).reshape(-1)
+            if res_arr.size == 1:
+                nx = ny = nz = int(res_arr[0])
+            elif res_arr.size == 3:
+                nx, ny, nz = (int(v) for v in res_arr)
+            else:
+                raise ValueError(
+                    f"resolution must be a scalar or a 3-vector, got shape {res_arr.shape}"
+                )
     else:
         raise ValueError("provide either resolution or voxel_size")
 
