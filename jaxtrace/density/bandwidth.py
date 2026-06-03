@@ -207,27 +207,23 @@ def initial_particle_spacing(P) -> np.ndarray:
     """
     Estimate the per-axis inter-particle spacing for an initial seeding.
 
-    The dominant estimate is the **isotropic** mean spacing implied by
-    the particle bbox and the count:
+    For a uniform cartesian grid seeding whose cell aspect matches the
+    bbox aspect, the per-axis spacing is
 
-        Delta_p = (V_bbox / N) ** (1/3)         (uniform-cloud estimate)
+        Delta_p_a = extent_a / N ** (1/d)
 
-    For genuinely anisotropic seedings (e.g. a 50 x 70 x 30 grid in a
-    bbox that's much thinner along one axis) the isotropic estimate
-    under-counts the *axial* spacing. We therefore correct per-axis
-    by the ratio of each axis's bbox extent to the geometric-mean extent:
+    Derivation: if the seeding fills the bbox with N cells whose
+    aspect matches the bbox (so that ``Delta_p_a / Delta_p_b ==
+    extent_a / extent_b``), then by volume conservation
 
-        Delta_p_a = Delta_p * (extent_a / geom_mean_extent)
-                  = extent_a * (N / V_bbox) ** (-1/3) / V_bbox ** (1/3) * extent_a / geom_mean
-        ⇒ simplifies algebraically to
-          Delta_p_a = extent_a / N_per_axis_a,
-        where N_per_axis_a = (N * extent_a^3 / V_bbox)^(1/3)
-                           = N^(1/3) * (extent_a / geom_mean_extent).
+        Delta_p_x * Delta_p_y * Delta_p_z == V_bbox / N    (3-D)
 
-    The result reproduces the underlying grid spacing exactly when the
-    seeding was a uniform cartesian grid (Δp_a = extent_a / N_seed_a).
-    For random seedings it gives a reasonable mean-spacing surrogate
-    that respects the anisotropy of the seeding box.
+    combined with the aspect constraint gives
+    ``Delta_p_a = extent_a / N ** (1/d)``. Equivalent statements:
+
+      - the equivalent seeding has ``N ** (1/d)`` cells per axis;
+      - the per-axis spacing is ``(V_bbox / N) ** (1/d) * (extent_a / geom_mean(extent))``;
+      - on a cubic bbox this collapses to the isotropic ``(V/N)^{1/3}``.
 
     Parameters
     ----------
@@ -247,11 +243,6 @@ def initial_particle_spacing(P) -> np.ndarray:
         raise ValueError(f"need at least 2 particles to estimate spacing, got N={N}")
     lo = P_np.min(axis=0)
     hi = P_np.max(axis=0)
-    extent = np.maximum(hi - lo, 1e-30)             # avoid div-by-zero on degenerate axes
-    V_bbox = float(np.prod(extent))
-    # Per-axis N_seed: cube-root of the volume share scaled by the per-axis ratio
-    geom_mean = V_bbox ** (1.0 / d)
-    n_per_axis = (N ** (1.0 / d)) * (extent / geom_mean)
-    n_per_axis = np.maximum(n_per_axis, 1.0)        # at least one cell per axis
-    return (extent / n_per_axis).astype(np.float32)
+    extent = np.maximum(hi - lo, 1e-30)            # avoid div-by-zero on degenerate axes
+    return (extent / float(N) ** (1.0 / d)).astype(np.float32)
 
