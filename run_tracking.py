@@ -393,7 +393,10 @@ def parse_args():
                         choices=["wendland_c2", "wendland_c4", "cubic_spline",
                                  "gaussian", "epanechnikov", "quintic_spline"])
     parser.add_argument("--density-bandwidth-mode", default="fixed",
-                        choices=["fixed", "scott", "silverman", "knn_adaptive"])
+                        choices=["fixed", "scott", "silverman", "knn_adaptive",
+                                 "initial_spacing"],
+                        help="initial_spacing: h_xyz = bandwidth_factor * Δp_axis "
+                             "from the seeded (step-0) particle positions.")
     parser.add_argument("--density-bandwidth", type=float, default=None,
                         help="Fixed bandwidth (fixed mode only). Default: bandwidth-factor*voxel_size.")
     parser.add_argument("--density-bandwidth-xyz", type=float, nargs=3, default=None,
@@ -420,6 +423,11 @@ def parse_args():
                         metavar=("HX", "HY", "HZ"),
                         help="Per-axis voxel edge length. Overrides --density-voxel-size "
                              "and --density-resolution.")
+    parser.add_argument("--density-voxel-size-from-particles", action="store_true",
+                        help="Size the voxel grid to the per-axis initial "
+                             "inter-particle spacing Δp_axis (from seeded "
+                             "positions). Overrides all other voxel-size / "
+                             "resolution flags.")
     parser.add_argument("--density-pad-fraction", type=float, default=0.0)
     parser.add_argument("--density-no-mask-inside-mesh", action="store_true")
     parser.add_argument("--density-engine", choices=["auto", "brute", "octree"], default="auto")
@@ -1744,6 +1752,7 @@ def main():
                 bounds=density_bounds,
                 resolution=None if _density_voxel_size_cfg is not None else _density_resolution_cfg,
                 voxel_size=_density_voxel_size_cfg,
+                voxel_size_from_particles=args.density_voxel_size_from_particles,
                 pad_fraction=args.density_pad_fraction,
                 mask_inside_mesh=not args.density_no_mask_inside_mesh,
                 kernel=args.density_kernel,

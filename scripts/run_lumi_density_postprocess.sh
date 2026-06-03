@@ -60,15 +60,19 @@ VELOCITY_MESH=""                  # e.g. /scratch/.../<case>.gid/post/0eule/<cas
 #   explicit -- use BOUNDS below verbatim.
 BOUNDS_MODE=prepass               # prepass | mesh | explicit
 BOUNDS=""                         # "XMIN XMAX YMIN YMAX ZMIN ZMAX" (for explicit)
-RESOLUTION=128                    # cubic resolution; ignored if VOXEL_SIZE set
-VOXEL_SIZE=""                     # absolute voxel edge length [m]; overrides RESOLUTION
+RESOLUTION=128                    # cubic resolution (used if no override)
+RESOLUTION_XYZ=""                 # "NX NY NZ" per-axis; overrides RESOLUTION
+VOXEL_SIZE=""                     # scalar voxel edge length [m]; overrides RESOLUTION
+VOXEL_SIZE_XYZ=""                 # "HX HY HZ" per-axis; overrides VOXEL_SIZE / RESOLUTION
+VOXEL_SIZE_FROM_PARTICLES=0       # 1 = size voxels from step-0 inter-particle Δp_axis
 PAD_FRACTION=0.0
 NO_MASK_INSIDE_MESH=0             # 1 = skip masking (faster; lower fidelity near boundary)
 
 # ── [3] Kernel / bandwidth ───────────────────────────────────────────────────
 KERNEL=wendland_c2                # wendland_c2|wendland_c4|cubic_spline|gaussian|epanechnikov|quintic_spline
-BANDWIDTH_MODE=fixed              # fixed | scott | silverman | knn_adaptive
-BANDWIDTH=""                      # explicit h (fixed mode); "" = factor * voxel_size
+BANDWIDTH_MODE=fixed              # fixed | scott | silverman | knn_adaptive | initial_spacing
+BANDWIDTH=""                      # scalar h [m] (fixed mode); "" = factor * voxel_size
+BANDWIDTH_XYZ=""                  # "HX HY HZ" per-axis (fixed mode)
 BANDWIDTH_FACTOR=2.0
 BANDWIDTH_REFRESH_EVERY=0
 KNN_K=32
@@ -216,10 +220,14 @@ ARGS=(
     --blosc-threads     "$BLOSC_THREADS"
     --read-prefetch     "$READ_PREFETCH"
 )
-[ -n "$BANDWIDTH" ]      && ARGS+=( --bandwidth   "$BANDWIDTH" )
-[ -n "$VOXEL_SIZE" ]     && ARGS+=( --voxel-size  "$VOXEL_SIZE" )
-[ -n "$VELOCITY_MESH" ]  && ARGS+=( --velocity-mesh "$VELOCITY_MESH" )
-[ -n "$BOUNDS" ]         && ARGS+=( --bounds $BOUNDS )
+[ -n "$BANDWIDTH" ]       && ARGS+=( --bandwidth      "$BANDWIDTH" )
+[ -n "$BANDWIDTH_XYZ" ]   && ARGS+=( --bandwidth-xyz  $BANDWIDTH_XYZ )
+[ -n "$VOXEL_SIZE" ]      && ARGS+=( --voxel-size     "$VOXEL_SIZE" )
+[ -n "$VOXEL_SIZE_XYZ" ]  && ARGS+=( --voxel-size-xyz $VOXEL_SIZE_XYZ )
+[ -n "$RESOLUTION_XYZ" ]  && ARGS+=( --resolution-xyz $RESOLUTION_XYZ )
+[ "$VOXEL_SIZE_FROM_PARTICLES" = "1" ] && ARGS+=( --voxel-size-from-particles )
+[ -n "$VELOCITY_MESH" ]   && ARGS+=( --velocity-mesh "$VELOCITY_MESH" )
+[ -n "$BOUNDS" ]          && ARGS+=( --bounds $BOUNDS )
 case "$BOUNDS_MODE" in
     explicit)
         if [ -z "$BOUNDS" ]; then

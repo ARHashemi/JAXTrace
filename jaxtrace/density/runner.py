@@ -54,6 +54,12 @@ class DensityRunnerConfig:
     # Per-axis voxel size in metres. Scalar or 3-tuple, just like resolution.
     # When set, overrides ``resolution`` (see grid.make_voxel_grid).
     voxel_size: Optional[Union[float, Tuple[float, float, float]]] = None
+    # When True, ignore ``voxel_size`` / ``resolution`` and instead size the
+    # voxel grid to match the initial inter-particle spacing per axis
+    # (see bandwidth.initial_particle_spacing). This gives a grid whose
+    # cell size is meaningful in the same units the particle cloud
+    # already resolves — natural for surrogate-model training.
+    voxel_size_from_particles: bool = False
     pad_fraction: float = 0.0
 
     # --- inside-mesh masking --------------------------------------------------
@@ -61,7 +67,10 @@ class DensityRunnerConfig:
 
     # --- kernel / bandwidth ---------------------------------------------------
     kernel: str = "wendland_c2"
-    bandwidth_mode: str = "fixed"            # fixed | scott | silverman | knn_adaptive
+    bandwidth_mode: str = "fixed"
+    # one of: fixed | scott | silverman | knn_adaptive | initial_spacing
+    # "initial_spacing" sets h_xyz = bandwidth_factor * Δp_axis from the
+    # step-0 (or runner-supplied) particle positions.
     # Fixed bandwidth value. Either a scalar (isotropic h) or a 3-tuple
     # (hx, hy, hz). Per-axis bandwidth is honoured for all kernels —
     # the kernel is normalised by 1/(h_x · h_y · h_z) so it still
@@ -130,10 +139,26 @@ class DensityRunner:
 
     def __post_init__(self):
         bb_min, bb_max = self._resolve_bbox()
+
+        # Optionally size the voxel grid from the initial inter-particle
+        # spacing. This requires ``initial_positions`` to be provided; the
+        # resulting (anisotropic) Δp_axis becomes the voxel_size, which
+        # overrides cfg.resolution and cfg.voxel_size.
+        _vs_override: Optional[np.ndarray] = None
+        if self.cfg.voxel_size_from_particles:
+            if self.initial_positions is None:
+                raise ValueError(
+                    "voxel_size_from_particles=True requires the runner to be "
+                    "constructed with initial_positions=(N, 3) particle array"
+                )
+            _vs_override = bandwidth.initial_particle_spacing(self.initial_positions)
+            print(f"[density] voxel_size from initial particle spacing: "
+                  f"Δp_axis={_vs_override.tolist()}")
+
         self.voxel_grid = grid_mod.make_voxel_grid(
             bb_min, bb_max,
-            resolution=self.cfg.resolution,
-            voxel_size=self.cfg.voxel_size,
+            resolution=(None if _vs_override is not None else self.cfg.resolution),
+            voxel_size=(_vs_override if _vs_override is not None else self.cfg.voxel_size),
             pad_fraction=self.cfg.pad_fraction,
         )
 
@@ -185,6 +210,17 @@ class DensityRunner:
                 _h_max_est = self.cfg.bandwidth_factor * float(
                     np.max(self.voxel_grid.spacing)
                 )
+        elif self.cfg.bandwidth_mode == "initial_spacing":
+            # h_xyz = factor * Δp_axis — compute Δp at the same step we'll
+            # use later in _compute_h so the pad and the actual kernel see
+            # the same bandwidth.
+            if self.initial_positions is None:
+                raise ValueError(
+                    "bandwidth_mode='initial_spacing' requires the runner to be "
+                    "constructed with initial_positions=(N, 3)"
+                )
+            _dp = bandwidth.initial_particle_spacing(self.initial_positions)
+            _h_max_est = float(self.cfg.bandwidth_factor) * float(_dp.max())
         else:
             # Adaptive — pick a generous upper bound from the bbox extent.
             _h_max_est = 0.25 * float(
@@ -258,6 +294,8 @@ class DensityRunner:
         # call accepts either a scalar or a 3-vector for voxel_size /
         # fixed_h, and broadcasts/validates internally.
         vs_per_axis = np.asarray(self.voxel_grid.spacing, dtype=np.float32)
+        # For "initial_spacing" we want the seed positions (step-0), NOT the
+        # current step's particles — h must be constant across the run.
         return bandwidth.resolve_bandwidth(
             positions,
             mode=self.cfg.bandwidth_mode,
@@ -266,6 +304,7 @@ class DensityRunner:
             bandwidth_factor=self.cfg.bandwidth_factor,
             knn_k=self.cfg.knn_k,
             knn_safety=self.cfg.knn_safety,
+            initial_positions=self.initial_positions,
             d=3,
         )
 

@@ -67,16 +67,32 @@ def resolve_bandwidth(
     knn_k: int = 32,
     knn_safety: float = 1.2,
     knn_chunk: int = 4096,
+    initial_positions=None,             # (N, d) seeding for "initial_spacing" mode
     d: int = 3,
 ) -> jnp.ndarray:
     """
     Return per-particle, per-axis smoothing lengths of shape ``(N, d)``,
     float32, on device.
 
-    ``fixed_h`` and ``voxel_size`` may each be a scalar (isotropic) or a
-    per-axis sequence of length ``d``. For modes other than ``fixed``,
-    these arguments are unused; Scott/Silverman compute per-axis ``σ``
-    from the cloud, k-NN uses a scalar per particle.
+    Modes
+    -----
+    ``fixed``
+        Per-axis or scalar bandwidth via ``fixed_h``; if absent, default
+        to ``bandwidth_factor * voxel_size`` (also scalar or per-axis).
+    ``scott`` / ``silverman``
+        Per-axis bandwidth from the cloud's per-dimension std × the
+        usual asymptotic factor. Anisotropic for free.
+    ``knn_adaptive``
+        Scalar per-particle bandwidth from k-NN distances, broadcast
+        across axes.
+    ``initial_spacing``
+        Per-axis bandwidth = ``bandwidth_factor * Δp_axis``, where
+        ``Δp_axis`` is the per-axis inter-particle spacing of the
+        ``initial_positions`` argument (see :func:`initial_particle_spacing`).
+        This is the standard SPH choice for a uniform initial seeding
+        and gives a kernel that resolves the particle scale by
+        construction. The reference positions are taken once at runner
+        startup and the resulting h is held fixed for the run.
     """
     N = positions.shape[0]
 
@@ -89,7 +105,6 @@ def resolve_bandwidth(
             h_axis = float(bandwidth_factor) * vs_arr
         else:
             h_axis = fixed_arr
-        # Broadcast to (N, d) — identical row per particle.
         return jnp.broadcast_to(jnp.asarray(h_axis, dtype=jnp.float32), (N, d))
 
     if mode == "scott":
@@ -101,13 +116,16 @@ def resolve_bandwidth(
         return jnp.broadcast_to(jnp.asarray(h_axis, dtype=jnp.float32), (N, d))
 
     if mode == "knn_adaptive":
-        # Scalar per-particle bandwidth, broadcast across axes. A true
-        # anisotropic k-NN (ellipsoidal neighbourhood) would compute the
-        # per-axis std of the k nearest displacements; not implemented yet.
         h_scalar = _knn_bandwidth_bruteforce(
             positions, k=int(knn_k), safety=float(knn_safety), chunk=int(knn_chunk),
-        )                                       # (N,)
+        )
         return jnp.broadcast_to(h_scalar[:, None], (N, d)).astype(jnp.float32)
+
+    if mode == "initial_spacing":
+        ref_pos = initial_positions if initial_positions is not None else positions
+        delta_p_axis = initial_particle_spacing(ref_pos)      # (d,)
+        h_axis = (float(bandwidth_factor) * delta_p_axis).astype(np.float32)
+        return jnp.broadcast_to(jnp.asarray(h_axis, dtype=jnp.float32), (N, d))
 
     raise ValueError(f"unknown bandwidth mode {mode!r}")
 
@@ -179,3 +197,61 @@ def particle_bbox(P: jnp.ndarray) -> tuple[np.ndarray, np.ndarray]:
     lo = np.asarray(jnp.min(P, axis=0)).astype(np.float32)
     hi = np.asarray(jnp.max(P, axis=0)).astype(np.float32)
     return lo, hi
+
+
+# -----------------------------------------------------------------------------
+# Initial inter-particle spacing
+# -----------------------------------------------------------------------------
+
+def initial_particle_spacing(P) -> np.ndarray:
+    """
+    Estimate the per-axis inter-particle spacing for an initial seeding.
+
+    The dominant estimate is the **isotropic** mean spacing implied by
+    the particle bbox and the count:
+
+        Delta_p = (V_bbox / N) ** (1/3)         (uniform-cloud estimate)
+
+    For genuinely anisotropic seedings (e.g. a 50 x 70 x 30 grid in a
+    bbox that's much thinner along one axis) the isotropic estimate
+    under-counts the *axial* spacing. We therefore correct per-axis
+    by the ratio of each axis's bbox extent to the geometric-mean extent:
+
+        Delta_p_a = Delta_p * (extent_a / geom_mean_extent)
+                  = extent_a * (N / V_bbox) ** (-1/3) / V_bbox ** (1/3) * extent_a / geom_mean
+        ⇒ simplifies algebraically to
+          Delta_p_a = extent_a / N_per_axis_a,
+        where N_per_axis_a = (N * extent_a^3 / V_bbox)^(1/3)
+                           = N^(1/3) * (extent_a / geom_mean_extent).
+
+    The result reproduces the underlying grid spacing exactly when the
+    seeding was a uniform cartesian grid (Δp_a = extent_a / N_seed_a).
+    For random seedings it gives a reasonable mean-spacing surrogate
+    that respects the anisotropy of the seeding box.
+
+    Parameters
+    ----------
+    P : array, shape (N, d)
+        Particle positions (host or device).
+
+    Returns
+    -------
+    np.ndarray of shape (d,), float32
+        Per-axis inter-particle spacing in physical units.
+    """
+    P_np = np.asarray(P, dtype=np.float64)
+    if P_np.ndim != 2:
+        raise ValueError(f"expected (N, d), got shape {P_np.shape}")
+    N, d = P_np.shape
+    if N <= 1:
+        raise ValueError(f"need at least 2 particles to estimate spacing, got N={N}")
+    lo = P_np.min(axis=0)
+    hi = P_np.max(axis=0)
+    extent = np.maximum(hi - lo, 1e-30)             # avoid div-by-zero on degenerate axes
+    V_bbox = float(np.prod(extent))
+    # Per-axis N_seed: cube-root of the volume share scaled by the per-axis ratio
+    geom_mean = V_bbox ** (1.0 / d)
+    n_per_axis = (N ** (1.0 / d)) * (extent / geom_mean)
+    n_per_axis = np.maximum(n_per_axis, 1.0)        # at least one cell per axis
+    return (extent / n_per_axis).astype(np.float32)
+

@@ -75,13 +75,21 @@ def parse_args() -> argparse.Namespace:
                    metavar=("HX", "HY", "HZ"),
                    help="Per-axis voxel edge length. Overrides --voxel-size "
                         "and --resolution.")
+    p.add_argument("--voxel-size-from-particles", action="store_true",
+                   help="Set the voxel grid spacing to the per-axis initial "
+                        "inter-particle spacing Δp_axis (estimated from "
+                        "the first step's positions). Overrides --resolution, "
+                        "--resolution-xyz, --voxel-size and --voxel-size-xyz.")
 
     # Kernel / bandwidth
     p.add_argument("--kernel", default="wendland_c2",
                    choices=["wendland_c2", "wendland_c4", "cubic_spline",
                             "gaussian", "epanechnikov", "quintic_spline"])
     p.add_argument("--bandwidth-mode", default="fixed",
-                   choices=["fixed", "scott", "silverman", "knn_adaptive"])
+                   choices=["fixed", "scott", "silverman", "knn_adaptive",
+                            "initial_spacing"],
+                   help="initial_spacing: h_xyz = bandwidth_factor * Δp_axis "
+                        "from the first step's particle positions.")
     p.add_argument("--bandwidth", type=float, default=None,
                    help="Fixed bandwidth (only if --bandwidth-mode fixed). "
                         "Default = bandwidth-factor * voxel_size. "
@@ -283,6 +291,22 @@ def main() -> int:
     )
     _bandwidth_cfg = args.bandwidth_xyz if args.bandwidth_xyz is not None else args.bandwidth
 
+    # If the user asked for voxel-size-from-particles OR the initial-spacing
+    # bandwidth mode, we need a reference particle cloud for those derived
+    # quantities. Load the first available step from the trajectory file.
+    _initial_positions = None
+    if args.voxel_size_from_particles or args.bandwidth_mode == "initial_spacing":
+        import h5py
+        with h5py.File(str(args.particles), "r") as _f:
+            root = _f["/VTKHDF"]
+            offset = int(root["Steps/PointOffsets"][0])
+            count = int(root["NumberOfPoints"][0])
+            _initial_positions = np.asarray(
+                root["Points"][offset:offset + count], dtype=np.float32,
+            )
+        print(f"[density-postprocess] loaded reference positions for "
+              f"voxel/bandwidth derivation: step 0, N={_initial_positions.shape[0]}")
+
     # Build runner config
     cfg = DensityRunnerConfig(
         bounds_mode="explicit",
@@ -291,6 +315,7 @@ def main() -> int:
         # accepts None for the unused field.
         resolution=None if _voxel_size_cfg is not None else _resolution_cfg,
         voxel_size=_voxel_size_cfg,
+        voxel_size_from_particles=args.voxel_size_from_particles,
         pad_fraction=args.pad_fraction,
         mask_inside_mesh=(mesh_octree_gpu is not None) and (not args.no_mask_inside_mesh),
         kernel=args.kernel,
@@ -323,6 +348,7 @@ def main() -> int:
         mesh_octree_gpu=mesh_octree_gpu,
         mesh_bbox_min=mesh_bbox_min,
         mesh_bbox_max=mesh_bbox_max,
+        initial_positions=_initial_positions,
     )
 
     # Resolve which step indices to actually process.
