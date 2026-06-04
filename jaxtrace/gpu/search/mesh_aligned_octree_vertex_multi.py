@@ -127,7 +127,8 @@ def extract_octree_cells_vertex_multi(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
     tolerance: float = 1e-6,
-    verbose: bool = True
+    verbose: bool = True,
+    orphan_fallback: bool = True,
 ) -> OctreeCellDataVertexMulti:
     """
     Extract octree cells using MULTI-CELL vertex registration.
@@ -150,6 +151,11 @@ def extract_octree_cells_vertex_multi(
         connectivity: (n_elements, 4) element connectivity
         tolerance: geometric tolerance
         verbose: print progress
+        orphan_fallback: when True (default), non-Kuhn elements that
+            have no Kuhn face-neighbour fall back to their own AABB to
+            derive cell_size/level. When False, those elements are
+            dropped from the octree (legacy behaviour) — spatial search
+            will not find them.
 
     Returns:
         OctreeCellDataVertexMulti with multi-cell mapping
@@ -238,6 +244,29 @@ def extract_octree_cells_vertex_multi(
 
     n_neighbor_found = 0
     n_neighbor_not_found = 0
+    n_orphan_fallback = 0
+
+    # Median Kuhn (cell_size, level) — used when an orphan has no
+    # Kuhn neighbour. Snaps the orphan cell to a level the kernel
+    # actually walks (the kernel iterates a fixed level range).
+    if kuhn_element_info:
+        _kuhn_levels = np.array(
+            [info[1] for info in kuhn_element_info.values()],
+            dtype=np.int32,
+        )
+        _kuhn_sizes = np.array(
+            [info[0] for info in kuhn_element_info.values()],
+            dtype=np.float64,
+        )
+        median_level = int(np.median(_kuhn_levels))
+        median_cell_size = np.median(_kuhn_sizes, axis=0)
+    else:
+        median_level = 14
+        median_cell_size = np.array([
+            max(tolerance, 1e-12),
+            max(tolerance, 1e-12),
+            max(tolerance, 1e-12),
+        ], dtype=np.float64)
 
     for elem_id in non_kuhn_ids:
         node_ids = connectivity[elem_id]
@@ -248,45 +277,60 @@ def extract_octree_cells_vertex_multi(
             elem_id, connectivity, node_to_elements, kuhn_element_info
         )
 
-        if neighbor_id >= 0:
+        if neighbor_id < 0:
+            # Orphan: no Kuhn face-neighbour. Either drop or borrow
+            # the global median Kuhn (cell_size, level).
+            if not orphan_fallback:
+                n_neighbor_not_found += 1
+                if verbose:
+                    print(f"    WARNING: Element {elem_id} has no Kuhn "
+                          f"face neighbor, skipping")
+                continue
+            neighbor_cell_size = median_cell_size
+            neighbor_level = median_level
+            n_orphan_fallback += 1
+        else:
             n_neighbor_found += 1
 
-            # Register using the Non-Kuhn element's OWN vertex positions
-            # but with the neighbor's cell_size and level.
-            # This ensures the element is in cells the search will actually look in.
-            vertex_cells = set()
-            for vertex in vertices:
-                i = int(np.floor(vertex[0] / neighbor_cell_size[0]))
-                j = int(np.floor(vertex[1] / neighbor_cell_size[1]))
-                k = int(np.floor(vertex[2] / neighbor_cell_size[2]))
+        # Register using the Non-Kuhn element's OWN vertex positions
+        # but with the (neighbor or AABB-derived) cell_size and level.
+        # This ensures the element is in cells the search will look in.
+        vertex_cells = set()
+        for vertex in vertices:
+            i = int(np.floor(vertex[0] / neighbor_cell_size[0]))
+            j = int(np.floor(vertex[1] / neighbor_cell_size[1]))
+            k = int(np.floor(vertex[2] / neighbor_cell_size[2]))
 
-                offset = (1 << 19)
-                max_coord = (1 << 20)
+            offset = (1 << 19)
+            max_coord = (1 << 20)
 
-                i_morton = np.clip(i + offset, 0, max_coord - 1)
-                j_morton = np.clip(j + offset, 0, max_coord - 1)
-                k_morton = np.clip(k + offset, 0, max_coord - 1)
+            i_morton = np.clip(i + offset, 0, max_coord - 1)
+            j_morton = np.clip(j + offset, 0, max_coord - 1)
+            k_morton = np.clip(k + offset, 0, max_coord - 1)
 
-                morton = encode_morton_3d_single(i_morton, j_morton, k_morton, max_depth=21)
+            morton = encode_morton_3d_single(
+                i_morton, j_morton, k_morton, max_depth=21,
+            )
 
-                cell_key = (morton, neighbor_level)
-                vertex_cells.add(cell_key)
+            cell_key = (morton, neighbor_level)
+            vertex_cells.add(cell_key)
 
-                if cell_key not in cell_metadata:
-                    cell_metadata[cell_key] = (morton, neighbor_level, (i, j, k), neighbor_cell_size.copy())
+            if cell_key not in cell_metadata:
+                cell_metadata[cell_key] = (
+                    morton, neighbor_level, (i, j, k),
+                    neighbor_cell_size.copy(),
+                )
 
-            for cell_key in vertex_cells:
-                element_to_cells_dict[elem_id].add(cell_key)
-                cell_to_elements_dict[cell_key].add(elem_id)
-                total_vertex_cell_registrations += 1
-        else:
-            n_neighbor_not_found += 1
-            if verbose:
-                print(f"    WARNING: Element {elem_id} has no Kuhn face neighbor, skipping")
+        for cell_key in vertex_cells:
+            element_to_cells_dict[elem_id].add(cell_key)
+            cell_to_elements_dict[cell_key].add(elem_id)
+            total_vertex_cell_registrations += 1
 
     if verbose:
         print(f"  Non-Kuhn with Kuhn neighbor: {n_neighbor_found:,}")
-        print(f"  Non-Kuhn without Kuhn neighbor: {n_neighbor_not_found:,}")
+        if n_orphan_fallback:
+            print(f"  Non-Kuhn AABB-fallback: {n_orphan_fallback:,}")
+        print(f"  Non-Kuhn dropped (no fallback): {n_neighbor_not_found:,}")
         print(f"  Total registrations: {total_vertex_cell_registrations:,}")
         print(f"  Cells per element (mean): {total_vertex_cell_registrations / n_elements:.2f}")
 

@@ -1,48 +1,43 @@
 """
-Mesh-Aligned Octree: Parent-Cube Registration
+Mesh-Aligned Octree: AABB-Overlap Registration
 
-Each element is registered in its ONE parent cube — the Kuhn hexahedral cell
-whose octree subdivision produced this tetrahedron.  This gives a tight,
-predictable element-per-cell count (5–6 for Kuhn, max ~8) that enables
-fully static inner search loops on GPU.
+Each element is registered in every level cell that its axis-aligned bounding
+box (AABB) overlaps.  This is a general-mesh registration strategy: no Kuhn
+decomposition or axis-aligned-edge structure is assumed.
 
-Non-Kuhn elements (those without 3 axis-aligned edges) are handled by
-borrowing a face- or node-neighbour's cell_size/level and registering via
-centroid into that grid, adding at most +1 per cell.
+For Kuhn tetrahedra the AABB coincides with the parent hexahedral cell, so
+this strategy produces the same single-cell registration as parent-cube
+(1 cell per element, ~6 elements per cell).  The AABB is contracted inward
+by a negligible epsilon to avoid registering in adjacent cells when tet
+vertices sit exactly on grid boundaries.
 
-Combined with 3x3x3 neighbourhood search, this gives 100% found rate on
-Kuhn meshes (Proposition 1 in the paper).
+For general (non-Kuhn) tetrahedra the element may span 1-8 cells at its
+level, depending on cell-boundary crossings.
 
-Data Structure (for the FLA/cylA benchmark mesh):
-                            Parent-Cube     Vertex-Multi (for comparison)
-    Cells                   ~517,069        ~665,824
-    Element registrations   ~3,048,900      ~12,194,568
-    Elements per cell       5.89 (max 8)    18.3 (max 129)
-    Cells per element       1.00            4.00
-    Inner loop bound        8 (static)      dynamic (CSR)
+Data Structure (expected for FLA/cylA benchmark mesh, mostly Kuhn):
+                            AABB-Overlap     Parent-Cube     Vertex-Multi
+    Cells per element       ~1.0 (Kuhn)      1.00            4.00
+    Elements per cell       ~6 (Kuhn)        5.89 (max 8)    18.3 (max 129)
 """
 
 import numpy as np
-from typing import Tuple, NamedTuple
+from typing import NamedTuple
 from collections import defaultdict
 
 from .mesh_aligned_octree_single_cell import (
     encode_morton_3d_single,
     find_axis_aligned_edges_single,
-    find_parent_cube,
 )
 from .mesh_aligned_octree_vertex_multi import (
     build_node_to_elements,
     find_kuhn_face_neighbor,
 )
+from .mesh_aligned_octree_parent_cube import _find_kuhn_node_neighbor
 
 
-class OctreeCellDataParentCube(NamedTuple):
+class OctreeCellDataAABB(NamedTuple):
     """
-    Mesh-aligned octree with single parent-cube registration.
-
-    Each Kuhn element is in exactly 1 cell (its parent cube).
-    Non-Kuhn elements are placed in their Kuhn neighbour's grid.
+    Mesh-aligned octree with AABB-overlap registration.
 
     Compatible with upload_mesh_aligned_octree_to_gpu() — it reads:
         cell_morton_codes, cell_levels, cell_sizes, cell_grid_indices,
@@ -68,44 +63,72 @@ class OctreeCellDataParentCube(NamedTuple):
     n_non_kuhn_registered: int
 
 
-def _find_kuhn_node_neighbor(
-    elem_id: int,
-    connectivity: np.ndarray,
-    node_to_elements: dict,
-    kuhn_element_info: dict,
-) -> tuple:
+def _register_aabb_cells(vertices, cell_size, level, cell_to_elements_dict,
+                         cell_metadata, elem_id):
+    """Register an element in all cells overlapped by its AABB.
+
+    The AABB is contracted inward by a small epsilon to avoid registering
+    in neighbouring cells when vertices sit exactly on a grid boundary.
+    For Kuhn tetrahedra whose vertices coincide with grid corners, this
+    reduces the registration from 2×2×2 = 8 cells to 1 (the parent cube),
+    matching the parent-cube strategy.  For general tetrahedra the
+    contraction is negligible relative to cell size.
+
+    Returns the number of cells registered.
     """
-    Find a Kuhn node-neighbor (shares >= 1 node) for a Non-Kuhn element.
+    # Compute AABB, contracted inward to avoid grid-boundary straddling.
+    # eps is relative to cell size so it adapts across refinement levels.
+    eps = 1e-10 * cell_size
+    v_min = vertices.min(axis=0) + eps
+    v_max = vertices.max(axis=0) - eps
 
-    Fallback when no face-neighbor (>= 3 shared nodes) is Kuhn.
-    """
-    elem_nodes = connectivity[elem_id]
+    # Grid range
+    i_min = int(np.floor(v_min[0] / cell_size[0]))
+    j_min = int(np.floor(v_min[1] / cell_size[1]))
+    k_min = int(np.floor(v_min[2] / cell_size[2]))
 
-    for node_id in elem_nodes:
-        for neighbor_id in node_to_elements[int(node_id)]:
-            if neighbor_id == elem_id:
-                continue
-            if neighbor_id in kuhn_element_info:
-                cell_size, level = kuhn_element_info[neighbor_id]
-                return neighbor_id, cell_size, level
+    i_max = int(np.floor(v_max[0] / cell_size[0]))
+    j_max = int(np.floor(v_max[1] / cell_size[1]))
+    k_max = int(np.floor(v_max[2] / cell_size[2]))
 
-    return -1, None, None
+    offset = (1 << 19)
+    max_coord = (1 << 20)
+
+    n_registered = 0
+    for i in range(i_min, i_max + 1):
+        for j in range(j_min, j_max + 1):
+            for k in range(k_min, k_max + 1):
+                i_m = int(np.clip(i + offset, 0, max_coord - 1))
+                j_m = int(np.clip(j + offset, 0, max_coord - 1))
+                k_m = int(np.clip(k + offset, 0, max_coord - 1))
+
+                morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
+                cell_key = (morton, level)
+
+                cell_to_elements_dict[cell_key].append(elem_id)
+
+                if cell_key not in cell_metadata:
+                    cell_metadata[cell_key] = (cell_size.copy(), (i, j, k))
+
+                n_registered += 1
+
+    return n_registered
 
 
-def extract_octree_cells_parent_cube(
+def extract_octree_cells_aabb(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
     tolerance: float = 1e-6,
     verbose: bool = True,
     orphan_fallback: bool = True,
-) -> OctreeCellDataParentCube:
+) -> OctreeCellDataAABB:
     """
-    Extract octree cells using SINGLE parent-cube registration.
+    Extract octree cells using AABB-overlap registration.
 
-    Each Kuhn element is registered in the ONE cell that contains its
-    centroid (the parent cube from the Kuhn decomposition).  Non-Kuhn
-    elements borrow a Kuhn neighbour's grid and are registered via
-    centroid into that grid.
+    Each element is registered in every level cell that its axis-aligned
+    bounding box overlaps.  For Kuhn elements the level is detected from
+    axis-aligned edges; for non-Kuhn elements the level is borrowed from
+    a Kuhn neighbour (same fallback as parent-cube and vertex-multi).
 
     Args:
         node_positions: (n_nodes, 3) float64 — node coordinates
@@ -113,37 +136,34 @@ def extract_octree_cells_parent_cube(
         tolerance: geometric tolerance for axis-aligned edge detection
         verbose: print progress
         orphan_fallback: when True (default), non-Kuhn elements that
-            have no Kuhn face- or node-neighbour fall back to a cell
-            derived from the element's own AABB. When False, those
-            elements are dropped from the octree (legacy behaviour) —
-            spatial search will not find them.
+            have no Kuhn face- or node-neighbour fall back to their own
+            AABB to derive cell_size/level. When False, those elements
+            are dropped from the octree (legacy behaviour) — spatial
+            search will not find them.
 
     Returns:
-        OctreeCellDataParentCube with single-cube-per-element mapping
+        OctreeCellDataAABB with AABB-overlap registration
     """
     n_elements = connectivity.shape[0]
 
     if verbose:
         print(f"\n{'='*80}")
-        print("Mesh-Aligned Octree: Parent-Cube Registration")
+        print("Mesh-Aligned Octree: AABB-Overlap Registration")
         print(f"{'='*80}")
         print(f"  Elements: {n_elements:,}")
         print(f"  Tolerance: {tolerance:.2e}")
-        print(f"  Expected: 1 cell per element, ~5-6 elements per cell, max ~8")
 
-    # cell_key = (morton, level)  →  list of element IDs
     cell_to_elements_dict = defaultdict(list)
-    # cell_key  →  (cell_size, (i, j, k))
     cell_metadata = {}
-    # For non-Kuhn pass 2
-    kuhn_element_info = {}  # elem_id → (cell_size, level)
+    kuhn_element_info = {}
     non_kuhn_ids = []
+    total_cell_registrations = 0
 
     # ------------------------------------------------------------------
-    # Pass 1: Kuhn elements — centroid → parent cube
+    # Pass 1: Kuhn elements — AABB overlap
     # ------------------------------------------------------------------
     if verbose:
-        print(f"\n[1/3] Pass 1: Kuhn elements → parent cube...")
+        print(f"\n[1/3] Pass 1: Kuhn elements → AABB overlap...")
 
     for elem_id in range(n_elements):
         node_ids = connectivity[elem_id]
@@ -157,22 +177,11 @@ def extract_octree_cells_parent_cube(
 
         kuhn_element_info[elem_id] = (cell_size.copy(), level)
 
-        # Parent cube via centroid
-        _, _, i, j, k = find_parent_cube(vertices, cell_size, tolerance)
-
-        offset = (1 << 19)
-        max_coord = (1 << 20)
-        i_m = int(np.clip(i + offset, 0, max_coord - 1))
-        j_m = int(np.clip(j + offset, 0, max_coord - 1))
-        k_m = int(np.clip(k + offset, 0, max_coord - 1))
-
-        morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
-        cell_key = (morton, level)
-
-        cell_to_elements_dict[cell_key].append(elem_id)
-
-        if cell_key not in cell_metadata:
-            cell_metadata[cell_key] = (cell_size.copy(), (i, j, k))
+        n_reg = _register_aabb_cells(
+            vertices, cell_size, level,
+            cell_to_elements_dict, cell_metadata, elem_id,
+        )
+        total_cell_registrations += n_reg
 
         if verbose and (elem_id + 1) % 500000 == 0:
             print(f"    Processed {elem_id + 1:,}/{n_elements:,} elements...")
@@ -181,25 +190,22 @@ def extract_octree_cells_parent_cube(
     if verbose:
         print(f"  Kuhn elements: {n_kuhn:,}")
         print(f"  Non-Kuhn elements (deferred): {len(non_kuhn_ids):,}")
+        if n_kuhn > 0:
+            print(f"  Kuhn cells/element (mean): "
+                  f"{total_cell_registrations / n_kuhn:.2f}")
 
     # ------------------------------------------------------------------
-    # Pass 2: Non-Kuhn elements — borrow neighbour's grid, centroid assignment
+    # Pass 2: Non-Kuhn elements — borrow level, AABB overlap
     # ------------------------------------------------------------------
     n_non_kuhn_registered = 0
     n_non_kuhn_orphan_fallback = 0
     n_non_kuhn_dropped = 0
 
-    # Precompute a global fallback (cell_size, level) from the median
-    # Kuhn element. We DO NOT compute orphan levels from the orphan's
-    # own AABB — the kernel only searches a fixed range of levels (7..14
-    # currently), so a level outside that range would never be visited
-    # and the orphan would be invisible to the spatial search.
-    # Snapping to the global median guarantees the orphan cell sits at
-    # a level the kernel actually walks. Overlap with neighbouring
-    # Kuhn cells at the same level is harmless: the search reads every
-    # element listed in a visited cell and the point-in-tet test
-    # (kernel side) decides — duplicate listings cannot produce a wrong
-    # answer, only redundant tests.
+    # Precompute median Kuhn (cell_size, level) as the orphan fallback.
+    # The kernel iterates a fixed range of levels (currently 7..14);
+    # orphan cells MUST sit at one of those levels to be visited, so we
+    # snap to the global median Kuhn level rather than computing one
+    # from the orphan's own AABB.
     if kuhn_element_info:
         _kuhn_levels = np.array(
             [info[1] for info in kuhn_element_info.values()],
@@ -212,7 +218,6 @@ def extract_octree_cells_parent_cube(
         median_level = int(np.median(_kuhn_levels))
         median_cell_size = np.median(_kuhn_sizes, axis=0)
     else:
-        # Pathological all-non-Kuhn mesh: fall back to defaults.
         median_level = 14
         median_cell_size = np.array([
             max(tolerance, 1e-12),
@@ -222,14 +227,14 @@ def extract_octree_cells_parent_cube(
 
     if non_kuhn_ids:
         if verbose:
-            print(f"\n[2/3] Pass 2: Non-Kuhn elements → neighbour's grid...")
+            print(f"\n[2/3] Pass 2: Non-Kuhn elements → neighbour level + AABB overlap...")
 
         node_to_elements = build_node_to_elements(connectivity)
 
         for elem_id in non_kuhn_ids:
             vertices = node_positions[connectivity[elem_id]]
 
-            # Try face-neighbour first (shares ≥ 3 nodes)
+            # Try face-neighbour first
             nbr_id, nbr_size, nbr_level = find_kuhn_face_neighbor(
                 elem_id, connectivity, node_to_elements, kuhn_element_info
             )
@@ -241,42 +246,25 @@ def extract_octree_cells_parent_cube(
                 )
 
             if nbr_id < 0:
-                # No Kuhn neighbour at all. Two options:
-                #   orphan_fallback=True  (default): borrow the global
-                #     median Kuhn (cell_size, level) so the orphan sits
-                #     at a level the kernel walks, and let it be
-                #     registered by centroid into that grid.
-                #   orphan_fallback=False: drop the element (legacy).
                 if not orphan_fallback:
                     if verbose:
                         print(f"    WARNING: Element {elem_id} has no "
                               f"Kuhn neighbour, skipped")
                     n_non_kuhn_dropped += 1
                     continue
+                # Use the global median Kuhn (cell_size, level) so the
+                # cell sits at a level the kernel actually walks.
+                # Overlap with existing cells is harmless: the point-
+                # in-tet test is the authoritative decider.
                 nbr_size = median_cell_size
                 nbr_level = median_level
                 n_non_kuhn_orphan_fallback += 1
 
-            # Centroid of the non-Kuhn element in the neighbour's grid
-            centroid = vertices.mean(axis=0)
-            i = int(np.floor(centroid[0] / nbr_size[0]))
-            j = int(np.floor(centroid[1] / nbr_size[1]))
-            k = int(np.floor(centroid[2] / nbr_size[2]))
-
-            offset = (1 << 19)
-            max_coord = (1 << 20)
-            i_m = int(np.clip(i + offset, 0, max_coord - 1))
-            j_m = int(np.clip(j + offset, 0, max_coord - 1))
-            k_m = int(np.clip(k + offset, 0, max_coord - 1))
-
-            morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
-            cell_key = (morton, nbr_level)
-
-            cell_to_elements_dict[cell_key].append(elem_id)
-
-            if cell_key not in cell_metadata:
-                cell_metadata[cell_key] = (nbr_size.copy(), (i, j, k))
-
+            n_reg = _register_aabb_cells(
+                vertices, nbr_size, nbr_level,
+                cell_to_elements_dict, cell_metadata, elem_id,
+            )
+            total_cell_registrations += n_reg
             n_non_kuhn_registered += 1
 
         if verbose:
@@ -333,16 +321,17 @@ def extract_octree_cells_parent_cube(
             max_elems = n_elems
 
     cell_to_elements_offsets[n_cells] = write_idx
-    # Trim data array (deduplication may have reduced total)
     cell_to_elements_data = cell_to_elements_data[:write_idx]
 
     n_registered = n_kuhn + n_non_kuhn_registered
     elements_per_cell = np.diff(cell_to_elements_offsets)
+    cells_per_elem_mean = total_cell_registrations / max(n_registered, 1)
 
     if verbose:
         print(f"  Unique cells: {n_cells:,}")
         print(f"  Registered elements: {n_registered:,} / {n_elements:,}")
         print(f"  CSR data entries: {write_idx:,}")
+        print(f"  Cells per element (mean): {cells_per_elem_mean:.2f}")
         print(f"\n  Elements-per-cell statistics:")
         print(f"    Mean:   {elements_per_cell.mean():.2f}")
         print(f"    Median: {np.median(elements_per_cell):.0f}")
@@ -356,17 +345,16 @@ def extract_octree_cells_parent_cube(
             print(f"    {count:3d} elements: {freq:>8,} cells "
                   f"({100 * freq / n_cells:5.2f}%)")
 
-        # Level distribution
         unique_lvls, lvl_counts = np.unique(cell_levels, return_counts=True)
         print(f"\n  Level distribution:")
         for lvl, cnt in zip(unique_lvls, lvl_counts):
             print(f"    Level {lvl:2d}: {cnt:>8,} cells")
 
         print(f"\n{'='*80}")
-        print(f"Parent-Cube Registration Complete!")
+        print(f"AABB-Overlap Registration Complete!")
         print(f"{'='*80}\n")
 
-    return OctreeCellDataParentCube(
+    return OctreeCellDataAABB(
         cell_morton_codes=cell_morton_codes,
         cell_levels=cell_levels,
         cell_sizes=cell_sizes,
@@ -375,7 +363,7 @@ def extract_octree_cells_parent_cube(
         cell_to_elements_data=cell_to_elements_data,
         n_cells=n_cells,
         n_elements=n_registered,
-        cells_per_element_mean=1.0,
+        cells_per_element_mean=cells_per_elem_mean,
         elements_per_cell_mean=float(elements_per_cell.mean()),
         max_elements_per_cell=int(max_elems),
         n_non_kuhn=len(non_kuhn_ids),

@@ -378,6 +378,12 @@ def parse_args():
     parser.add_argument("--registration", type=str, default=None,
                         choices=["vertex_multi", "parent_cube"],
                         help="Override octree registration method")
+    parser.add_argument("--no-orphan-fallback", action="store_true", default=False,
+                        help="Disable the AABB fallback for non-Kuhn elements "
+                             "that have no Kuhn neighbour. By default such "
+                             "elements get a private cell derived from their "
+                             "own AABB; with this flag they are dropped from "
+                             "the octree (legacy behaviour).")
 
     # --- density-field online estimation (opt-in) ---
     # All --density-* args are inert unless --density-enable is passed. When
@@ -1097,6 +1103,7 @@ def main():
     if config.OCTREE_REGISTRATION_METHOD == "parent_cube":
         mesh_octree_cells = extract_octree_cells_parent_cube(
             node_positions, connectivity, tolerance=1e-6, verbose=True,
+            orphan_fallback=not args.no_orphan_fallback,
         )
         print(f"  Parent-cube octree: {mesh_octree_cells.n_cells:,} cells, "
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell "

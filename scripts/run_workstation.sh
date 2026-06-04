@@ -109,6 +109,14 @@ L0_SKIP_BAND=0.0
 ENHANCED_SEARCH_BAND=0.0
 REGISTRATION=""
 
+# ORPHAN_FALLBACK: how to handle non-Kuhn tetrahedra that have no
+# Kuhn face/node neighbour. By default (=1) they get a private octree
+# cell built from the global median Kuhn cell_size/level so the
+# spatial search can still find them. Set to 0 to drop them from the
+# octree (legacy behaviour) — particles landing inside these tets
+# will be reported as lost.
+ORPHAN_FALLBACK=1
+
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
 # BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
 # where wall is one of {x_min, x_max, y_min, y_max, z_min, z_max} and mode
@@ -495,6 +503,7 @@ if [ -n "${INLET_WALL:-}" ]; then
     ARGS+=( --inlet-wall "$INLET_WALL" --inlet-velocity "$INLET_VELOCITY" )
 fi
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
+[ "$ORPHAN_FALLBACK"    = "0" ] && ARGS+=( --no-orphan-fallback  )
 [ "$NO_EXPORT"          = "1" ] && ARGS+=( --no-export           )
 ARGS+=( --export-format "$EXPORT_FORMAT" )
 [ "$EXPORT_ELEMENT_IDS" = "1" ] && ARGS+=( --export-element-ids  )
