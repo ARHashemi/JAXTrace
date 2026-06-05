@@ -311,9 +311,18 @@ def main():
     print("Mesh coverage diagnostic")
     print("=" * 80)
 
-    print(f"\n[1/4] Loading mesh ({args.input})...")
+    # The loader composes `base_path / file_pattern.format(...)`, so
+    # base_path must be a Path. Accept --input either as the case dir
+    # ('<case>.gid') or as the post dir ('<case>.gid/post'); the latter
+    # is what run_tracking.py ultimately uses.
+    in_path = Path(args.input).resolve()
+    if (in_path / 'post').is_dir():
+        base_path = in_path / 'post'
+    else:
+        base_path = in_path
+    print(f"\n[1/4] Loading mesh ({base_path})...")
     node_positions, connectivity, _ = load_velocity_sequence_from_pvtu(
-        base_path=args.input,
+        base_path=base_path,
         file_pattern=args.mesh_pattern,
         timestep_range=(args.vel_start, args.vel_start),
         field_name=args.velocity_field,
