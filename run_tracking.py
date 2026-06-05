@@ -384,6 +384,14 @@ def parse_args():
                              "elements get a private cell derived from their "
                              "own AABB; with this flag they are dropped from "
                              "the octree (legacy behaviour).")
+    parser.add_argument("--no-hybrid-non-kuhn", action="store_true", default=False,
+                        help="Disable AABB-overlap registration for non-Kuhn "
+                             "elements (revert to centroid-only). Default is "
+                             "hybrid: Kuhn elements use cheap parent-cube "
+                             "registration, non-Kuhn elements use AABB-overlap "
+                             "so vertices fall within the search neighbourhood. "
+                             "Use this flag only to reproduce legacy behaviour "
+                             "or to benchmark the difference.")
 
     # --- density-field online estimation (opt-in) ---
     # All --density-* args are inert unless --density-enable is passed. When
@@ -1104,6 +1112,7 @@ def main():
         mesh_octree_cells = extract_octree_cells_parent_cube(
             node_positions, connectivity, tolerance=1e-6, verbose=True,
             orphan_fallback=not args.no_orphan_fallback,
+            hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
         )
         print(f"  Parent-cube octree: {mesh_octree_cells.n_cells:,} cells, "
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell "

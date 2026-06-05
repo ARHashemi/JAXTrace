@@ -98,14 +98,31 @@ def extract_octree_cells_parent_cube(
     tolerance: float = 1e-6,
     verbose: bool = True,
     orphan_fallback: bool = True,
+    hybrid_non_kuhn: bool = True,
 ) -> OctreeCellDataParentCube:
     """
-    Extract octree cells using SINGLE parent-cube registration.
+    Extract octree cells using SINGLE parent-cube registration for Kuhn
+    elements and (by default) AABB-overlap registration for non-Kuhn
+    elements.
 
     Each Kuhn element is registered in the ONE cell that contains its
     centroid (the parent cube from the Kuhn decomposition).  Non-Kuhn
-    elements borrow a Kuhn neighbour's grid and are registered via
-    centroid into that grid.
+    elements borrow a Kuhn neighbour's grid (face → node neighbour →
+    global median Kuhn fallback) and are registered either:
+      - in every cell their axis-aligned bounding box overlaps
+        (hybrid_non_kuhn=True, default), or
+      - in the single cell their centroid falls in
+        (hybrid_non_kuhn=False, legacy behaviour).
+
+    Background: on meshes with a high non-Kuhn fraction (>20 % of
+    elements), centroid-only registration creates coverage holes —
+    non-Kuhn tets whose vertices fall outside the 3x3x3 cell
+    neighbourhood around the centroid cell. A particle landing on such
+    a vertex is invisible to the kernel's L0/L1/L2 search and ends up
+    with element_id=-1 inside the geometric domain. AABB-overlap
+    registration on non-Kuhn elements closes those holes by listing
+    each non-Kuhn tet in every cell its AABB touches. Kuhn elements are
+    untouched — they keep the cheap single-cell registration.
 
     Args:
         node_positions: (n_nodes, 3) float64 — node coordinates
@@ -113,13 +130,16 @@ def extract_octree_cells_parent_cube(
         tolerance: geometric tolerance for axis-aligned edge detection
         verbose: print progress
         orphan_fallback: when True (default), non-Kuhn elements that
-            have no Kuhn face- or node-neighbour fall back to a cell
-            derived from the element's own AABB. When False, those
-            elements are dropped from the octree (legacy behaviour) —
-            spatial search will not find them.
+            have no Kuhn face- or node-neighbour fall back to the
+            global median Kuhn (cell_size, level). When False, those
+            elements are dropped from the octree.
+        hybrid_non_kuhn: when True (default), non-Kuhn elements use
+            AABB-overlap registration. When False, they use the
+            centroid-only registration (legacy behaviour).
 
     Returns:
-        OctreeCellDataParentCube with single-cube-per-element mapping
+        OctreeCellDataParentCube with single-cube-per-Kuhn-element and
+        (AABB-overlap | centroid)-per-non-Kuhn-element mapping.
     """
     n_elements = connectivity.shape[0]
 
@@ -188,6 +208,7 @@ def extract_octree_cells_parent_cube(
     n_non_kuhn_registered = 0
     n_non_kuhn_orphan_fallback = 0
     n_non_kuhn_dropped = 0
+    n_non_kuhn_cell_entries = 0
 
     # Precompute a global fallback (cell_size, level) from the median
     # Kuhn element. We DO NOT compute orphan levels from the orphan's
@@ -257,33 +278,66 @@ def extract_octree_cells_parent_cube(
                 nbr_level = median_level
                 n_non_kuhn_orphan_fallback += 1
 
-            # Centroid of the non-Kuhn element in the neighbour's grid
-            centroid = vertices.mean(axis=0)
-            i = int(np.floor(centroid[0] / nbr_size[0]))
-            j = int(np.floor(centroid[1] / nbr_size[1]))
-            k = int(np.floor(centroid[2] / nbr_size[2]))
-
             offset = (1 << 19)
             max_coord = (1 << 20)
-            i_m = int(np.clip(i + offset, 0, max_coord - 1))
-            j_m = int(np.clip(j + offset, 0, max_coord - 1))
-            k_m = int(np.clip(k + offset, 0, max_coord - 1))
 
-            morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
-            cell_key = (morton, nbr_level)
-
-            cell_to_elements_dict[cell_key].append(elem_id)
-
-            if cell_key not in cell_metadata:
-                cell_metadata[cell_key] = (nbr_size.copy(), (i, j, k))
+            if hybrid_non_kuhn:
+                # AABB-overlap registration: every cell the tet's AABB
+                # touches at the chosen (cell_size, level). Covers the
+                # vertices that centroid-only registration would miss.
+                lo = vertices.min(axis=0)
+                hi = vertices.max(axis=0)
+                i_lo = int(np.floor(lo[0] / nbr_size[0]))
+                j_lo = int(np.floor(lo[1] / nbr_size[1]))
+                k_lo = int(np.floor(lo[2] / nbr_size[2]))
+                i_hi = int(np.floor(hi[0] / nbr_size[0]))
+                j_hi = int(np.floor(hi[1] / nbr_size[1]))
+                k_hi = int(np.floor(hi[2] / nbr_size[2]))
+                for i in range(i_lo, i_hi + 1):
+                    for j in range(j_lo, j_hi + 1):
+                        for k in range(k_lo, k_hi + 1):
+                            i_m = int(np.clip(i + offset, 0, max_coord - 1))
+                            j_m = int(np.clip(j + offset, 0, max_coord - 1))
+                            k_m = int(np.clip(k + offset, 0, max_coord - 1))
+                            morton = encode_morton_3d_single(
+                                i_m, j_m, k_m, max_depth=21,
+                            )
+                            cell_key = (morton, nbr_level)
+                            cell_to_elements_dict[cell_key].append(elem_id)
+                            if cell_key not in cell_metadata:
+                                cell_metadata[cell_key] = (
+                                    nbr_size.copy(), (i, j, k),
+                                )
+                            n_non_kuhn_cell_entries += 1
+            else:
+                # Centroid-only registration (legacy).
+                centroid = vertices.mean(axis=0)
+                i = int(np.floor(centroid[0] / nbr_size[0]))
+                j = int(np.floor(centroid[1] / nbr_size[1]))
+                k = int(np.floor(centroid[2] / nbr_size[2]))
+                i_m = int(np.clip(i + offset, 0, max_coord - 1))
+                j_m = int(np.clip(j + offset, 0, max_coord - 1))
+                k_m = int(np.clip(k + offset, 0, max_coord - 1))
+                morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
+                cell_key = (morton, nbr_level)
+                cell_to_elements_dict[cell_key].append(elem_id)
+                if cell_key not in cell_metadata:
+                    cell_metadata[cell_key] = (nbr_size.copy(), (i, j, k))
+                n_non_kuhn_cell_entries += 1
 
             n_non_kuhn_registered += 1
 
         if verbose:
             print(f"  Non-Kuhn registered: {n_non_kuhn_registered:,} / "
                   f"{len(non_kuhn_ids):,}")
+            if hybrid_non_kuhn and n_non_kuhn_registered > 0:
+                avg = n_non_kuhn_cell_entries / n_non_kuhn_registered
+                print(f"  Non-Kuhn registration mode: AABB-overlap "
+                      f"({avg:.2f} cells/element on average)")
+            elif n_non_kuhn_registered > 0:
+                print(f"  Non-Kuhn registration mode: centroid (legacy)")
             if n_non_kuhn_orphan_fallback:
-                print(f"  Non-Kuhn AABB-fallback cells: "
+                print(f"  Non-Kuhn AABB-fallback (orphan): "
                       f"{n_non_kuhn_orphan_fallback:,}")
             if n_non_kuhn_dropped:
                 print(f"  Non-Kuhn dropped (no fallback): "

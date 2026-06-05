@@ -299,6 +299,11 @@ def main():
     ap.add_argument('--velocity-field', type=str, default='Displacement')
     ap.add_argument('--registration', choices=['parent_cube', 'vertex_multi'],
                     default='parent_cube')
+    ap.add_argument('--no-hybrid-non-kuhn', action='store_true', default=False,
+                    help='parent_cube only: revert non-Kuhn elements to '
+                         'centroid-only registration (legacy). Use this to '
+                         'reproduce the coverage-hole symptom; omit (default) '
+                         'to verify that hybrid registration closes the holes.')
     ap.add_argument('--max-elements', type=int, default=0,
                     help='Coverage check: limit to first N elements (0=all)')
     ap.add_argument('--half-window', type=int, default=1,
@@ -356,6 +361,7 @@ def main():
         octree = extract_octree_cells_parent_cube(
             node_positions, connectivity, tolerance=1e-6, verbose=True,
             orphan_fallback=True,
+            hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
         )
     else:
         octree = extract_octree_cells_vertex_multi(

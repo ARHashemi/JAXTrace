@@ -117,6 +117,19 @@ REGISTRATION=""
 # will be reported as lost.
 ORPHAN_FALLBACK=1
 
+# HYBRID_NON_KUHN: registration strategy for non-Kuhn elements.
+# 1 (default) — non-Kuhn tets are registered in every cell their AABB
+#               overlaps (typically 1-4 cells). This closes coverage
+#               holes on meshes with a high non-Kuhn fraction (the
+#               classic symptom: particles geometrically inside the
+#               domain flagged as Escaped at element faces).
+# 0           — non-Kuhn tets registered by centroid only (1 cell;
+#               legacy behaviour). Use for benchmarking or when the
+#               mesh is mostly Kuhn anyway. Kuhn elements are
+#               unaffected by this flag — they always use the cheap
+#               single-cell parent-cube registration.
+HYBRID_NON_KUHN=1
+
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
 # BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
 # where wall is one of {x_min, x_max, y_min, y_max, z_min, z_max} and mode
@@ -509,6 +522,7 @@ if [ -n "${INLET_WALL:-}" ]; then
 fi
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
 [ "$ORPHAN_FALLBACK"    = "0" ] && ARGS+=( --no-orphan-fallback  )
+[ "$HYBRID_NON_KUHN"    = "0" ] && ARGS+=( --no-hybrid-non-kuhn  )
 [ "$LEVELSET_ENABLE"    = "0" ] && ARGS+=( --no-levelset         )
 [ "$NO_EXPORT"          = "1" ] && ARGS+=( --no-export           )
 ARGS+=( --export-format "$EXPORT_FORMAT" )
