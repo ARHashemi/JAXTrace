@@ -146,7 +146,12 @@ POINT_IN_TET_TOL=1e-6      # numerical tolerance for point-in-tet test
 # Set INLET_WALL="" to disable (no inlet, no cropping warnings).
 INLET_WALL=""              # "" | x_min | x_max | y_min | y_max | z_min | z_max
 INLET_VELOCITY=0.0         # signed scalar [m/s]; positive = into the mesh
-LEVELSET_MODE=zero_vel     # how to handle a particle inside the tool region:
+LEVELSET_ENABLE=1          # 1 = read LEVEL field, mask velocity inside tool;
+                           # 0 = ignore the LEVEL field entirely, use raw mesh
+                           # velocities everywhere (no tool masking, no
+                           # boundary-element L0 skip).
+LEVELSET_MODE=zero_vel     # how to handle a particle inside the tool region
+                           # when LEVELSET_ENABLE=1:
                            #   zero_vel  -- velocity at that step is set to 0
                            #   skip_step -- the RK4 step is skipped entirely
 FAILED_SUBSTAGE=zero_vel   # policy when an RK4 substage falls outside the mesh:
@@ -504,6 +509,7 @@ if [ -n "${INLET_WALL:-}" ]; then
 fi
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
 [ "$ORPHAN_FALLBACK"    = "0" ] && ARGS+=( --no-orphan-fallback  )
+[ "$LEVELSET_ENABLE"    = "0" ] && ARGS+=( --no-levelset         )
 [ "$NO_EXPORT"          = "1" ] && ARGS+=( --no-export           )
 ARGS+=( --export-format "$EXPORT_FORMAT" )
 [ "$EXPORT_ELEMENT_IDS" = "1" ] && ARGS+=( --export-element-ids  )
