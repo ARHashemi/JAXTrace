@@ -4,7 +4,16 @@
 #
 # For every cylindrical_NNN.gid folder in the current directory, drop in a
 # per-case run_jaxtrace.sh patched with:
-#   - INPUT:          the case folder's absolute path
+#   - INPUT:          set to "$COHORT_PREFIX/<case_name>". The cohort
+#                     prefix comes from --cohort-prefix=<path> if given,
+#                     otherwise from $PWD (the directory you ran the
+#                     generator from, as you typed it — no symlink
+#                     resolution). On a machine where the cohort folder
+#                     is mounted under a different prefix than the host
+#                     that will run the simulation, pass
+#                     --cohort-prefix=<runtime-native-path> so the
+#                     stamped INPUT matches what the runtime host
+#                     expects to see.
 #   - INLET_VELOCITY: 3rd column of the first line after
 #                     '$ Faces constraints => 1=111' in
 #                     <case>/data/<stem>.som.fix
@@ -40,6 +49,8 @@
 #   ./generate_jaxtrace_scripts.sh --force                      # overwrite everything
 #   ./generate_jaxtrace_scripts.sh --skip=004,005,006           # don't touch these
 #   ./generate_jaxtrace_scripts.sh --jaxtrace-repo=/path        # explicit JAXTrace dir
+#   ./generate_jaxtrace_scripts.sh \
+#       --cohort-prefix=/scratch/shared/ROM/FOM                 # runtime-native cohort path
 #   ./generate_jaxtrace_scripts.sh --csv                        # write case_parameters.csv
 #   ./generate_jaxtrace_scripts.sh --csv=summary.csv            # write to a specific file
 #   ./generate_jaxtrace_scripts.sh --csv --csv-numbers-only     # number-only CSV
@@ -65,6 +76,17 @@ CASE_GLOB="cylindrical_*.gid"
 # When --csv (no value) is passed, the path defaults to ./case_parameters.csv.
 CSV_OUTPUT=""
 CSV_NAMES_ONLY=0      # 1 = number column only; 0 (default) = case name + number
+# Parent directory under which the generated INPUT paths are written:
+#   INPUT="$COHORT_PREFIX/<case_name>"
+# Empty (the default) means "use $PWD as the user typed it" — useful when
+# you run the generator from the cohort folder via its runtime-native
+# path. Override with --cohort-prefix=<path> when the host running the
+# generator sees the cohort folder under a different mount than the host
+# that will run the generated scripts (e.g. the local machine sees
+# /home/<user>/fsw-gpu/scratch/... while the workstation runtime expects
+# /scratch/...). We deliberately do NOT call `readlink -f`, because that
+# would resolve symlinks and substitute the local mount prefix.
+COHORT_PREFIX=""
 
 # Reference template for workstation: must exist as a hand-tuned baseline.
 WORKSTATION_TEMPLATE="cylindrical_001.gid/run_jaxtrace.sh"
@@ -80,11 +102,12 @@ for arg in "$@"; do
         --skip)              ;;  # eaten by next iteration; see --skip=X below
         --skip=*)            SKIP_LIST="${arg#*=}" ;;
         --jaxtrace-repo=*)   JAXTRACE_REPO="${arg#*=}" ;;
+        --cohort-prefix=*)   COHORT_PREFIX="${arg#*=}" ;;
         --csv)               CSV_OUTPUT="case_parameters.csv" ;;
         --csv=*)             CSV_OUTPUT="${arg#*=}" ;;
         --csv-numbers-only)  CSV_NAMES_ONLY=1 ;;
         --help|-h)
-            sed -n '2,53p' "$0"
+            sed -n '2,64p' "$0"
             exit 0
             ;;
         *)
@@ -116,8 +139,18 @@ else
         exit 1
     fi
 fi
+# ── Resolve cohort prefix ──────────────────────────────────────────────────
+# Order: explicit --cohort-prefix wins; otherwise use $PWD as-is (no
+# readlink, no realpath — we trust the user's typed path).
+if [ -z "$COHORT_PREFIX" ]; then
+    COHORT_PREFIX="$PWD"
+fi
+# Trim any trailing slash for tidy joins below.
+COHORT_PREFIX="${COHORT_PREFIX%/}"
+
 echo "Template: $TEMPLATE_PATH"
 echo "Platform: $PLATFORM"
+echo "Cohort:   $COHORT_PREFIX"
 echo "Force:    $FORCE"
 echo "Skip:     ${SKIP_LIST:-<none>}"
 echo
@@ -157,9 +190,17 @@ extract_pin_rpm() {
     ' "$som_dat"
 }
 
-# Patch INPUT, INLET_VELOCITY, PIN_RPM in a template string. We use a temp
-# file rather than sed -i so the template is not modified and any failure
-# leaves the output as it was.
+# Patch INPUT, INLET_VELOCITY, PIN_RPM, AUTO_DETECT_CASE in the template.
+#
+# INPUT is set to "$COHORT_PREFIX/<case_name>", giving each generated
+# script an explicit, host-native input path. We also force
+# AUTO_DETECT_CASE=0 so the runner uses that stamped INPUT verbatim
+# instead of re-deriving the case dir from `pwd -P` at run time —
+# this makes the launch behaviour deterministic regardless of CWD or
+# symlinks.
+#
+# We use a temp file rather than sed -i so the template is not modified
+# and any failure leaves the output as it was.
 patch_template() {
     local template="$1"
     local output="$2"
@@ -167,11 +208,12 @@ patch_template() {
     local inlet_v="$4"
     local pin_rpm="$5"
 
-    # We patch the FIRST line that defines each variable at column 0. Using
-    # sed with a strict anchor avoids touching comments / occurrences inside
-    # echo statements further down the script.
+    # First line at column 0 for each variable. The leading-anchor
+    # 0,/^VAR=/ form restricts the substitution to the first match so
+    # comments or echoes later in the script are not affected.
     sed \
         -e "0,/^INPUT=/{s|^INPUT=.*|INPUT=\"$input_path\"|}" \
+        -e "0,/^AUTO_DETECT_CASE=/{s|^AUTO_DETECT_CASE=.*|AUTO_DETECT_CASE=0|}" \
         -e "0,/^INLET_VELOCITY=/{s|^INLET_VELOCITY=.*|INLET_VELOCITY=$inlet_v|}" \
         -e "0,/^PIN_RPM=/{s|^PIN_RPM=.*|PIN_RPM=$pin_rpm|}" \
         "$template" > "$output.tmp"
@@ -179,6 +221,7 @@ patch_template() {
     mv "$output.tmp" "$output"
     chmod +x "$output"
 }
+
 
 # ── Build skip set ─────────────────────────────────────────────────────────
 declare -A SKIP_SET
@@ -281,14 +324,18 @@ for case_dir in $CASE_GLOB; do
         continue
     fi
 
-    # Absolute INPUT path (resolve symlinks too so the script works no
-    # matter where it's launched from).
-    abs_input=$(readlink -f "$case_dir")
+    # Compose INPUT from the user-supplied cohort prefix (or $PWD) and
+    # the case directory name. The prefix is taken verbatim, so the
+    # caller is responsible for ensuring it matches the path the
+    # runtime host expects to see (e.g. /scratch/shared/ROM/FOM on the
+    # workstation, not /home/<user>/fsw-gpu/scratch/... on the local
+    # box).
+    input_path="$COHORT_PREFIX/$name"
 
-    patch_template "$TEMPLATE_PATH" "$out_path" "$abs_input" "$inlet_v" "$pin_rpm"
+    patch_template "$TEMPLATE_PATH" "$out_path" "$input_path" "$inlet_v" "$pin_rpm"
 
     printf "  %s: written  (INPUT=%s, INLET_VELOCITY=%s, PIN_RPM=%s)\n" \
-        "$name" "$abs_input" "$inlet_v" "$pin_rpm"
+        "$name" "$input_path" "$inlet_v" "$pin_rpm"
     n_done=$((n_done + 1))
 done
 
