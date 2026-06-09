@@ -338,11 +338,16 @@ if [ "$(basename "$_CASE_DIR")" = "post" ]; then
 fi
 
 # ── Output paths ──────────────────────────────────────────────────────────────
-# Two layouts:
-#   OUTPUT_TARGET=scratch  (default): use /flash for active IO then move to
-#                                     /scratch/users/$USER/outputs/<folder>.
-#   OUTPUT_TARGET=case:               write straight into the case folder so
-#                                     mesh and JAXTrace outputs sit together.
+# /flash is local NVMe; /scratch and shared case folders sit on slow HDD.
+# Hot-path JAXTrace IO (particle export, monitor log, run log) ALWAYS
+# stages on /flash; we only differ in where results land at the end:
+#   OUTPUT_TARGET=scratch  (default): move to /scratch/users/$USER/outputs/<folder>.
+#   OUTPUT_TARGET=case:               move to <case>.gid/<OUTPUT_CASE_SUBFOLDER>
+#                                     so mesh + results sit together.
+# Earlier versions of this script collapsed FLASH_OUT onto SCRATCH_OUT
+# in case-mode, which sent every per-step VTKHDF write straight to the
+# shared HDD and tanked throughput. We never want that — the flash→
+# target move at the end is cheap (one big sequential copy).
 FLASH_OUT=/flash/users/${USER}/run_${RUN_ID}
 LOG_DIR=""
 case "${OUTPUT_TARGET:-scratch}" in
@@ -351,9 +356,7 @@ case "${OUTPUT_TARGET:-scratch}" in
         SCRATCH_OUT="${_CASE_DIR}/${SUB}"
         SCRATCH_BASE="$(dirname "$SCRATCH_OUT")"
         LOG_DIR="${SCRATCH_OUT}/logs"
-        # Run python directly into the case folder (no flash→case copy).
-        FLASH_OUT="$SCRATCH_OUT"
-        echo "[output] OUTPUT_TARGET=case: writing results to '$SCRATCH_OUT'"
+        echo "[output] OUTPUT_TARGET=case: staging on '$FLASH_OUT', final '$SCRATCH_OUT'"
         ;;
     scratch)
         SCRATCH_BASE=/scratch/users/${USER}/outputs
@@ -698,14 +701,47 @@ _cleanup_monitor
 echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
 
-# ── Move results from flash → scratch ─────────────────────────────────────────
-# With OUTPUT_TARGET=case, FLASH_OUT == SCRATCH_OUT, so the move is a no-op.
+# ── Move results from flash → final destination ──────────────────────────────
+# FLASH_OUT is always on /flash (NVMe staging); SCRATCH_OUT is the final
+# destination (/scratch by default, or inside the case folder when
+# OUTPUT_TARGET=case). We need a TRUE merge here — earlier runs may have
+# left an empty (or stale) subdir at SCRATCH_OUT/run_<...>/, and plain
+# `mv FLASH/*` refuses to merge directories. Use rsync when available
+# (atomic, handles partial trees), fall back to `cp -a` + `rm`.
+#
+# We also DO NOT silence stderr any more: the previous version did
+# `mv ... 2>/dev/null` and a refused merge was reported as success.
+# Real outputs ended up stranded on /flash while empty placeholder
+# directories sat in the case folder. Loud failures are better.
 if [ "$FLASH_OUT" != "$SCRATCH_OUT" ]; then
-    echo "Moving results from /flash to /scratch..."
-    mv "$FLASH_OUT"/* "$SCRATCH_OUT"/ 2>/dev/null
-    rmdir "$FLASH_OUT" 2>/dev/null
+    echo "Moving results from $FLASH_OUT to $SCRATCH_OUT..."
+    _XFER_RC=0
+    if command -v rsync >/dev/null 2>&1; then
+        # -a: preserve timestamps/perms; --remove-source-files clears
+        # /flash incrementally so a partial xfer is still useful.
+        rsync -a --remove-source-files "$FLASH_OUT"/ "$SCRATCH_OUT"/
+        _XFER_RC=$?
+    else
+        # Portable fallback: copy-then-delete. cp -a preserves
+        # timestamps/perms; the trailing /. merges the contents.
+        cp -a "$FLASH_OUT"/. "$SCRATCH_OUT"/
+        _XFER_RC=$?
+        [ "$_XFER_RC" = 0 ] && rm -rf "$FLASH_OUT"/*
+    fi
+    if [ "$_XFER_RC" != "0" ]; then
+        echo "WARNING: transfer from $FLASH_OUT to $SCRATCH_OUT" \
+             "failed with rc=$_XFER_RC. Results remain on /flash;" \
+             "you can manually rsync them to the destination." >&2
+    else
+        # Prune any now-empty directories left behind on /flash.
+        find "$FLASH_OUT" -depth -type d -empty -delete 2>/dev/null
+    fi
 fi
-[ -f "$MONITOR_LOG" ] && mv "$MONITOR_LOG" "$SCRATCH_OUT/logs/" 2>/dev/null
+if [ -f "$MONITOR_LOG" ]; then
+    mkdir -p "$SCRATCH_OUT/logs"
+    mv -f "$MONITOR_LOG" "$SCRATCH_OUT/logs/" || \
+        echo "WARNING: failed to move $MONITOR_LOG to $SCRATCH_OUT/logs/" >&2
+fi
 
 # Cleanup CUDA cache
 rm -rf "$CUDA_CACHE_DIR"
