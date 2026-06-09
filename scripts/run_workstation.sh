@@ -372,7 +372,74 @@ case "${OUTPUT_TARGET:-scratch}" in
 esac
 MONITOR_LOG="${LOG_DIR}/$(basename "$SCRATCH_OUT")_monitor.log"
 
-mkdir -p "$FLASH_OUT" "$SCRATCH_OUT" "$LOG_DIR"
+# Create the output directories early. We capture stdout+stderr so the
+# dry-run probe below (and the user later) can see whether anything
+# failed silently — e.g. permission denied on a shared mount, which is
+# the most common cause of OUTPUT_TARGET=case crashing later in the
+# pipeline.
+_MKDIR_OUT="$(mkdir -p "$FLASH_OUT" "$SCRATCH_OUT" "$LOG_DIR" 2>&1)"
+_MKDIR_RC=$?
+
+# ── Dry-run probe (no Python, no GPU; just verify the path plumbing) ─────────
+# Enable with: JAXTRACE_DRY_RUN=1 bash run_jaxtrace.sh
+# Prints every derived path and tests writability on FLASH_OUT,
+# SCRATCH_OUT, and LOG_DIR. Exits with code 0 if all writes succeed,
+# code 3 otherwise. Use this before submitting a long run to confirm
+# OUTPUT_TARGET=case / OUTPUT_TARGET=scratch are wired correctly on
+# this host.
+if [ "${JAXTRACE_DRY_RUN:-0}" = "1" ]; then
+    echo
+    echo "================ DRY RUN ================"
+    echo " Case stem:        $_CASE"
+    echo " Case dir:         $_CASE_DIR"
+    echo " INPUT:            $INPUT"
+    echo " OUTPUT_TARGET:    ${OUTPUT_TARGET:-scratch}"
+    echo " OUTPUT subfolder: ${OUTPUT_CASE_SUBFOLDER:-post_pt}"
+    echo " FLASH_OUT:        $FLASH_OUT"
+    echo " SCRATCH_BASE:     $SCRATCH_BASE"
+    echo " SCRATCH_OUT:      $SCRATCH_OUT"
+    echo " LOG_DIR:          $LOG_DIR"
+    echo " MONITOR_LOG:      $MONITOR_LOG"
+    echo " RUN_LOG:          $RUN_LOG"
+    echo
+    echo " mkdir -p rc:      $_MKDIR_RC"
+    [ -n "$_MKDIR_OUT" ] && echo " mkdir -p stderr:  $_MKDIR_OUT"
+    echo
+    # Quick writability check on each directory. Anything we cannot
+    # touch here will fail the real run too — usually because the case
+    # folder lives on a read-only share or the user lacks group write.
+    _probe_writable() {
+        local d="$1"
+        local label="$2"
+        if [ ! -d "$d" ]; then
+            echo " [FAIL] $label does not exist: $d"
+            return 1
+        fi
+        local probe="$d/.jaxtrace_dryrun_probe_$$"
+        if : > "$probe" 2>/dev/null; then
+            rm -f "$probe"
+            echo " [ OK ] $label is writable: $d"
+            return 0
+        else
+            echo " [FAIL] $label is NOT writable: $d"
+            return 1
+        fi
+    }
+    _probe_writable "$FLASH_OUT"   "FLASH_OUT"
+    _rc_a=$?
+    _probe_writable "$SCRATCH_OUT" "SCRATCH_OUT"
+    _rc_b=$?
+    _probe_writable "$LOG_DIR"     "LOG_DIR"
+    _rc_c=$?
+    echo "=========================================="
+    [ $((_rc_a + _rc_b + _rc_c)) = 0 ] && exit 0 || exit 3
+fi
+# Non-dry-run path: if mkdir actually failed, fail loudly now instead
+# of letting Python crash with an opaque file-not-found error later.
+if [ "$_MKDIR_RC" != "0" ]; then
+    echo "ERROR: mkdir -p failed (rc=$_MKDIR_RC): $_MKDIR_OUT" >&2
+    exit 4
+fi
 
 # ── Mirror this script's output to a log file next to the results ────────────
 # The terminal still sees everything; tee duplicates each line to log.txt
