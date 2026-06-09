@@ -331,18 +331,23 @@ if [ "$(basename "$_CASE_DIR")" = "post" ]; then
 fi
 
 # ── Output paths ────────────────────────────────────────────────────────────
-# Two layouts:
-#   OUTPUT_TARGET=scratch (default): /flash for active IO, then move to
-#                                    /scratch/${PROJECT}/${USER}/outputs/.
-#   OUTPUT_TARGET=case             : write straight into the case folder.
+# /flash on LUMI is local NVMe; /scratch (and case folders living on
+# Lustre) is much slower for per-step writes. Hot-path JAXTrace IO
+# (particle export, monitor log) ALWAYS stages on /flash; we only
+# differ in where results land at the end:
+#   OUTPUT_TARGET=scratch (default): move to /scratch/${PROJECT}/${USER}/outputs/.
+#   OUTPUT_TARGET=case             : move to <case>.gid/<OUTPUT_CASE_SUBFOLDER>.
+# Earlier versions of this script collapsed FLASH_OUT onto SCRATCH_OUT
+# in case-mode, which sent every per-step VTKHDF write straight to
+# Lustre and tanked throughput. We never want that — the flash→target
+# move at the end is one big sequential copy.
 FLASH_OUT="/flash/${PROJECT}/${USER}/run_${SLURM_JOB_ID}"
 case "${OUTPUT_TARGET:-scratch}" in
   case)
     SUB="${OUTPUT_CASE_SUBFOLDER:-post_pt}"
     SCRATCH_OUT="${_CASE_DIR}/${SUB}"
     SCRATCH_BASE="$(dirname "$SCRATCH_OUT")"
-    FLASH_OUT="$SCRATCH_OUT"   # python writes directly, no flash hop
-    echo "[output] OUTPUT_TARGET=case: writing to '$SCRATCH_OUT'"
+    echo "[output] OUTPUT_TARGET=case: staging on '$FLASH_OUT', final '$SCRATCH_OUT'"
     ;;
   scratch)
     SCRATCH_BASE="/scratch/${PROJECT}/${USER}/outputs"
@@ -359,7 +364,7 @@ case "${OUTPUT_TARGET:-scratch}" in
 esac
 MONITOR_LOG="${SCRATCH_BASE}/$(basename "$SCRATCH_OUT")_monitor.log"
 
-mkdir -p $FLASH_OUT $SCRATCH_OUT
+mkdir -p "$FLASH_OUT" "$SCRATCH_OUT"
 
 # ── MIOpen cache to RAM ──────────────────────────────────────────────────────
 export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-${SLURM_JOB_ID}"
@@ -606,13 +611,41 @@ _cleanup_monitor
 echo ""
 echo "Simulation exited with code $SIM_EXIT at $(date)"
 
-# ── Move results to Scratch after job ───────────────────────────────────────
-# When OUTPUT_TARGET=case, FLASH_OUT == SCRATCH_OUT and there's nothing to
-# move; python wrote directly into the case folder.
+# ── Move results from flash → final destination ─────────────────────────────
+# FLASH_OUT is always on /flash (NVMe staging); SCRATCH_OUT is the final
+# destination (/scratch by default, or inside the case folder when
+# OUTPUT_TARGET=case). We need a TRUE merge here — earlier runs may have
+# left an empty (or stale) subdir at SCRATCH_OUT/run_<...>/, and plain
+# `mv FLASH/*` refuses to merge directories. Use rsync when available
+# (atomic, handles partial trees), fall back to `cp -a` + `rm`.
+#
+# We also DO NOT silence stderr any more: the previous version did
+# `mv ... 2>/dev/null` and a refused merge was reported as success.
+# Real outputs ended up stranded on /flash while empty placeholder
+# directories sat in the case folder. Loud failures are better.
 if [ "$FLASH_OUT" != "$SCRATCH_OUT" ]; then
-  echo "Moving results from flash to scratch..."
-  mv $FLASH_OUT/* $SCRATCH_OUT/ 2>/dev/null
-  rmdir $FLASH_OUT 2>/dev/null
+  echo "Moving results from $FLASH_OUT to $SCRATCH_OUT..."
+  _XFER_RC=0
+  if command -v rsync >/dev/null 2>&1; then
+    # -a: preserve timestamps/perms; --remove-source-files clears
+    # /flash incrementally so a partial xfer is still useful.
+    rsync -a --remove-source-files "$FLASH_OUT"/ "$SCRATCH_OUT"/
+    _XFER_RC=$?
+  else
+    # Portable fallback: copy-then-delete. cp -a preserves
+    # timestamps/perms; the trailing /. merges the contents.
+    cp -a "$FLASH_OUT"/. "$SCRATCH_OUT"/
+    _XFER_RC=$?
+    [ "$_XFER_RC" = 0 ] && rm -rf "$FLASH_OUT"/*
+  fi
+  if [ "$_XFER_RC" != "0" ]; then
+    echo "WARNING: transfer from $FLASH_OUT to $SCRATCH_OUT" \
+         "failed with rc=$_XFER_RC. Results remain on /flash;" \
+         "you can manually rsync them to the destination." >&2
+  else
+    # Prune any now-empty directories left behind on /flash.
+    find "$FLASH_OUT" -depth -type d -empty -delete 2>/dev/null
+  fi
 fi
 
 # Copy SLURM stdout/stderr and monitor log into the results folder. The
@@ -623,7 +656,10 @@ SLURM_ERR="${SLURM_SUBMIT_DIR:-.}/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err"
 mkdir -p "$SCRATCH_OUT/logs"
 [ -f "$SLURM_OUT" ]   && cp "$SLURM_OUT" "$SCRATCH_OUT/logs/"
 [ -f "$SLURM_ERR" ]   && cp "$SLURM_ERR" "$SCRATCH_OUT/logs/"
-[ -f "$MONITOR_LOG" ] && mv "$MONITOR_LOG" "$SCRATCH_OUT/logs/"
+if [ -f "$MONITOR_LOG" ]; then
+  mv -f "$MONITOR_LOG" "$SCRATCH_OUT/logs/" || \
+    echo "WARNING: failed to move $MONITOR_LOG to $SCRATCH_OUT/logs/" >&2
+fi
 
 echo "Done. All results, logs and monitoring in:"
 echo "  $SCRATCH_OUT"
