@@ -302,12 +302,29 @@ _cleanup_monitor
 echo ""
 echo "Density post-processing exited with code $PP_EXIT at $(date)"
 
-# Move from flash to final OUTPUT_DIR (no-op if no staging was used).
+# Merge flash → final OUTPUT_DIR (no-op if no staging was used). `mv FLASH/*`
+# refuses to merge into an existing same-name subdir (e.g. OUTPUT_DIR/logs/),
+# silently stranding files on /flash. Use rsync (or cp -a fallback) for a
+# true merge, mirroring run_lumi.sh.
 if [ "$EFFECTIVE_OUTPUT_DIR" != "$OUTPUT_DIR" ]; then
     echo "[stage] moving outputs $EFFECTIVE_OUTPUT_DIR -> $OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
-    mv -f "$EFFECTIVE_OUTPUT_DIR"/* "$OUTPUT_DIR"/ 2>/dev/null
-    rmdir "$EFFECTIVE_OUTPUT_DIR" 2>/dev/null || true
+    _XFER_RC=0
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --remove-source-files "$EFFECTIVE_OUTPUT_DIR"/ "$OUTPUT_DIR"/
+        _XFER_RC=$?
+    else
+        cp -a "$EFFECTIVE_OUTPUT_DIR"/. "$OUTPUT_DIR"/
+        _XFER_RC=$?
+        [ "$_XFER_RC" = 0 ] && rm -rf "$EFFECTIVE_OUTPUT_DIR"/*
+    fi
+    if [ "$_XFER_RC" != "0" ]; then
+        echo "WARNING: transfer from $EFFECTIVE_OUTPUT_DIR to $OUTPUT_DIR" \
+             "failed with rc=$_XFER_RC. Results remain on /flash;" \
+             "you can manually rsync them to the destination." >&2
+    else
+        find "$EFFECTIVE_OUTPUT_DIR" -depth -type d -empty -delete 2>/dev/null
+    fi
 fi
 
 # Stash the monitor log next to the outputs for traceability.

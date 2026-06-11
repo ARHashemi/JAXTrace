@@ -312,16 +312,30 @@ _cleanup_monitor
 echo ""
 echo "Density post-processing exited with code $PP_EXIT at $(date)"
 
-# Move from flash to final OUTPUT_DIR. Done regardless of exit code so a
+# Merge flash → final OUTPUT_DIR. Done regardless of exit code so a
 # partially-completed run still leaves recoverable output in scratch.
+# `mv FLASH/*` refuses to merge into an existing same-name subdir (e.g.
+# OUTPUT_DIR/logs/), silently stranding files on /flash. Use rsync (or
+# `cp -a` fallback) to do a true merge, mirroring run_jaxtrace.sh.
 if [ "$EFFECTIVE_OUTPUT_DIR" != "$OUTPUT_DIR" ]; then
     echo "[stage] moving outputs $EFFECTIVE_OUTPUT_DIR -> $OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
-    # Use mv -f so existing same-name files in OUTPUT_DIR get overwritten
-    # cleanly. Handles the case where a previous run wrote intermediate
-    # artefacts (e.g. a partial density.vtkhdf) that this run is replacing.
-    mv -f "$EFFECTIVE_OUTPUT_DIR"/* "$OUTPUT_DIR"/ 2>/dev/null
-    rmdir "$EFFECTIVE_OUTPUT_DIR" 2>/dev/null || true
+    _XFER_RC=0
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --remove-source-files "$EFFECTIVE_OUTPUT_DIR"/ "$OUTPUT_DIR"/
+        _XFER_RC=$?
+    else
+        cp -a "$EFFECTIVE_OUTPUT_DIR"/. "$OUTPUT_DIR"/
+        _XFER_RC=$?
+        [ "$_XFER_RC" = 0 ] && rm -rf "$EFFECTIVE_OUTPUT_DIR"/*
+    fi
+    if [ "$_XFER_RC" != "0" ]; then
+        echo "WARNING: transfer from $EFFECTIVE_OUTPUT_DIR to $OUTPUT_DIR" \
+             "failed with rc=$_XFER_RC. Results remain on /flash;" \
+             "you can manually rsync them to the destination." >&2
+    else
+        find "$EFFECTIVE_OUTPUT_DIR" -depth -type d -empty -delete 2>/dev/null
+    fi
 fi
 
 rm -rf "$CUDA_CACHE_DIR"

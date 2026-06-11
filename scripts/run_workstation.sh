@@ -59,6 +59,15 @@ RUN_TAG=""
 OUTPUT_TARGET=scratch
 OUTPUT_CASE_SUBFOLDER=post_pt    # used when OUTPUT_TARGET=case
 
+# ENABLE_UNION: when 1, run `bash run_union.sh` (sitting next to this
+# script) after the tracking python finishes and outputs have been
+# rsync'd to SCRATCH_OUT. run_union.sh is expected to read its input
+# from SCRATCH_OUT (typically <case>.gid/post_pt/run_*/particles.vtkhdf)
+# and write its outputs to <particles_dir>/union/. The hook is a single
+# inline bash invocation — no separate process, no SLURM dependency.
+# Auto-stamped by generate_jaxtrace_scripts.sh --enable-union.
+ENABLE_UNION=0
+
 # ── [2] Precision & velocity field ───────────────────────────────────────────
 PRECISION=float32          # float32 | float64
 VEL_START=159
@@ -741,6 +750,26 @@ if [ -f "$MONITOR_LOG" ]; then
     mkdir -p "$SCRATCH_OUT/logs"
     mv -f "$MONITOR_LOG" "$SCRATCH_OUT/logs/" || \
         echo "WARNING: failed to move $MONITOR_LOG to $SCRATCH_OUT/logs/" >&2
+fi
+
+# ── Optional union postprocess ───────────────────────────────────────────────
+# When ENABLE_UNION=1 and run_union.sh exists next to this script, run
+# it after the tracking results have landed in SCRATCH_OUT. We only fire
+# the hook if the tracking python itself exited cleanly — there's no
+# point unioning a half-written trajectory.
+if [ "${ENABLE_UNION:-0}" = "1" ] && [ "$SIM_EXIT" = "0" ]; then
+    _UNION_SH="$(dirname "$0")/run_union.sh"
+    if [ -x "$_UNION_SH" ] || [ -f "$_UNION_SH" ]; then
+        echo ""
+        echo "================ UNION POSTPROCESS ================"
+        echo " Running $_UNION_SH"
+        echo "==================================================="
+        bash "$_UNION_SH"
+        _UNION_RC=$?
+        echo "Union postprocess exited with code $_UNION_RC"
+    else
+        echo "WARNING: ENABLE_UNION=1 but $_UNION_SH not found; skipping union." >&2
+    fi
 fi
 
 # Cleanup CUDA cache

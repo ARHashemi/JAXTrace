@@ -36,6 +36,18 @@
 #                     so every case simulates the same physical travel
 #                     distance. The fastest case gets exactly N steps;
 #                     every other case gets more.
+#   - --fixed-dt=X:   force every case to use DT=X regardless of its own
+#                     TIME_STEP_SIZE. The N_STEPS scaling above then uses
+#                     X for every case (including the reference). The
+#                     per-case TIME_STEP_SIZE is still read; if it
+#                     disagrees with X we print a WARNING per case.
+#   - --enable-union: stamp ENABLE_UNION=1 into each generated runner so
+#                     the run_jaxtrace.sh / run_lumi.sh hook calls
+#                     run_union.sh after tracking finishes. Requires
+#                     run_union.sh to exist next to run_jaxtrace.sh in
+#                     each case folder; use the parallel
+#                     generate_jaxtrace_union_scripts.sh to produce
+#                     those.
 #
 # Other knobs (MESH_PATTERN, INLET_WALL, BOUNDARY_WALLS, …) are taken
 # verbatim from the chosen template so this script never has to know about
@@ -64,6 +76,9 @@
 #   ./generate_jaxtrace_scripts.sh \
 #       --cohort-prefix=/scratch/shared/ROM/FOM                 # runtime-native cohort path
 #   ./generate_jaxtrace_scripts.sh --max-steps=2000             # equalise travel distance
+#   ./generate_jaxtrace_scripts.sh --max-steps=2000 \
+#       --fixed-dt=2.5e-03                                      # force same DT for all cases
+#   ./generate_jaxtrace_scripts.sh --enable-union               # run union after tracking
 #   ./generate_jaxtrace_scripts.sh --csv                        # write case_parameters.csv
 #   ./generate_jaxtrace_scripts.sh --csv=summary.csv            # write to a specific file
 #   ./generate_jaxtrace_scripts.sh --csv --csv-numbers-only     # number-only CSV
@@ -71,10 +86,12 @@
 # CSV: a row is emitted for every case where all per-case values could
 # be parsed, including cases where the per-case runner already exists
 # and is being skipped. Columns are:
-#   case_name,case_number,inlet_velocity,pin_rpm,dt[,n_steps]
+#   case_name,case_number,inlet_velocity,pin_rpm,dt[,n_steps][,dt_file]
 # or, with --csv-numbers-only:
-#   case_number,inlet_velocity,pin_rpm,dt[,n_steps]
-# The n_steps column is included only when --max-steps was passed.
+#   case_number,inlet_velocity,pin_rpm,dt[,n_steps][,dt_file]
+# n_steps appears only when --max-steps is given; dt_file appears only
+# when --fixed-dt is given (so the file's TIME_STEP_SIZE is recorded
+# alongside the forced value for auditability).
 # =============================================================================
 
 set -euo pipefail
@@ -110,6 +127,18 @@ COHORT_PREFIX=""
 # D_max = v_max * dt_max * MAX_STEPS is the reference travel distance.
 # Empty = disabled (use the template's N_STEPS / DT verbatim).
 MAX_STEPS=""
+# Force a single DT for every case, overriding each case's own
+# TIME_STEP_SIZE. When set, the per-case .dat is still read so we can
+# print a per-case WARNING when the user-supplied value disagrees with
+# what FEMUSS used. When unset (the default), the per-case DT from
+# data/<stem>.dat is stamped verbatim into each runner.
+FIXED_DT=""
+# Toggle: append a `bash run_union.sh` call to the generated
+# run_jaxtrace.sh so a union postprocess runs automatically after
+# tracking finishes. Empty / 0 = disabled. Implementation lives in the
+# template (run_workstation.sh / run_lumi.sh), which honours
+# ENABLE_UNION; the generator just stamps ENABLE_UNION=$ENABLE_UNION.
+ENABLE_UNION=""
 
 # Reference template for workstation: must exist as a hand-tuned baseline.
 WORKSTATION_TEMPLATE="cylindrical_001.gid/run_jaxtrace.sh"
@@ -127,11 +156,13 @@ for arg in "$@"; do
         --jaxtrace-repo=*)   JAXTRACE_REPO="${arg#*=}" ;;
         --cohort-prefix=*)   COHORT_PREFIX="${arg#*=}" ;;
         --max-steps=*)       MAX_STEPS="${arg#*=}" ;;
+        --fixed-dt=*)        FIXED_DT="${arg#*=}" ;;
+        --enable-union)      ENABLE_UNION=1 ;;
         --csv)               CSV_OUTPUT="case_parameters.csv" ;;
         --csv=*)             CSV_OUTPUT="${arg#*=}" ;;
         --csv-numbers-only)  CSV_NAMES_ONLY=1 ;;
         --help|-h)
-            sed -n '2,78p' "$0"
+            sed -n '2,95p' "$0"
             exit 0
             ;;
         *)
@@ -189,6 +220,16 @@ if [ -n "$MAX_STEPS" ]; then
     echo "Max steps: $MAX_STEPS  (applied to the case with the largest INLET_VELOCITY)"
 else
     echo "Max steps: <unchanged from template>"
+fi
+if [ -n "$FIXED_DT" ]; then
+    echo "Fixed DT:  $FIXED_DT  (forced for every case; file dt only used for warnings)"
+else
+    echo "Fixed DT:  <off; per-case DT from data/<stem>.dat>"
+fi
+if [ -n "$ENABLE_UNION" ]; then
+    echo "Union:     ENABLE_UNION=$ENABLE_UNION stamped into every case"
+else
+    echo "Union:     <unchanged from template>"
 fi
 echo
 
@@ -258,8 +299,9 @@ patch_template() {
     local input_path="$3"
     local inlet_v="$4"
     local pin_rpm="$5"
-    local dt="$6"          # may be "" → keep template's DT
-    local n_steps="$7"     # may be "" → keep template's N_STEPS
+    local dt="$6"             # may be "" → keep template's DT
+    local n_steps="$7"        # may be "" → keep template's N_STEPS
+    local enable_union="$8"   # may be "" → keep template's ENABLE_UNION
 
     # First line at column 0 for each variable. The leading-anchor
     # 0,/^VAR=/ form restricts the substitution to the first match so
@@ -275,6 +317,9 @@ patch_template() {
     fi
     if [ -n "$n_steps" ]; then
         sed_args+=( -e "0,/^N_STEPS=/{s|^N_STEPS=.*|N_STEPS=$n_steps|}" )
+    fi
+    if [ -n "$enable_union" ]; then
+        sed_args+=( -e "0,/^ENABLE_UNION=/{s|^ENABLE_UNION=.*|ENABLE_UNION=$enable_union|}" )
     fi
     sed "${sed_args[@]}" "$template" > "$output.tmp"
 
@@ -337,9 +382,20 @@ if [ -n "$MAX_STEPS" ]; then
         echo "       reference travel distance." >&2
         exit 1
     fi
-    D_MAX=$(awk -v v="$V_MAX" -v dt="$DT_AT_VMAX" -v n="$MAX_STEPS" \
+    # When --fixed-dt is given, every case will actually run with that
+    # DT (the per-case value is just used for the mismatch warning).
+    # Compute D_max with the DT that will *actually* be used so the
+    # N_STEPS scaling in pass 1 is consistent with the stamped DT.
+    _REF_DT="$DT_AT_VMAX"
+    if [ -n "$FIXED_DT" ]; then
+        _REF_DT="$FIXED_DT"
+    fi
+    D_MAX=$(awk -v v="$V_MAX" -v dt="$_REF_DT" -v n="$MAX_STEPS" \
         'BEGIN{printf "%.17g", v*dt*n}')
-    echo "Ref case:  $NAME_VMAX  (v=$V_MAX m/s, dt=$DT_AT_VMAX s)"
+    echo "Ref case:  $NAME_VMAX  (v=$V_MAX m/s, dt_file=$DT_AT_VMAX s)"
+    if [ -n "$FIXED_DT" ]; then
+        echo "Ref DT:    $_REF_DT s  (forced via --fixed-dt; file dt ignored for scaling)"
+    fi
     echo "D_max:     $D_MAX m  (= v_max * dt * MAX_STEPS)"
     echo
 fi
@@ -351,15 +407,18 @@ fi
 # independent of whether the runners are regenerated.
 if [ -n "$CSV_OUTPUT" ]; then
     echo "CSV:       $CSV_OUTPUT"
-    # Header columns: always include dt (always parsed). n_steps is
-    # included only when --max-steps was given (otherwise N_STEPS
-    # comes verbatim from the template and isn't meaningful per case).
+    # Header columns: always include dt (the value actually stamped
+    # into the runner). n_steps is included only when --max-steps was
+    # given. dt_file is included only when --fixed-dt was given so the
+    # CSV records each case's original TIME_STEP_SIZE alongside the
+    # forced value.
     if [ "$CSV_NAMES_ONLY" = 1 ]; then
         _hdr="case_number,inlet_velocity,pin_rpm,dt"
     else
         _hdr="case_name,case_number,inlet_velocity,pin_rpm,dt"
     fi
     [ -n "$MAX_STEPS" ] && _hdr="$_hdr,n_steps"
+    [ -n "$FIXED_DT" ]  && _hdr="$_hdr,dt_file"
     echo "$_hdr" > "$CSV_OUTPUT"
 fi
 echo
@@ -413,7 +472,7 @@ for case_dir in $CASE_GLOB; do
 
     inlet_v=$(extract_inlet_velocity "$som_fix")
     pin_rpm=$(extract_pin_rpm "$som_dat")
-    dt=$(extract_time_step_size "$dat_file")
+    dt_file=$(extract_time_step_size "$dat_file")
     if [ -z "$inlet_v" ]; then
         echo "  $name: FAILED — could not parse INLET_VELOCITY from $som_fix"
         n_failed=$((n_failed + 1))
@@ -424,17 +483,38 @@ for case_dir in $CASE_GLOB; do
         n_failed=$((n_failed + 1))
         continue
     fi
-    if [ -z "$dt" ]; then
+    if [ -z "$dt_file" ]; then
         echo "  $name: FAILED — could not parse TIME_STEP_SIZE from $dat_file"
         n_failed=$((n_failed + 1))
         continue
+    fi
+
+    # Decide what DT we will actually stamp into the runner. --fixed-dt
+    # forces the same value for every case; otherwise we use each case's
+    # own TIME_STEP_SIZE. When the forced value disagrees with the file
+    # (by more than ~1e-6 relative) print a per-case WARNING so silent
+    # divergence from what FEMUSS used is visible at generation time.
+    if [ -n "$FIXED_DT" ]; then
+        dt="$FIXED_DT"
+        if awk -v a="$FIXED_DT" -v b="$dt_file" \
+            'BEGIN{
+                if (b+0 == 0) exit 1
+                d = (a+0 - b+0)/(b+0)
+                if (d < 0) d = -d
+                exit (d > 1e-6) ? 0 : 1
+            }'; then
+            echo "  $name: WARNING --fixed-dt=$FIXED_DT differs from case dt=$dt_file"
+        fi
+    else
+        dt="$dt_file"
     fi
 
     # Compute case-specific N_STEPS so this case travels the same
     # physical distance as the reference (max-velocity) case. The
     # fastest case gets exactly MAX_STEPS; slower cases get more.
     # We compute ceil(D_max / (v_case * dt_case)) in awk to keep float
-    # precision; bash arithmetic is integer-only.
+    # precision; bash arithmetic is integer-only. Note: `dt` here is
+    # the value that will actually be stamped (either case's or fixed).
     n_steps=""
     if [ -n "$MAX_STEPS" ]; then
         n_steps=$(awk -v d="$D_MAX" -v v="$inlet_v" -v dt="$dt" \
@@ -465,6 +545,7 @@ for case_dir in $CASE_GLOB; do
             _row="$name,$num,$inlet_v,$pin_rpm,$dt"
         fi
         [ -n "$MAX_STEPS" ] && _row="$_row,$n_steps"
+        [ -n "$FIXED_DT" ]  && _row="$_row,$dt_file"
         echo "$_row" >> "$CSV_OUTPUT"
         n_csv_rows=$((n_csv_rows + 1))
     fi
@@ -485,20 +566,18 @@ for case_dir in $CASE_GLOB; do
     # box).
     input_path="$COHORT_PREFIX/$name"
 
-    # Always patch DT (read from the case's own data file). Patch
-    # N_STEPS too only when --max-steps was given; otherwise the
-    # template's N_STEPS is preserved (pass "" to patch_template to
-    # skip the substitution).
+    # Always patch DT (either from the case's own data file or the
+    # --fixed-dt override). Patch N_STEPS too only when --max-steps was
+    # given; otherwise the template's N_STEPS is preserved. ENABLE_UNION
+    # is patched only when --enable-union was given; otherwise the
+    # template's value (typically 0) is preserved.
     patch_template "$TEMPLATE_PATH" "$out_path" "$input_path" \
-        "$inlet_v" "$pin_rpm" "$dt" "$n_steps"
+        "$inlet_v" "$pin_rpm" "$dt" "$n_steps" "$ENABLE_UNION"
 
-    if [ -n "$n_steps" ]; then
-        printf "  %s: written  (INPUT=%s, INLET_VELOCITY=%s, PIN_RPM=%s, DT=%s, N_STEPS=%s)\n" \
-            "$name" "$input_path" "$inlet_v" "$pin_rpm" "$dt" "$n_steps"
-    else
-        printf "  %s: written  (INPUT=%s, INLET_VELOCITY=%s, PIN_RPM=%s, DT=%s)\n" \
-            "$name" "$input_path" "$inlet_v" "$pin_rpm" "$dt"
-    fi
+    _msg="INPUT=$input_path, INLET_VELOCITY=$inlet_v, PIN_RPM=$pin_rpm, DT=$dt"
+    [ -n "$n_steps" ]     && _msg="$_msg, N_STEPS=$n_steps"
+    [ -n "$ENABLE_UNION" ] && _msg="$_msg, ENABLE_UNION=$ENABLE_UNION"
+    printf "  %s: written  (%s)\n" "$name" "$_msg"
     n_done=$((n_done + 1))
 done
 
