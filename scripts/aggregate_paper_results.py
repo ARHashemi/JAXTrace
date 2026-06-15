@@ -298,28 +298,39 @@ def _format_data_structure_stats(blocks, log_lines: List[str]) -> str:
     builder prints during stage [3/5]. These aren't inside a ==== block
     so we scan the log lines directly for the printed octree summaries.
     """
-    pat = re.compile(
+    # Header pattern: any prefix ending in "octree:" then "N cells".
+    # The remainder of the line may contain "X elem/cell", "(max Y)",
+    # and "Z cells/elem" in any order — we extract each independently.
+    head_pat = re.compile(
         r"^\s*(Vertex-multi octree|Parent-cube octree|AABB-overlap octree):\s*"
-        r"(\d[\d,]*) cells,\s*([\d.]+) elem/cell"
-        r"(?:\s*\(max\s*(\d+)\))?"
-        r"(?:,\s*([\d.]+) cells/elem)?"
+        r"(\d[\d,]*) cells"
     )
+    epc_pat = re.compile(r"([\d.]+)\s*elem/cell")
+    max_pat = re.compile(r"\(\s*max\s*(\d+)\s*\)")
+    cpe_pat = re.compile(r"([\d.]+)\s*cells/elem")
     rows: List[List[str]] = []
     seen = set()
     for line in log_lines:
-        m = pat.search(line)
-        if m and m.group(1) not in seen:
-            seen.add(m.group(1))
-            name, n_cells, ec, max_e, cpe = m.groups()
-            rows.append(
-                [
-                    name,
-                    n_cells,
-                    ec,
-                    cpe or "1.0",
-                    max_e or "—",
-                ]
-            )
+        m = head_pat.search(line)
+        if m is None:
+            continue
+        name = m.group(1)
+        if name in seen:
+            continue
+        seen.add(name)
+        n_cells = m.group(2)
+        epc_m = epc_pat.search(line, m.end())
+        max_m = max_pat.search(line, m.end())
+        cpe_m = cpe_pat.search(line, m.end())
+        rows.append(
+            [
+                name,
+                n_cells,
+                epc_m.group(1) if epc_m else "—",
+                cpe_m.group(1) if cpe_m else "1.0",
+                max_m.group(1) if max_m else "—",
+            ]
+        )
     if not rows:
         return "_(data-structure stats not found in log)_"
     return _md_table(
