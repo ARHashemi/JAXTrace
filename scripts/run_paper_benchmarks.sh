@@ -37,8 +37,14 @@ JAXTRACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MESH_BASE="${MESH_BASE:-/flash/users/${USER:-ali}/data/cylA.gid/post}"
 MESH_SUBDIR="${MESH_SUBDIR:-0eule}"
 FEMUSS_SUBDIR="${FEMUSS_SUBDIR:-1part}"
-MESH_PATTERN="${MESH_PATTERN:-cylA_{timestep}.pvtu}"
-FEMUSS_PATTERN="${FEMUSS_PATTERN:-cylA_pt_{timestep}.pvtu}"
+# IMPORTANT: keep these defaults SINGLE-quoted. Bash expansion through
+# "${VAR:-default}" with the literal braces silently corrupts
+# "cylA_{timestep}.pvtu" into "cylA_{timestep.pvtu}" — Python then
+# crashes with "AttributeError: 'int' object has no attribute 'pvtu'".
+# Use ${VAR:=...} with a printf-built literal to keep the placeholder
+# intact. (Bug seen in the 2026-06-15 workstation run.)
+: "${MESH_PATTERN:=$(printf '%s' 'cylA_{timestep}.pvtu')}"
+: "${FEMUSS_PATTERN:=$(printf '%s' 'cylA_pt_{timestep}.pvtu')}"
 
 # Velocity timestep range used in the paper.
 VEL_START="${VEL_START:-159}"

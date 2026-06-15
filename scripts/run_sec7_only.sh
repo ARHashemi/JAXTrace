@@ -29,8 +29,19 @@ if [ -z "$RESULTS_DIR" ] || [ ! -d "$RESULTS_DIR" ]; then
 fi
 
 MESH_BASE="${MESH_BASE:-/flash/users/${USER:-ali}/data/cylA.gid/post}"
-MESH_PATTERN="${MESH_PATTERN:-cylA_{timestep}.pvtu}"
-FEMUSS_PATTERN="${FEMUSS_PATTERN:-cylA_pt_{timestep}.pvtu}"
+# IMPORTANT: keep these defaults SINGLE-quoted. Bash brace-expansion is
+# disabled for braces with no comma/.. inside (per POSIX), but it bites
+# anyway when expanded through the "${VAR:-default}" form: bash
+# silently moves the closing brace to the end, turning
+#   cylA_{timestep}.pvtu
+# into
+#   cylA_{timestep.pvtu}
+# Python then sees a malformed format placeholder and crashes with
+# "AttributeError: 'int' object has no attribute 'pvtu'".
+# Using single-quoted literals and an explicit default-test sidesteps
+# the expansion. The Python script receives the pattern verbatim.
+: "${MESH_PATTERN:=$(printf '%s' 'cylA_{timestep}.pvtu')}"
+: "${FEMUSS_PATTERN:=$(printf '%s' 'cylA_pt_{timestep}.pvtu')}"
 VEL_START="${VEL_START:-159}"
 VEL_END="${VEL_END:-159}"
 SEC7_FEMUSS_START="${SEC7_FEMUSS_START:-0}"
