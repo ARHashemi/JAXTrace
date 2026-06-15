@@ -55,6 +55,7 @@ from jaxtrace.gpu.mesh_loader_timedep import load_velocity_sequence_from_pvtu
 from jaxtrace.gpu.mesh_deduplication import deduplicate_nodes
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
 from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
+from jaxtrace.gpu.search.mesh_aligned_octree_aabb import extract_octree_cells_aabb
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_morton_builder import build_mesh_aligned_morton_structure
 from jaxtrace.gpu.search.mesh_aligned_morton_search import (
@@ -174,8 +175,10 @@ def parse_args():
     )
     parser.add_argument(
         "--registration", type=str, default="both",
-        choices=["vertex", "parent_cube", "both"],
-        help="Registration method: vertex (vertex-multi), parent_cube, or both",
+        choices=["vertex", "parent_cube", "aabb", "both", "all"],
+        help="Registration method: vertex (vertex-multi), parent_cube, aabb "
+             "(AABB-overlap), both (vertex+parent_cube; legacy default), or "
+             "all (vertex+parent_cube+aabb).",
     )
     parser.add_argument(
         "--cost-analysis", action="store_true", default=True,
@@ -594,7 +597,8 @@ def hlo_cost_analysis(jit_fn, sample_input):
         return None
 
 
-def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu, radius=None):
+def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu,
+                         radius=None, octree_gpu_aabb=None):
     """Build a jitted vmapped batch function for cost analysis on a single batch."""
     if method_type == '1x1x1':
         max_tests = jnp.int32(150)
@@ -626,6 +630,21 @@ def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_g
         def _batch(pos_batch):
             def single(pos):
                 return search_mesh_aligned_octree_static_where(pos, octree_gpu_pc, max_elems_per_cell=max_per_cell)
+            return jax.vmap(single)(pos_batch)
+        return _batch
+    elif method_type == '3x3x3_aabb':
+        # AABB registration produces variable cells-per-element, so we
+        # use the multi-local (dynamic inner-loop) search rather than
+        # the static parent-cube search. The 3x3x3 spatial neighbourhood
+        # plus AABB coverage gives the same in-element guarantee as the
+        # vertex/centroid variants on the Kuhn subset.
+        max_tests = jnp.int32(600)
+        if octree_gpu_aabb is None:
+            raise ValueError("octree_gpu_aabb must be provided for 3x3x3_aabb")
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_mesh_aligned_octree_multi_local_where(pos, octree_gpu_aabb, max_tests=max_tests)
             return jax.vmap(single)(pos_batch)
         return _batch
     elif method_type == 'radius':
@@ -723,8 +742,9 @@ def main():
 
     # ---- Build structures & upload to GPU ----
     registration = args.registration
-    use_vertex = registration in ("vertex", "both")
-    use_parent_cube = registration in ("parent_cube", "both")
+    use_vertex      = registration in ("vertex",      "both", "all")
+    use_parent_cube = registration in ("parent_cube", "both", "all")
+    use_aabb        = registration in ("aabb",                "all")
 
     print(f"\n[3/5] Building search structures and uploading to GPU...")
     print(f"  Registration mode: {registration}")
@@ -788,6 +808,37 @@ def main():
                 connectivity, node_positions, mesh_octree_cells_pc, verbose=False
             )
             build_times['octree_upload_parent_cube'] = time.time() - t_pc_upload_0
+
+    # AABB-overlap octree (for 3x3x3^AABB)
+    octree_gpu_aabb = None
+    if use_aabb:
+        with nvtx_range("stage3.octree_extract_aabb"):
+            t_aabb_extract_0 = time.time()
+            mesh_octree_cells_aabb = extract_octree_cells_aabb(
+                node_positions, connectivity, tolerance=1e-6, verbose=False
+            )
+            build_times['octree_extract_aabb'] = time.time() - t_aabb_extract_0
+
+        cells_per_elem_aabb = (
+            mesh_octree_cells_aabb.cell_to_elements_offsets[1:]
+            - mesh_octree_cells_aabb.cell_to_elements_offsets[:-1]
+        )
+        print(f"  AABB-overlap octree: {mesh_octree_cells_aabb.n_cells:,} cells, "
+              f"{mesh_octree_cells_aabb.elements_per_cell_mean:.1f} elem/cell "
+              f"(max {mesh_octree_cells_aabb.max_elements_per_cell}), "
+              f"{mesh_octree_cells_aabb.cells_per_element_mean:.1f} cells/elem")
+
+        build_meta['aabb_n_cells'] = int(mesh_octree_cells_aabb.n_cells)
+        build_meta['aabb_mean_elem_per_cell'] = float(mesh_octree_cells_aabb.elements_per_cell_mean)
+        build_meta['aabb_max_elem_per_cell'] = int(mesh_octree_cells_aabb.max_elements_per_cell)
+        build_meta['aabb_mean_cells_per_elem'] = float(mesh_octree_cells_aabb.cells_per_element_mean)
+
+        with nvtx_range("stage3.octree_upload_aabb"):
+            t_aabb_upload_0 = time.time()
+            octree_gpu_aabb = upload_mesh_aligned_octree_to_gpu(
+                connectivity, node_positions, mesh_octree_cells_aabb, verbose=False
+            )
+            build_times['octree_upload_aabb'] = time.time() - t_aabb_upload_0
 
     # Mesh-aligned Morton structure (for radius search) — only with vertex
     morton_gpu = None
@@ -905,6 +956,13 @@ def main():
         l2_methods += [
             ('3x3x3^PC',    '3x3x3_pc', None),
         ]
+    if use_aabb:
+        # Same kernel as parent_cube (uniform CSR octree on the GPU) —
+        # only the registration changes which cells contain which
+        # elements. The search code path is identical.
+        l2_methods += [
+            ('3x3x3^AABB',  '3x3x3_aabb', None),
+        ]
 
     rng = np.random.default_rng(args.seed)
 
@@ -959,6 +1017,10 @@ def main():
                 search_fn = lambda p: search_3x3x3_pc_batch(
                     p, octree_gpu_pc, args.batch_size, config.MAX_ELEMS_PER_CELL
                 )
+            elif method_type == '3x3x3_aabb':
+                # AABB uses the same multi-local search as the vertex 3x3x3
+                # but on the AABB-registered octree.
+                search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_aabb, args.batch_size)
             elif method_type == 'radius':
                 _r = radius  # capture
                 search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
@@ -1195,7 +1257,8 @@ def main():
         cost_results = {}
         for method_name, method_type, radius in l2_methods:
             jit_fn = build_jit_for_method(
-                method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu, radius=radius
+                method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu,
+                radius=radius, octree_gpu_aabb=octree_gpu_aabb,
             )
             ca = hlo_cost_analysis(jit_fn, sample_batch)
             cost_results[method_name] = ca
@@ -1301,6 +1364,10 @@ def main():
             intra_methods += [
                 ('3x3x3^PC',    '3x3x3_pc', None),
             ]
+        if use_aabb:
+            intra_methods += [
+                ('3x3x3^AABB',  '3x3x3_aabb', None),
+            ]
 
         intra_results = {}
         for method_name, method_type, radius in intra_methods:
@@ -1321,6 +1388,8 @@ def main():
                     search_fn = lambda p: search_3x3x3_pc_batch(
                         p, octree_gpu_pc, args.batch_size, config.MAX_ELEMS_PER_CELL
                     )
+                elif method_type == '3x3x3_aabb':
+                    search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_aabb, args.batch_size)
                 elif method_type == 'radius':
                     _r = radius
                     search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
