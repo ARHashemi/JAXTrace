@@ -357,3 +357,153 @@ vs `log` produce distinct curves. That is exactly what
 For the feasibility elbow, `none` is the correct standard POD. `log` is
 the most interesting alternative to compare, since it best handles the
 order-of-magnitude spread between the stir-zone core and the wake.
+
+---
+
+# Part II — measuring surrogate error
+
+The PCA above gives a *basis*. A *surrogate* must, given only the two
+inputs $(v_{adv}, \omega_{pin})$ of an **unseen** case, produce its full
+density field. There are two very different error numbers, and conflating
+them is the most common mistake — so they get their own section.
+
+## Projection (truncation) error — basis expressiveness only
+
+Fit PCA on **all** `n` cases, then reconstruct case `i` from its first
+`K` modes:
+
+$$
+\rho_i^{\text{proj}} = \bar{\rho} + \sum_{k=1}^{K} A_{ik}\,\phi_k,
+\qquad
+e_i^{\text{proj}} = \frac{\lVert \rho_i^{\text{proj}} - \rho_i \rVert_2}
+                         {\lVert \rho_i \rVert_2}.
+$$
+
+Crucially, the coefficients $A_{ik}$ here are the **true** ones, obtained
+by projecting case `i`'s *own* density onto the modes. Case `i` was in the
+training set. So this measures only **how well `K` modes span the data** —
+it always decreases as `K` grows and says *nothing* about predicting a new
+case. On this dataset, $K=7$ gives ~**11.8 %** mean projection error.
+
+Use it to answer "is the linear subspace rich enough?" — not "is the
+surrogate accurate?".
+
+## LOOCV (leave-one-out cross-validation) — true generalization
+
+To predict an **unseen** case we cannot project its density (we don't have
+it). We only have its inputs. So the surrogate needs a second piece: a
+**regressor** $g:(v_{adv}, \omega_{pin}) \mapsto (A_1,\dots,A_K)$ that
+predicts the mode coefficients from the inputs. **PCA + regressor together
+is the surrogate**, and LOOCV tests exactly that:
+
+```
+for each case i = 1..n:
+    train = all cases except i
+    1. PCA on `train`            -> mean ρ̄, modes Φ, training coeffs A_train
+    2. fit regressor g on train  : inputs_train -> A_train
+    3. predict held-out coeffs   : Â_i = g(inputs_i)        ← inputs only!
+    4. reconstruct               : ρ̂_i = ρ̄ + Σ_k Â_ik φ_k   (chain undone)
+    5. error                     : e_i = ‖ρ̂_i − ρ_i‖ / ‖ρ_i‖
+```
+
+The held-out case never touches the PCA fit *or* the regressor fit, so
+$e_i$ is an honest generalization error. Sweeping `K` and averaging $e_i$
+over the folds gives the **error-vs-modes** curve; plotting $e_i$ at the
+best `K` over the $(v_{adv}, \omega_{pin})$ plane gives the **2D error
+map**. (This is the standard LOOCV your colleagues use; "train on n−1,
+test on 1, repeat" is its definition.)
+
+> **Why LOOCV ≫ projection.** Projection at $K=7$ is ~12 %; LOOCV at
+> $K=7$ is ~28 %. The gap is the *regression* error: the modes represent
+> the fields well, but predicting their amplitudes from just two scalars
+> with only 16 training points is the hard part. That gap — not the
+> projection number — is the real feasibility signal.
+
+> **Why the error-vs-modes curve has a dip.** Adding modes first helps
+> (less truncation) but eventually hurts: the higher modes carry little
+> energy and their coefficients are noisy functions of the inputs, so the
+> regressor overfits them. The minimum of the LOOCV curve is the
+> bias/variance sweet spot — here $K \approx 4$–$7$.
+
+### The per-case-scale subtlety under `per_case_*`
+
+When `normalize="per_case_*"`, the training coefficients live in
+amplitude-removed space, so the regressor predicts a *shape*. The removed
+amplitude $s_i$ is itself regressed on the inputs (a second, scalar
+regression) and multiplied back in at reconstruction, so $\hat\rho_i$ is
+in physical units. For `none`/`global_*`, $s_i\equiv1$ and this step is a
+no-op. For `log`, the error is computed in log-density space (the log is
+not inverted), so **`log` LOOCV numbers are not comparable** to the
+linear-space ones — the comparison plot flags this and puts `log` on its
+own axis/scale.
+
+## The three regressors
+
+All three map standardized inputs (each of $v_{adv},\omega_{pin}$ shifted
+to zero mean / unit std on the training fold) to the coefficient vector.
+They are deliberately lightweight — 16 training points cannot support a
+heavy model.
+
+**1. `rbf` — radial basis function interpolation**
+(`scipy.interpolate.RBFInterpolator`, thin-plate-spline kernel,
+`smoothing=0`). Writes each coefficient as a weighted sum of radial
+kernels centred on the training points:
+
+$$
+\hat A(p) = \sum_{j=1}^{n_{\text{train}}} w_j\,\varphi(\lVert p - p_j\rVert)
+            + (\text{low-order polynomial}),
+\qquad \varphi(r)=r^2\log r .
+$$
+
+The weights $w_j$ are solved so the interpolant passes **exactly** through
+every training value. Smooth, tuning-free, and well-suited to scattered
+low-dimensional data — the best performer here. Weakness: extrapolation
+outside the convex hull of the samples is unreliable.
+
+**2. `gp` — Gaussian process regression**
+(a small anisotropic-RBF GP implemented in NumPy — no scikit-learn
+dependency). Models the coefficient as a Gaussian process with a squared-
+exponential kernel:
+
+$$
+k(p,p') = \exp\!\Big(-\tfrac{\lVert p - p'\rVert^2}{2\,\ell^2}\Big),
+\qquad
+\hat A(p) = k(p, P)\,\big[K(P,P) + \sigma_n^2 I\big]^{-1} A_{\text{train}} .
+$$
+
+The length scale $\ell$ is set from the median pairwise distance of the
+training points; a tiny noise $\sigma_n^2$ keeps the solve stable. A GP
+also yields a predictive variance (uncertainty), useful later for active
+sampling. With only 16 points it is slightly noisier than RBF here.
+
+**3. `poly` — least-squares polynomial**
+Fits the coefficients as a degree-2 polynomial in $(v_{adv}, \omega_{pin})$:
+
+$$
+\hat A(p) = c_0 + c_1 v + c_2 \omega + c_3 v^2 + c_4 v\omega + c_5 \omega^2,
+$$
+
+with $c$ from ordinary least squares. The simplest, most interpretable
+baseline; underfits if the true response is more wiggly than quadratic,
+but it is a useful floor — if a fancy regressor can't beat the polynomial,
+the limitation is the data, not the model. On this dataset it lands
+between RBF and GP.
+
+## Reading the two LOOCV plots
+
+`run_rom_loocv.py` produces:
+
+- **`rom_loocv_error_vs_modes.png`** — mean held-out error vs `K`, one
+  curve per regressor. Pick the regressor and `K` at the lowest dip.
+- **`rom_loocv_error_maps.png`** — the held-out error at the best `K`
+  drawn as a filled contour over the $(v_{adv}, \omega_{pin})$ plane, with
+  the 17 cases marked. This shows *where* in parameter space the surrogate
+  is weak — typically the sparsely sampled corners (here the high-$|\omega|$
+  / low-$v_{adv}$ region) and the convex-hull edges.
+
+`run_rom_loocv.py --compare-normalize` instead fixes one regressor and
+overlays the LOOCV result across normalizations
+(`rom_loocv_normalize_compare.png`), to see whether `per_case_*` or `log`
+buys anything over plain `none`. (On this data they do not move the linear-
+space error much — confirming the bottleneck is the regression, not the
+field normalization.)

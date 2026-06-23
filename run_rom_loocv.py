@@ -51,6 +51,20 @@ def parse_args() -> argparse.Namespace:
                    help="Regressors to compare (default: rbf gp poly).")
     p.add_argument("--max-modes", type=int, default=None,
                    help="Cap the mode sweep (default: n-2).")
+    # Normalization comparison mode (writes to *separate* files; the
+    # default single-normalize run still writes rom_loocv_*.png).
+    p.add_argument("--compare-normalize", nargs="*", default=None,
+                   metavar="NAME",
+                   help="Run LOOCV across several normalizations and overlay "
+                        "them for ONE regressor (--compare-regressor). Writes "
+                        "rom_loocv_normalize_compare*.png — does not overwrite "
+                        "the single-run plots. Default set when flag given with "
+                        "no names: none per_case_l2 per_case_mass log.")
+    p.add_argument("--compare-regressor", default="rbf", choices=list(REGRESSORS),
+                   help="Regressor used in --compare-normalize mode (default rbf).")
+    p.add_argument("--tag", default="",
+                   help="Suffix appended to output filenames so multiple runs "
+                        "(e.g. different normalizations) coexist in one out-dir.")
     p.add_argument("--no-plot", action="store_true")
     return p.parse_args()
 
@@ -119,6 +133,90 @@ def plot_error_maps(results, out_path: Path):
     print(f"[cv] wrote {out_path}")
 
 
+def plot_normalize_compare(results_by_norm, regressor, out_path: Path):
+    """One regressor, several normalizations: error-vs-modes overlay (left)
+    and per-normalization 2D error maps (remaining panels)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.tri import Triangulation
+
+    names = list(results_by_norm)
+    n = len(names)
+    fig = plt.figure(figsize=(5.0 * (n + 1), 4.6))
+    gs = fig.add_gridspec(1, n + 1)
+
+    # Left panel: error-vs-modes curves, one per normalization. "log" is in
+    # a different (log-density) metric, so it goes on a right-hand twin axis.
+    ax0 = fig.add_subplot(gs[0, 0])
+    ax0b = None
+    for idx, nm in enumerate(names):
+        res = results_by_norm[nm]
+        lbl = f"{nm} (K={res.best_k}, {res.mean_error.min()*100:.0f}%)"
+        if nm == "log":
+            ax0b = ax0b or ax0.twinx()
+            ax0b.plot(res.k_values, res.mean_error * 100.0, "s--",
+                      color=f"C{idx}", label=lbl + " [log-space]")
+            ax0b.set_ylabel("log-space rel. err [%]", color=f"C{idx}")
+            ax0b.tick_params(axis="y", labelcolor=f"C{idx}")
+        else:
+            ax0.plot(res.k_values, res.mean_error * 100.0, "o-",
+                     color=f"C{idx}", label=lbl)
+    ax0.set_xlabel("number of PCA modes retained")
+    ax0.set_ylabel("mean held-out rel. L2 error [%] (linear)")
+    ax0.set_title(f"Error vs #modes — {regressor}")
+    ax0.grid(True, alpha=0.3)
+    lines, labels = ax0.get_legend_handles_labels()
+    if ax0b is not None:
+        l2, lab2 = ax0b.get_legend_handles_labels()
+        lines += l2
+        labels += lab2
+    ax0.legend(lines, labels, fontsize=8)
+
+    # One 2D map per normalization. NB: "log" error is measured in
+    # log-density space (the log is not inverted), so it is NOT comparable
+    # to the linear-space errors. Exclude it from the shared color scale
+    # and give it its own scale + a warning label, so it can't flatten the
+    # comparable maps.
+    def _is_log(nm):
+        return nm == "log"
+
+    linear_names = [nm for nm in names if not _is_log(nm)]
+    if linear_names:
+        all_err = np.concatenate(
+            [results_by_norm[nm].error_at_best_k() * 100.0
+             for nm in linear_names]
+        )
+        vmin, vmax = float(all_err.min()), float(all_err.max())
+    else:
+        vmin = vmax = None
+    for j, nm in enumerate(names):
+        res = results_by_norm[nm]
+        ax = fig.add_subplot(gs[0, j + 1])
+        v, w = res.params[:, 0], res.params[:, 1]
+        err = res.error_at_best_k() * 100.0
+        # log gets its own auto scale; comparable ones share vmin/vmax.
+        kw = ({} if _is_log(nm) or vmin is None
+              else dict(vmin=vmin, vmax=vmax))
+        tcf = ax.tricontourf(Triangulation(v, w), err, levels=14,
+                             cmap="viridis", **kw)
+        ax.scatter(v, w, c=err, cmap="viridis",
+                   **(kw if kw else {}), edgecolors="k", s=45, zorder=3)
+        ax.set_xlabel("v_adv")
+        if j == 0:
+            ax.set_ylabel("omega_pin")
+        suffix = "  [log-space, NOT comparable]" if _is_log(nm) else ""
+        ax.set_title(f"{nm}  (K={res.best_k})\n"
+                     f"mean {err.mean():.0f}%  max {err.max():.0f}%{suffix}")
+        fig.colorbar(tcf, ax=ax, label="rel. L2 err [%]")
+
+    fig.suptitle(f"LOOCV normalization comparison — regressor={regressor}",
+                 fontsize=12)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    print(f"[cv] wrote {out_path}")
+
+
 def main() -> int:
     args = parse_args()
     from jaxtrace.rom import load_dataset, loocv
@@ -140,6 +238,49 @@ def main() -> int:
     if args.max_modes is not None:
         k_values = np.arange(1, int(args.max_modes) + 1)
 
+    tag = f"_{args.tag}" if args.tag else ""
+
+    # ---------------------------------------------------------------
+    # Mode B: compare normalizations for ONE regressor (separate files).
+    # ---------------------------------------------------------------
+    if args.compare_normalize is not None:
+        norms = args.compare_normalize or [
+            "none", "per_case_l2", "per_case_mass", "log"
+        ]
+        reg = args.compare_regressor
+        print(f"[cv] normalization comparison: regressor={reg}, norms={norms}")
+        results_by_norm = {}
+        for nm in norms:
+            res = loocv(
+                ds.matrix, ds.params, ds.case_numbers,
+                regressor=reg, normalize=nm, k_values=k_values, verbose=False,
+            )
+            results_by_norm[nm] = res
+            print(f"[cv]   {nm:16s} best K={res.best_k}, "
+                  f"mean held-out error={res.mean_error.min()*100:.2f}%  "
+                  f"(max per-case {res.error_at_best_k().max()*100:.1f}%)")
+        npz = args.out_dir / f"rom_loocv_normalize_compare{tag}.npz"
+        np.savez_compressed(
+            npz,
+            regressor=reg,
+            norms=np.array(norms),
+            params=ds.params,
+            case_numbers=np.array(ds.case_numbers),
+            k_values=next(iter(results_by_norm.values())).k_values,
+            **{f"rel_error_{nm}": r.rel_error for nm, r in results_by_norm.items()},
+        )
+        print(f"[cv] wrote {npz}")
+        if not args.no_plot:
+            plot_normalize_compare(
+                results_by_norm, reg,
+                args.out_dir / f"rom_loocv_normalize_compare{tag}.png",
+            )
+        print("[cv] done.")
+        return 0
+
+    # ---------------------------------------------------------------
+    # Mode A: single normalization, compare regressors (default).
+    # ---------------------------------------------------------------
     results = []
     for reg in args.regressors:
         res = loocv(
@@ -153,7 +294,7 @@ def main() -> int:
         results.append(res)
 
     # Persist raw errors.
-    npz = args.out_dir / "rom_loocv.npz"
+    npz = args.out_dir / f"rom_loocv{tag}.npz"
     np.savez_compressed(
         npz,
         normalize=args.normalize,
@@ -166,8 +307,10 @@ def main() -> int:
     print(f"[cv] wrote {npz}")
 
     if not args.no_plot:
-        plot_error_vs_modes(results, args.out_dir / "rom_loocv_error_vs_modes.png")
-        plot_error_maps(results, args.out_dir / "rom_loocv_error_maps.png")
+        plot_error_vs_modes(
+            results, args.out_dir / f"rom_loocv_error_vs_modes{tag}.png")
+        plot_error_maps(
+            results, args.out_dir / f"rom_loocv_error_maps{tag}.png")
 
     print("[cv] done.")
     return 0
