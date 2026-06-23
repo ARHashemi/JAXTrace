@@ -345,6 +345,7 @@ def load_dataset(
     params_csv: Optional[Path] = None,
     trim_lo: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_LO,
     trim_hi: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_HI,
+    x_keep_fraction: Optional[float] = None,
     verbose: bool = True,
 ) -> SnapshotDataset:
     """
@@ -356,6 +357,12 @@ def load_dataset(
     artefacts before the PCA. Defaults to one voxel off every wall and 6
     off the z_max wall (the artificial top-layer density). Pass ``None``
     (or zeros) to disable trimming.
+
+    ``x_keep_fraction`` (e.g. 0.2) keeps only the first fraction of the
+    x-extent — the near-pin region — discarding the downstream wake. It is
+    applied *after* the voxel margin trims (so the wall artefacts are still
+    removed), by dropping the appropriate number of high-x voxels. ``None``
+    keeps the whole x-extent.
     """
     snapshots = discover_cases(fom_root, exclude=exclude, params_csv=params_csv)
     grid = build_reference_grid(snapshots, resolution=resolution)
@@ -380,6 +387,20 @@ def load_dataset(
     # --- optional trim ---
     lo = tuple(trim_lo) if trim_lo is not None else (0, 0, 0)
     hi = tuple(trim_hi) if trim_hi is not None else (0, 0, 0)
+    # Fold the x-keep fraction into the high-x margin. After the lo/hi
+    # margins, the x-extent has (nx - lo_x - hi_x) voxels; keep the first
+    # `frac` of them by dropping the rest from the high-x wall.
+    if x_keep_fraction is not None:
+        if not (0.0 < x_keep_fraction <= 1.0):
+            raise ValueError(f"x_keep_fraction must be in (0,1]; got "
+                             f"{x_keep_fraction}")
+        nx_after = nx - lo[0] - hi[0]
+        n_keep = max(1, int(round(nx_after * x_keep_fraction)))
+        extra_hi_x = nx_after - n_keep
+        hi = (hi[0] + extra_hi_x, hi[1], hi[2])
+        if verbose:
+            print(f"[rom] x_keep_fraction={x_keep_fraction}: keep {n_keep} of "
+                  f"{nx_after} x-voxels (drop {extra_hi_x} from high-x wall)")
     if any(lo) or any(hi):
         cropped_grid, slices = grid.crop(lo, hi)
         # rows are raveled (nx, ny, nz) C order; reshape, slice, re-ravel.

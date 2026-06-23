@@ -45,6 +45,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--trim-hi", type=int, nargs=3, default=list(DEFAULT_TRIM_HI),
                    metavar=("X", "Y", "Z"))
     p.add_argument("--no-trim", action="store_true")
+    p.add_argument("--x-keep-fraction", type=float, default=None,
+                   help="Keep only the first fraction of the x-extent "
+                        "(near-pin region), e.g. 0.2. Default: keep all of x.")
     p.add_argument("--normalize", default="none", choices=list(NORMALIZE_CHOICES))
     p.add_argument("--regressors", nargs="+", default=list(REGRESSORS),
                    choices=list(REGRESSORS),
@@ -231,6 +234,7 @@ def main() -> int:
         resolution=tuple(args.resolution) if args.resolution else None,
         trim_lo=trim_lo,
         trim_hi=trim_hi,
+        x_keep_fraction=args.x_keep_fraction,
     )
     print(f"[cv] snapshot matrix: {ds.matrix.shape}")
 

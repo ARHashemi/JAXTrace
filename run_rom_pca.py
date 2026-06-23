@@ -52,6 +52,13 @@ def parse_args() -> argparse.Namespace:
                         "the extra z_max margin removes the top-layer artefact).")
     p.add_argument("--no-trim", action="store_true",
                    help="Disable trimming entirely.")
+    p.add_argument("--x-keep-fraction", type=float, default=None,
+                   help="Keep only the first fraction of the x-extent (the "
+                        "near-pin region), e.g. 0.2. Applied after the voxel "
+                        "trims. Default: keep all of x.")
+    p.add_argument("--tag", default="",
+                   help="Suffix appended to output filenames so multiple runs "
+                        "coexist in one out-dir (e.g. --tag x20).")
     # Normalization: the primary one saved to .npz, plus extras to overlay.
     p.add_argument("--normalize", default="none", choices=list(NORMALIZE_CHOICES),
                    help="Primary normalization for the saved PCA (default: none).")
@@ -161,12 +168,15 @@ def main() -> int:
     trim_lo = None if args.no_trim else tuple(args.trim_lo)
     trim_hi = None if args.no_trim else tuple(args.trim_hi)
 
+    tag = f"_{args.tag}" if args.tag else ""
+
     ds = load_dataset(
         fom_root=args.fom_root,
         exclude=tuple(args.exclude),
         resolution=tuple(args.resolution) if args.resolution else None,
         trim_lo=trim_lo,
         trim_hi=trim_hi,
+        x_keep_fraction=args.x_keep_fraction,
     )
     print(f"[rom] snapshot matrix: {ds.matrix.shape} "
           f"({ds.matrix.nbytes / 1024**2:.1f} MiB)")
@@ -185,7 +195,7 @@ def main() -> int:
         print(f"   {int(cl*100)}% : {pca.n_modes_for(cl)} modes")
 
     # Persist for downstream regression (coeffs vs params).
-    npz_path = args.out_dir / "rom_pca.npz"
+    npz_path = args.out_dir / f"rom_pca{tag}.npz"
     np.savez_compressed(
         npz_path,
         mean=pca.mean,
@@ -206,7 +216,8 @@ def main() -> int:
           f"({npz_path.stat().st_size / 1024**2:.1f} MiB)")
 
     if not args.no_plot:
-        make_plot(pca, args.out_dir / "rom_pca_elbow_coverage.png", args.coverage)
+        make_plot(pca, args.out_dir / f"rom_pca_elbow_coverage{tag}.png",
+                  args.coverage)
 
         # Comparison overlay across normalizations. Note: global_* options
         # are mathematically identical in *coverage* to none (they only
@@ -226,7 +237,7 @@ def main() -> int:
                 print(f"   {nm:16s} modes for coverage {cov}")
             make_compare_plot(
                 pca_by_name,
-                args.out_dir / "rom_pca_normalize_compare.png",
+                args.out_dir / f"rom_pca_normalize_compare{tag}.png",
                 args.coverage,
             )
 
