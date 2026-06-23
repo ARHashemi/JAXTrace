@@ -59,6 +59,37 @@ class ReferenceGrid:
             for a in range(3)
         )
 
+    def crop(
+        self,
+        margin_lo: Tuple[int, int, int],
+        margin_hi: Tuple[int, int, int],
+    ) -> Tuple["ReferenceGrid", Tuple[slice, slice, slice]]:
+        """
+        Return a cropped grid (and the per-axis index slices) that drops
+        ``margin_lo`` points from the low wall and ``margin_hi`` from the
+        high wall of each axis (order x, y, z).
+
+        The slices index an array shaped ``(nx, ny, nz)``.
+        """
+        nx, ny, nz = self.shape
+        n = (nx, ny, nz)
+        lo = tuple(int(m) for m in margin_lo)
+        hi = tuple(int(m) for m in margin_hi)
+        slices = tuple(
+            slice(lo[a], n[a] - hi[a]) for a in range(3)
+        )
+        new_shape = tuple(n[a] - lo[a] - hi[a] for a in range(3))
+        if any(s <= 0 for s in new_shape):
+            raise ValueError(
+                f"crop margins {margin_lo}/{margin_hi} exceed grid shape {n}"
+            )
+        new_origin = self.origin + self.spacing * np.asarray(lo, dtype=np.float64)
+        return (
+            ReferenceGrid(origin=new_origin, spacing=self.spacing.copy(),
+                          shape=new_shape),  # type: ignore[arg-type]
+            slices,  # type: ignore[return-value]
+        )
+
 
 @dataclass
 class CaseSnapshot:
@@ -299,17 +330,32 @@ def resample_to_reference(
     return arr.ravel(order="C")
 
 
+# Default trim margins in (x, y, z) voxel counts. One voxel off every
+# wall, plus 6 off the z_max wall where an artificial high-density layer
+# forms at the top of the domain from a simulation artefact.
+DEFAULT_TRIM_LO = (1, 1, 1)
+DEFAULT_TRIM_HI = (1, 1, 6)
+
+
 def load_dataset(
     fom_root: Path = DEFAULT_FOM_ROOT,
     exclude: Sequence[str] = DEFAULT_EXCLUDE,
     resolution: Optional[Tuple[int, int, int]] = None,
     field_name: str = "mean_density",
     params_csv: Optional[Path] = None,
+    trim_lo: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_LO,
+    trim_hi: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_HI,
     verbose: bool = True,
 ) -> SnapshotDataset:
     """
     End-to-end: discover cases, build the common grid, resample every
     snapshot onto it, and stack into a (n_cases, n_voxels) matrix.
+
+    ``trim_lo`` / ``trim_hi`` drop a margin of voxels from the low/high
+    wall of each axis (x, y, z) *after* resampling, removing boundary
+    artefacts before the PCA. Defaults to one voxel off every wall and 6
+    off the z_max wall (the artificial top-layer density). Pass ``None``
+    (or zeros) to disable trimming.
     """
     snapshots = discover_cases(fom_root, exclude=exclude, params_csv=params_csv)
     grid = build_reference_grid(snapshots, resolution=resolution)
@@ -320,6 +366,7 @@ def load_dataset(
         print(f"[rom]   origin  = {grid.origin}")
         print(f"[rom]   spacing = {grid.spacing}")
 
+    nx, ny, nz = grid.shape
     rows = np.empty((len(snapshots), grid.n_voxels), dtype=np.float32)
     params = np.empty((len(snapshots), 2), dtype=np.float64)
     for i, snap in enumerate(snapshots):
@@ -329,6 +376,23 @@ def load_dataset(
             print(f"[rom]   resampled case {snap.case_number}  "
                   f"v_adv={snap.v_adv:.4e} omega={snap.omega_pin:+.0f}  "
                   f"rho[min,max]=[{rows[i].min():.4g},{rows[i].max():.4g}]")
+
+    # --- optional trim ---
+    lo = tuple(trim_lo) if trim_lo is not None else (0, 0, 0)
+    hi = tuple(trim_hi) if trim_hi is not None else (0, 0, 0)
+    if any(lo) or any(hi):
+        cropped_grid, slices = grid.crop(lo, hi)
+        # rows are raveled (nx, ny, nz) C order; reshape, slice, re-ravel.
+        cube = rows.reshape(len(snapshots), nx, ny, nz)
+        cube = cube[:, slices[0], slices[1], slices[2]]
+        rows = cube.reshape(len(snapshots), -1).copy()
+        if verbose:
+            print(f"[rom] trimmed margins lo={lo} hi={hi} (x,y,z) -> "
+                  f"grid {cropped_grid.shape}, n_voxels = "
+                  f"{cropped_grid.n_voxels:,}")
+            print(f"[rom]   rho after trim: [min,max] over all cases = "
+                  f"[{rows.min():.4g}, {rows.max():.4g}]")
+        grid = cropped_grid
 
     return SnapshotDataset(
         snapshots=snapshots,

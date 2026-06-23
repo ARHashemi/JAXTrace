@@ -25,7 +25,7 @@ from .dataset import (
     discover_cases,
     load_dataset,
 )
-from .pca import PCAResult, fit_pca
+from .pca import NORMALIZE_CHOICES, PCAResult, fit_pca
 
 __all__ = [
     "CaseSnapshot",
@@ -35,4 +35,5 @@ __all__ = [
     "load_dataset",
     "PCAResult",
     "fit_pca",
+    "NORMALIZE_CHOICES",
 ]
