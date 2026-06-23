@@ -26,6 +26,7 @@ from .dataset import (
     load_dataset,
 )
 from .pca import NORMALIZE_CHOICES, PCAResult, fit_pca
+from .cv import LOOCVResult, REGRESSORS, loocv
 
 __all__ = [
     "CaseSnapshot",
@@ -36,4 +37,7 @@ __all__ = [
     "PCAResult",
     "fit_pca",
     "NORMALIZE_CHOICES",
+    "LOOCVResult",
+    "REGRESSORS",
+    "loocv",
 ]
