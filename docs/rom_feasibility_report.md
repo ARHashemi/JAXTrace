@@ -281,6 +281,10 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
 | particles | comoving, all cases | 20 | 1 | 99 % | dominated by 001 outlier |
 | particles | comoving, excl. 001 | 19 | 11 | **36.9 %** (rbf) | honest particle result |
 | particles | final / raw / comoving | — | identical | — | drift subtraction ⇒ same modes |
+| density | weld-pitch inputs (§7.1) | 17 | — | 28.3 % | no gain over baseline |
+| density | velocity-coeff inputs (§7.3) | 17 | — | 27.6 % | marginal gain (~0.6 %) |
+| density | all first-stage fields (§7.3) | 17 | — | 29.5 % | overfits (12 features) |
+| particles | velocity-coeff inputs (§7.3) | 19 | — | 37.8 % | no gain |
 
 ---
 
@@ -291,8 +295,11 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
    first pass, not production-accurate.
 
 2. **The bottleneck is data, not representation.** Projection error is ~12 %
-   while LOOCV is ~28 %, and neither normalization nor the choice among
-   reasonable representations moves the needle. The limiting factor is
+   while LOOCV is ~28 %, and neither normalization, input features (weld
+   pitch, log, first-stage ROM coefficients — §7), nor the choice among
+   reasonable representations moves the needle. **Active-subspace analysis
+   (§7.2) confirms the response is `v_adv`-dominated and low-rank in the
+   inputs**, so no input combination unlocks accuracy. The limiting factor is
    **17 training points in a 2D input space**, sparsest exactly where error
    peaks (high-|ω| / low-v_adv corner).
 
@@ -319,6 +326,108 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
 
 ---
 
+## 7. Follow-up studies (post-review)
+
+After an external review, four additional lines of work were carried out.
+Each was a hypothesis aimed at the diagnosed bottleneck (the input →
+mode-coefficient regression). The honest summary up front: **none of the
+input-side changes materially beat the two-scalar baseline** — which is
+itself an important, consistent result confirming the bottleneck is sample
+count, not the input representation.
+
+### 7.1 Richer input features (weld pitch, log)
+
+We tested mapping the raw inputs to physics-motivated features before the
+regression — most importantly the **weld pitch** `p_w = v_adv / |ω_pin|`,
+the advance-per-revolution often cited as the dominant FSW transport
+parameter.
+
+| feature set | density LOOCV (rbf) | particles LOOCV (rbf) |
+|---|---|---|
+| `(v_adv, ω)` identity (baseline) | **28.2 %** | **36.9 %** |
+| `(p_w, ω)` | 28.3 % | 37.8 % |
+| `(p_w, v_adv)` | 30.6 % | 38.4 % |
+| `p_w` only | 36.8 % | diverges |
+| `(log v_adv, log|ω|)` | 29.1 % | 36.8 % |
+
+**Weld pitch does not help, and `p_w`-only is much worse.** This refutes
+the intuition that the response collapses onto weld pitch.
+
+### 7.2 Active-subspace analysis — *why* pitch fails
+
+To explain 7.1 we computed the first-order **active subspace** of the
+input → coefficient map: a linear sensitivity per mode, energy-weighted,
+eigendecomposed to find the dominant input direction.
+
+| dataset | eigenvalue ratio λ₁/λ₂ | activity share | dominant raw direction |
+|---|---|---|---|
+| density full | 8.3 | 89 % / 11 % | ≈ **pure `v_adv`** `[1, 0]` |
+| density near-pin | 8.9 | 90 % / 10 % | ≈ **pure `v_adv`** `[1, 0]` |
+| particles (excl 001) | 3.0 | 75 % / 25 % | ≈ `v_adv`, but ω matters more |
+
+**The map is nearly 1-D — but the active direction is essentially `v_adv`,
+not weld pitch.** The coefficients barely depend on ω, so collapsing onto
+`p_w` (which mixes ω in) is the *wrong* reduction, exactly explaining why
+`pitch_only` degrades. Particles are genuinely more 2-D (ω contributes
+more), consistent with them being harder to predict.
+
+### 7.3 First-stage ROM coefficients as inputs
+
+A colleague's **first-stage ROM** is a POD of the FOM Displacement
+(velocity), Pressure and Temperature fields, stored as per-case reduced
+coefficients (`cylindrical.som.fswrom.romdata`: Displacement 3 modes,
+Pressure 4, Temperature 3 → up to 10 coordinates per case). The idea: use
+these physics-rich coordinates instead of, or in addition to, the two raw
+scalars for the *second-stage* density/particle regression.
+
+*Verification first.* The files carry no case-ordering metadata; we
+confirmed the 20 coefficient rows are in case order 000–019 by correlation
+(Displacement Mode 1 vs ω = **+0.999**; Mode 2 vs v_adv = **−0.931**).
+
+| input | density LOOCV (rbf) | particles LOOCV (rbf) |
+|---|---|---|
+| `(v_adv, ω)` baseline | 28.2 % | 36.9 % |
+| velocity coeffs **alone** (3) | **27.6 %** | 37.8 % |
+| `(v,ω)` + velocity (5) | 28.0 % | 37.9 % |
+| temperature coeffs alone (3) | 27.8 % | 37.5 % |
+| all fields alone (10) | 28.9 % | 38.4 % |
+| `(v,ω)` + all fields (12) | 29.5 % | 38.8 % |
+
+**Marginal at best.** Velocity coefficients alone give a small real gain
+for density (27.6 % vs 28.2 %) and none for particles; piling on all
+fields **overfits** (12 features, 17–19 points → best-K collapses to 3).
+A sensitivity check explains it: first-stage **modes 1–2 of each field are
+nearly linear in `(v_adv, ω)`** (R² 0.87–1.0, i.e. redundant), and only
+**mode ≥ 3 carries new information** (89–97 %), which does not strongly
+drive the density/particle modes. The velocity coefficients are largely a
+*reparametrisation* of the two scalars we already have.
+
+### 7.4 Cases 000/001 reruns (in progress)
+
+The two cases dropped from the studies (000/001) are being re-run.
+Diagnosis: their tracking scripts were structurally correct (only INPUT /
+N_STEPS / INLET_VELOCITY differed from good cases, with `DT = 3.75e-3`
+matching their RPM = −400). Fresh `run_jaxtrace.sh` / `run_union.sh` were
+regenerated by cloning a known-good case (014) and substituting the
+per-case values, keeping the original DT (a clean control). If the
+particle runaway (case 001, `max|ξ| ≈ 2.0`) persists after a clean rerun,
+the next step is a finer DT (1.875e-3). Results pending; once available,
+all studies should be re-run with the fuller dataset (≈19 density / 20
+particle cases).
+
+### 7.5 Net conclusion of the follow-up
+
+Three independent input-side levers — **weld pitch**, **log inputs**, and
+**first-stage ROM coefficients** — each failed to beat the two-scalar
+baseline by more than ~0.5 %. The **active-subspace** result ties this
+together: the response is `v_adv`-dominated and effectively low-rank in
+the inputs, so no clever input *combination* unlocks accuracy. The
+limiting factor is unambiguously the **number and placement of training
+samples**, reinforcing the §6 recommendation to add cases in the
+high-|ω| / low-v_adv corner.
+
+---
+
 ## Appendix — reproducing the results
 
 All code is on branch `feature/rom-svd`, package `jaxtrace/rom/`.
@@ -335,11 +444,21 @@ python run_rom_loocv.py  --out-dir rom_out --x-keep-fraction 0.2 --tag x20
 # Particles: stats + elbow comparison + LOOCV (exclude the 001 outlier)
 python run_rom_particles.py --out-dir rom_out --mode comoving
 python run_rom_particles.py --out-dir rom_out --mode comoving --exclude 001 --tag no001
+
+# Follow-up (§7): input features and first-stage ROM coefficients
+python run_rom_loocv.py --out-dir rom_out --feature-transform pitch_omega   # §7.1
+python run_rom_first_stage.py --target density   --out-dir rom_out          # §7.3
+python run_rom_first_stage.py --target particles --out-dir rom_out          # §7.3
 ```
+
+Active subspace (§7.2) and feature transforms (§7.1) are library calls in
+`jaxtrace.rom` (`active_subspace`, `FEATURE_TRANSFORMS`); first-stage
+loading is `load_first_stage_coeffs`.
 
 Output files (`rom_out/`, regenerable; not committed):
 
 - Density: `rom_pca_*`, `rom_loocv_*` (with `_x20` for the near-pin run).
 - Particles: `rom_particles_*` (with `_no001` for the outlier-excluded run).
+- Follow-up: `rom_firststage_{density,particles}.{png,npz}`.
 
 Math details: [`rom_pca_svd.md`](rom_pca_svd.md).
