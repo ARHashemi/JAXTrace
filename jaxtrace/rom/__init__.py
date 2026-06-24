@@ -29,6 +29,7 @@ from .pca import NORMALIZE_CHOICES, PCAResult, fit_pca
 from .cv import LOOCVResult, REGRESSORS, loocv
 from .features import FEATURE_TRANSFORMS
 from .active_subspace import ActiveSubspaceResult, active_subspace
+from .first_stage import FirstStageCoeffs, load_first_stage_coeffs
 from .particles import (
     PARTICLE_MODES,
     ParticleDataset,
@@ -55,4 +56,6 @@ __all__ = [
     "FEATURE_TRANSFORMS",
     "ActiveSubspaceResult",
     "active_subspace",
+    "FirstStageCoeffs",
+    "load_first_stage_coeffs",
 ]

@@ -196,6 +196,8 @@ def loocv(
     normalize: str = "none",
     k_values: Optional[np.ndarray] = None,
     feature_transform: str = "identity",
+    extra_features: Optional[np.ndarray] = None,
+    use_base_features: bool = True,
     verbose: bool = True,
 ) -> LOOCVResult:
     """
@@ -205,6 +207,12 @@ def loocv(
     ``feature_transform`` selects how the raw ``(v_adv, omega_pin)`` inputs
     are mapped to regressor features (see ``features.FEATURE_TRANSFORMS``);
     e.g. ``pitch_omega`` regresses on the weld pitch instead of v_adv.
+
+    ``extra_features`` is an optional (n_cases, d) matrix appended to the
+    regressor inputs — e.g. first-stage ROM velocity/temperature
+    coefficients. Set ``use_base_features=False`` to regress on the extra
+    features ALONE (dropping the transformed (v_adv, omega) entirely).
+    All features are standardised per fold before the regressor sees them.
 
     Errors are relative L2 in the SVD working space's *physical* units
     (the per-case and global scales are undone). For ``normalize="log"``
@@ -222,7 +230,17 @@ def loocv(
     feat = FEATURE_TRANSFORMS[feature_transform]
 
     X = np.asarray(matrix, dtype=np.float64)
-    P = feat(np.asarray(params, dtype=np.float64))   # (n, d) features
+    P = feat(np.asarray(params, dtype=np.float64))   # (n, d) base features
+    if not use_base_features:
+        if extra_features is None:
+            raise ValueError("use_base_features=False requires extra_features")
+        P = np.empty((X.shape[0], 0))
+    if extra_features is not None:
+        ef = np.asarray(extra_features, dtype=np.float64)
+        if ef.shape[0] != X.shape[0]:
+            raise ValueError(f"extra_features rows {ef.shape[0]} != "
+                             f"n_cases {X.shape[0]}")
+        P = np.concatenate([P, ef], axis=1) if P.shape[1] else ef
     n_cases = X.shape[0]
     if k_values is None:
         # At most n-1 non-trivial modes from n-1 training snapshots, and
