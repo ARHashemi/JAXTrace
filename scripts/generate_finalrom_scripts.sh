@@ -38,6 +38,17 @@ DT_COMMON="1.8750000000e-03"
 # Design invariant: v_adv * t_max = 0.075  ->  N_STEPS = 0.075/(v_adv*dt).
 VT_INVARIANT="0.075"
 
+# Absolute density ROI box, in metres: "XMIN XMAX YMIN YMAX ZMIN ZMAX".
+# WHY: a small fraction (~1-2.5%) of particles in some cases are runaways
+# (case 000/001 fly to x~2-3 m vs the ~0.08 m domain). The default
+# ROI_FRACTION is a fraction of the *trajectory bbox*, which those runaways
+# inflate to billions of voxels -> density grid OOM (the real cause of the
+# 000/001 "anomaly"). An absolute physical box, anchored to the 17 clean
+# cases' density grids (x in [0.026,0.079]) extended upstream to the seed
+# region (x ~ -0.024) with generous y/z margins, fixes the grid sizing for
+# every case and simply excludes the non-physical runaways. ~7.4M voxels.
+ROI_BOX_ABS="-0.030 0.085 -0.018 0.018 -0.0055 0.0015"
+
 # Templates: a known-good tracking script (RPM=-400, structurally clean)
 # and the newer union script (carries the co-moving block).
 TRACK_TEMPLATE="${FOM_ROOT}/cylindrical_014.gid/run_jaxtrace.sh"
@@ -87,9 +98,36 @@ for case_sh in "$FOM_ROOT"/cylindrical_0*.gid/run_jaxtrace.sh; do
         -e "s|^FILENAME_STEM=.*|FILENAME_STEM=finalrom|" \
         -e "s|^STEP_TAIL=.*|STEP_TAIL=1                        # FINAL step only (no time-average)|" \
         -e "s|^DEDUP_MODE=.*|DEDUP_MODE=none                   # single step: dedup is a no-op|" \
-        -e "s|^DRIFT_VELOCITY=.*|DRIFT_VELOCITY=\"${v_adv} 0 0\"   # co-moving subtraction ON|" \
         -e "s|^WRITE_DENSITY=.*|WRITE_DENSITY=1|" \
+        -e "s|^ROI_FRACTION=.*|ROI_FRACTION=\"\"                 # disabled: use absolute ROI_BOX (runaway-proof)|" \
+        -e "s|^ROI_BOX=.*|ROI_BOX=\"${ROI_BOX_ABS}\"   # physical box; excludes runaway particles, caps grid|" \
         "$UNION_TEMPLATE" > "$out_union"
+    # The template REFERENCES $DRIFT_VELOCITY (and the co-moving toggles)
+    # but never DECLARES them, so co-moving is off unless we inject the
+    # declaration. Add it right after the WRITE_DENSITY line.
+    python3 - "$out_union" "$v_adv" <<'PYEOF'
+import sys
+path, v_adv = sys.argv[1], sys.argv[2]
+s = open(path).read()
+block = (
+    f'\n# ── finalrom: co-moving (sPOD-style residual) ON ──────────────────────────\n'
+    f'DRIFT_VELOCITY="{v_adv} 0 0"     # V_adv along +x -> mean_density_comoving + reference_density\n'
+    f'NO_COMOVING=0\n'
+    f'COMOVING_REFERENCE=uniform        # uniform-reference residual (rho_bar - rho_unif)\n'
+)
+if 'DRIFT_VELOCITY=' not in s:
+    # insert after the first WRITE_DENSITY=... line
+    lines = s.splitlines(keepends=True)
+    out = []
+    inserted = False
+    for ln in lines:
+        out.append(ln)
+        if not inserted and ln.startswith('WRITE_DENSITY='):
+            out.append(block)
+            inserted = True
+    s = ''.join(out)
+    open(path, 'w').write(s)
+PYEOF
     # Point PARTICLES at the new run_finalrom folder (override the
     # latest-run auto-detect so it can't pick an old run_grid-frac_*).
     # Insert an explicit default just after the CASE_DIR line.
