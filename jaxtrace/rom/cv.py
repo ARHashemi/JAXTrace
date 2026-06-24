@@ -69,14 +69,19 @@ def _make_rbf(kernel: str = "thin_plate_spline"):
 
 
 def _make_poly(degree: int = 2):
+    import itertools
+
     def _features(X: np.ndarray) -> np.ndarray:
-        # X is (n, 2) standardized [v, w]. Build monomials up to `degree`.
-        v = X[:, 0]
-        w = X[:, 1]
-        cols = [np.ones_like(v)]
-        for d in range(1, degree + 1):
-            for i in range(d + 1):
-                cols.append((v ** (d - i)) * (w ** i))
+        # X is (n, d) standardized features. Build all monomials up to
+        # `degree` over the d columns (works for d = 1 or 2).
+        n, d = X.shape
+        cols = [np.ones(n)]
+        for deg in range(1, degree + 1):
+            for combo in itertools.combinations_with_replacement(range(d), deg):
+                term = np.ones(n)
+                for j in combo:
+                    term = term * X[:, j]
+                cols.append(term)
         return np.stack(cols, axis=1)
 
     def fit(Xtr: np.ndarray, Ytr: np.ndarray) -> Callable:
@@ -190,11 +195,16 @@ def loocv(
     regressor: str = "rbf",
     normalize: str = "none",
     k_values: Optional[np.ndarray] = None,
+    feature_transform: str = "identity",
     verbose: bool = True,
 ) -> LOOCVResult:
     """
     Leave-one-out CV of the PCA+regressor surrogate over a sweep of mode
     counts ``k_values`` (default 1..n-1).
+
+    ``feature_transform`` selects how the raw ``(v_adv, omega_pin)`` inputs
+    are mapped to regressor features (see ``features.FEATURE_TRANSFORMS``);
+    e.g. ``pitch_omega`` regresses on the weld pitch instead of v_adv.
 
     Errors are relative L2 in the SVD working space's *physical* units
     (the per-case and global scales are undone). For ``normalize="log"``
@@ -205,8 +215,14 @@ def loocv(
         raise ValueError(f"regressor={regressor!r} not in {list(REGRESSORS)}")
     fit_reg = REGRESSORS[regressor]
 
+    from .features import FEATURE_TRANSFORMS
+    if feature_transform not in FEATURE_TRANSFORMS:
+        raise ValueError(f"feature_transform={feature_transform!r} not in "
+                         f"{list(FEATURE_TRANSFORMS)}")
+    feat = FEATURE_TRANSFORMS[feature_transform]
+
     X = np.asarray(matrix, dtype=np.float64)
-    P = np.asarray(params, dtype=np.float64)
+    P = feat(np.asarray(params, dtype=np.float64))   # (n, d) features
     n_cases = X.shape[0]
     if k_values is None:
         # At most n-1 non-trivial modes from n-1 training snapshots, and

@@ -49,6 +49,9 @@ def parse_args() -> argparse.Namespace:
                    help="Keep only the first fraction of the x-extent "
                         "(near-pin region), e.g. 0.2. Default: keep all of x.")
     p.add_argument("--normalize", default="none", choices=list(NORMALIZE_CHOICES))
+    p.add_argument("--feature-transform", default="identity",
+                   help="Input feature map for the regressor "
+                        "(identity, pitch_omega, pitch_v, pitch_only, log_vw).")
     p.add_argument("--regressors", nargs="+", default=list(REGRESSORS),
                    choices=list(REGRESSORS),
                    help="Regressors to compare (default: rbf gp poly).")
@@ -257,7 +260,8 @@ def main() -> int:
         for nm in norms:
             res = loocv(
                 ds.matrix, ds.params, ds.case_numbers,
-                regressor=reg, normalize=nm, k_values=k_values, verbose=False,
+                regressor=reg, normalize=nm, k_values=k_values,
+                feature_transform=args.feature_transform, verbose=False,
             )
             results_by_norm[nm] = res
             print(f"[cv]   {nm:16s} best K={res.best_k}, "
@@ -290,6 +294,7 @@ def main() -> int:
         res = loocv(
             ds.matrix, ds.params, ds.case_numbers,
             regressor=reg, normalize=args.normalize, k_values=k_values,
+            feature_transform=args.feature_transform,
         )
         print(f"[cv] {reg}: best K={res.best_k}, "
               f"mean held-out error={res.mean_error.min()*100:.2f}%  "

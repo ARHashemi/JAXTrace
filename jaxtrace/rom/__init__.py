@@ -27,6 +27,8 @@ from .dataset import (
 )
 from .pca import NORMALIZE_CHOICES, PCAResult, fit_pca
 from .cv import LOOCVResult, REGRESSORS, loocv
+from .features import FEATURE_TRANSFORMS
+from .active_subspace import ActiveSubspaceResult, active_subspace
 from .particles import (
     PARTICLE_MODES,
     ParticleDataset,
@@ -50,4 +52,7 @@ __all__ = [
     "ParticleDataset",
     "load_particle_dataset",
     "compute_displacement_stats",
+    "FEATURE_TRANSFORMS",
+    "ActiveSubspaceResult",
+    "active_subspace",
 ]
