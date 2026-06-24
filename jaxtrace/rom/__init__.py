@@ -27,6 +27,12 @@ from .dataset import (
 )
 from .pca import NORMALIZE_CHOICES, PCAResult, fit_pca
 from .cv import LOOCVResult, REGRESSORS, loocv
+from .particles import (
+    PARTICLE_MODES,
+    ParticleDataset,
+    compute_displacement_stats,
+    load_particle_dataset,
+)
 
 __all__ = [
     "CaseSnapshot",
@@ -40,4 +46,8 @@ __all__ = [
     "LOOCVResult",
     "REGRESSORS",
     "loocv",
+    "PARTICLE_MODES",
+    "ParticleDataset",
+    "load_particle_dataset",
+    "compute_displacement_stats",
 ]
