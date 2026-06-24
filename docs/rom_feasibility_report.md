@@ -384,23 +384,93 @@ scalars for the *second-stage* density/particle regression.
 confirmed the 20 coefficient rows are in case order 000–019 by correlation
 (Displacement Mode 1 vs ω = **+0.999**; Mode 2 vs v_adv = **−0.931**).
 
+All three first-stage fields were tested as inputs — velocity
+(Displacement), temperature, and pressure — alone and appended to
+`(v_adv, ω)`:
+
 | input | density LOOCV (rbf) | particles LOOCV (rbf) |
 |---|---|---|
 | `(v_adv, ω)` baseline | 28.2 % | 36.9 % |
 | velocity coeffs **alone** (3) | **27.6 %** | 37.8 % |
 | `(v,ω)` + velocity (5) | 28.0 % | 37.9 % |
 | temperature coeffs alone (3) | 27.8 % | 37.5 % |
+| `(v,ω)` + temperature (5) | 28.6 % | 37.6 % |
 | all fields alone (10) | 28.9 % | 38.4 % |
 | `(v,ω)` + all fields (12) | 29.5 % | 38.8 % |
 
-**Marginal at best.** Velocity coefficients alone give a small real gain
-for density (27.6 % vs 28.2 %) and none for particles; piling on all
-fields **overfits** (12 features, 17–19 points → best-K collapses to 3).
-A sensitivity check explains it: first-stage **modes 1–2 of each field are
-nearly linear in `(v_adv, ω)`** (R² 0.87–1.0, i.e. redundant), and only
-**mode ≥ 3 carries new information** (89–97 %), which does not strongly
-drive the density/particle modes. The velocity coefficients are largely a
-*reparametrisation* of the two scalars we already have.
+**Marginal at best.** Velocity coefficients alone are the best of the set
+but give only a small real gain for density (27.6 % vs 28.2 %) and none
+for particles; piling on all fields **overfits** (12 features, 17–19
+points → best-K collapses to 3). A sensitivity check explains it:
+first-stage **modes 1–2 of each field are nearly linear in `(v_adv, ω)`**
+(R² 0.87–1.0, i.e. redundant), and only **mode ≥ 3 carries new
+information** (89–97 %), which does not strongly drive the density/particle
+modes. The first-stage coefficients are largely a *reparametrisation* of
+the two scalars we already have.
+
+#### How the coefficients are passed to the regressor
+
+The second-stage regressor accepts an arbitrary feature matrix via the
+`extra_features` / `use_base_features` arguments of `loocv`. The
+first-stage coefficients are loaded and aligned to the study's case order,
+then handed in directly — **no spatial basis is involved** (see the note
+below):
+
+```python
+from jaxtrace.rom import load_dataset, loocv
+from jaxtrace.rom.first_stage import load_first_stage_coeffs
+
+ds = load_dataset(verbose=False)                  # 2nd-stage target (density)
+fs = load_first_stage_coeffs()                    # reads .romdata only
+
+# (n_cases, d) feature matrix, rows aligned to ds.case_numbers.
+# modes=None keeps every retained mode of each field.
+ef = fs.select(fields=["Displacement"],           # velocity only
+               modes={"Displacement": 3},          # cap modes if desired
+               case_numbers=ds.case_numbers)
+
+# (a) coefficients ALONE as inputs (drop the raw scalars):
+loocv(ds.matrix, ds.params, ds.case_numbers, regressor="rbf",
+      extra_features=ef, use_base_features=False)
+
+# (b) APPEND coefficients to (v_adv, omega):
+loocv(ds.matrix, ds.params, ds.case_numbers, regressor="rbf",
+      extra_features=ef, use_base_features=True)
+```
+
+`extra_features` is a plain `(n_cases, d)` array, so any external per-case
+descriptor can be used the same way. `fs.select(fields=[...])` chooses
+which fields and how many modes to include; the driver
+`run_rom_first_stage.py` simply sweeps the configurations in the table
+above.
+
+#### Is the `.basis` file needed? No — and why
+
+The first-stage POD writes a field as
+
+> field_i(x) ≈ mean(x) + Σ_k a_ik · φ_k(x)
+
+where the **coefficients `a_ik`** (scalars, in `.romdata`, ~218 KB) are
+the per-case reduced coordinates and the **basis `φ_k(x)`** (vectors of
+length 180 461, in `.basis`, ~30 MB) are the spatial mode shapes, *shared
+by all cases*.
+
+- The second-stage regressor takes a **low-dimensional description of each
+  case as input**. That description *is* the coefficient vector `a_i` — a
+  handful of numbers. So only `.romdata` is read.
+- The **basis is only needed to reconstruct or visualise a physical field**
+  (`coeffs × basis + mean → field(x)`), e.g. to evaluate a predicted
+  velocity at a point or plot a mode shape. The surrogate does none of
+  that, so the 30 MB basis is never loaded.
+- One subtlety that justifies using the coefficients directly: scalar
+  coefficients are only comparable across cases when they refer to the
+  **same basis**. Here the colleague built a single global first-stage POD,
+  so all 20 cases share one basis — which is exactly why their `a_ik` are
+  meaningful, alignable features. We rely on that guarantee but do not need
+  to load the basis to use it.
+
+In short: **`.romdata` suffices for the second-stage ROM; `.basis` would
+only be required to turn predicted coefficients back into full fields.**
 
 ### 7.4 Cases 000/001 reruns (in progress)
 
