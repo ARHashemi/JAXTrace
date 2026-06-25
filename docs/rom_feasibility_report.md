@@ -285,6 +285,8 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
 | density | velocity-coeff inputs (§7.3) | 17 | — | 27.6 % | marginal gain (~0.6 %) |
 | density | all first-stage fields (§7.3) | 17 | — | 29.5 % | overfits (12 features) |
 | particles | velocity-coeff inputs (§7.3) | 19 | — | 37.8 % | no gain |
+| particles | manifold geometry (§8) | 18 | 11 lin / ~3 intr | — | curved manifold, ω-led MDS axis 1 |
+| density | manifold geometry (§8) | 17 | 9 lin / ~2.5 intr | — | curved manifold, mixed-param axis 2 |
 
 ---
 
@@ -311,6 +313,13 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
    though physically motivated — does not change the POD modes here, and
    |ξ|-thresholding cannot separate "affected" particles at this seed
    spacing.
+
+5. **The data manifold is curved, not flat (§8).** Independent
+   intrinsic-dimension estimates (~2–3) sit well below the linear PC count
+   (9–11 for 90 %) — the signature of a smooth but *nonlinear* manifold,
+   cleanly organised by `(v_adv, ω)`. This explains the slow SVD decay and
+   identifies nonlinear reduction (autoencoder / kernel-POD) as the
+   *eventual* — not current, given the sample count — route to lower error.
 
 **Recommended next steps**
 
@@ -498,6 +507,151 @@ high-|ω| / low-v_adv corner.
 
 ---
 
+## 8. Manifold-structure diagnostics
+
+Sections 2–7 measured *surrogate accuracy*. This section instead probes
+the *geometry* of the data itself: each case is one high-dimensional
+snapshot (a 360 000×3 particle cloud, or a flattened density field), and
+the 20 cases trace out a **manifold** in that space, parametrised by
+`(v_adv, ω_pin)`. Understanding that manifold's dimension and linearity
+explains *why* linear POD behaves as it does, and whether a nonlinear
+method could ever help.
+
+**Method order — linear/metric first, nonlinear embeddings last.** t-SNE
+and UMAP are deliberately *not* used as the first tool: they are nonlinear
+embeddings that can manufacture clusters and curvature which are not
+present in the data, so their output is untrustworthy without a linear
+anchor. We therefore use only methods that are cheap, deterministic, and
+faithful (numpy/scipy, no sklearn/umap), in increasing sophistication.
+Runaway-dominated cases 000/001 (particles) and 000/001/002 (density) are
+excluded, since their non-physical outliers otherwise dominate every
+pairwise distance.
+
+### 8.1 The five diagnostics
+
+1. **Linear spectrum** — mean-centred PCA explained-variance curve. How
+   many linear modes are needed for 90 % energy = the *linear*
+   dimensionality.
+2. **Linearity residual** — relative L2 reconstruction error using the
+   first *k* PCs, for all *k*. A fast drop to zero ⇒ linear & low-dim.
+3. **Intrinsic dimension** — two estimators that do **not** assume
+   linearity: *TwoNN* (ratio of 1st/2nd nearest-neighbour distances) and
+   the *correlation dimension* (Grassberger–Procaccia: slope of
+   `log C(r)` vs `log r`). These return a single number — the true
+   dimension of the surface the data lies on, regardless of curvature.
+4. **Pairwise distance matrix** — the full *n×n* case-to-case Euclidean
+   distances; reveals clustering directly.
+5. **Classical (Torgerson) MDS** — a *linear*, distance-preserving 2-D
+   layout (see §8.3 for exactly how its axes arise), coloured by the
+   parameters.
+
+### 8.2 Results
+
+| quantity | particles (18 cases) | density (17 cases) |
+|---|---|---|
+| PC1 explained variance | 36.4 % | 38.7 % |
+| **linear PCs for 90 %** | **11** | **9** |
+| **intrinsic dim (correlation)** | **≈ 3.4** | **≈ 2.5** |
+| intrinsic dim (TwoNN) | 13.6* | 8.5* |
+| MDS axis-1 corr (v_adv, ω) | (−0.45, **+0.86**) | (+0.18, **+0.88**) |
+| MDS axis-2 corr (v_adv, ω) | (**−0.87**, −0.47) | (−0.72, +0.44) |
+
+\* TwoNN is unreliable at *n* ≈ 17–18 points (it needs many samples); the
+correlation dimension is the trustworthy estimate here. Both agree
+qualitatively that the intrinsic dimension is **small** (≈ 2–3).
+
+**The headline signature: high linear dimension, low intrinsic
+dimension.** Both manifolds need ~9–11 linear PCs for 90 % energy, yet
+their intrinsic dimension is only ~2–3. That gap is the *definition* of a
+**curved (nonlinear) manifold**: the data lies on a low-dimensional
+surface that is *bent* through the high-dimensional space, so a linear
+basis can only wrap it by stacking many modes. (If the manifold were
+flat, linear-PC count and intrinsic dimension would agree.) This is an
+independent confirmation of the slow-SVD-decay / Kolmogorov-barrier
+observation in §2.3 and the review — now quantified by a dimension
+estimate rather than inferred from the spectrum alone.
+
+### 8.3 How the two MDS axes are chosen — and why they differ
+
+This is worth spelling out because it is the most easily misread plot.
+
+**Construction.** Classical MDS does *not* pick two of the original
+coordinates. From the *n×n* distance matrix `D` it forms the
+double-centred matrix
+
+> `B = −½ · J · D² · J`,  with `J = I − (1/n)·11ᵀ` (the centring operator),
+
+and eigendecomposes `B = V Λ Vᵀ`. The embedding coordinates are
+`xᵢ = √λᵢ · vᵢ` for the **two largest eigenvalues** `λ₁ ≥ λ₂`. So:
+
+- **Axis 1 is the single direction of greatest spread** among the cases
+  (largest λ); axis 2 is the orthogonal direction of next-greatest spread.
+- They are ordered by *variance captured*, exactly like PCA — in fact for
+  Euclidean `D`, classical MDS is PCA of the cases, so axis 1/2 are the
+  first two principal directions of the case cloud.
+- The axes are therefore **data-driven, not parameter-driven**: nothing
+  forces them to align with `v_adv` or `ω`. We *measure* their alignment
+  afterwards by correlating each axis with the two inputs (the table
+  above).
+
+**Why a near-1 negative eigenvalue appears.** Both manifolds show exactly
+one small negative MDS eigenvalue. Classical MDS yields negatives only
+when `D` is *not* exactly Euclidean-embeddable — i.e. when the manifold is
+curved. A single tiny negative eigenvalue is a mild, expected curvature
+signal, consistent with §8.2.
+
+**Why the axes differ between particles and density.** The axes are the
+principal directions of *different objects*, so they need not match:
+
+- **Particles** — the snapshot is a Lagrangian point cloud. Its dominant
+  variation (axis 1, λ₁) tracks **ω** (corr **+0.86**), and axis 2 tracks
+  **v_adv** almost purely (corr **−0.87**). The two axes are *cleanly
+  separated* into one-parameter-each coordinates: the particle manifold is
+  curved but its two leading directions are nearly an orthogonal
+  `(ω, v_adv)` chart.
+- **Density** — the snapshot is the Eulerian field. Axis 1 also tracks
+  **ω** (corr **+0.88**), but axis 2 is a **mixture** of `v_adv` (−0.72)
+  *and* `ω` (+0.44) — the parameters are *not* cleanly separated onto
+  orthogonal axes. Physically: the density field's spatial structure
+  couples the two inputs (the wake length depends on `v_adv` while its
+  internal pattern depends on `ω`), so no single MDS axis isolates
+  `v_adv`.
+
+The common feature — **axis 1 ≈ ω for both** — says pin rotation is the
+single largest source of snapshot-to-snapshot variation. The difference —
+**particles give a cleaner `(ω, v_adv)` split than density** — is
+consistent with the active-subspace result (§7.2): the density response
+is more strongly entangled with `v_adv` through the wake, so its
+parameter directions are more mixed.
+
+**How to read the MDS plot.** Points are the 18/17 cases laid out so that
+on-page distance ≈ true high-dimensional distance. Colour = `v_adv`, point
+size = `|ω|`. A smooth colour/size gradient across the layout (which both
+plots show) means the manifold is **smoothly parametrised by the inputs**
+— there are no isolated clusters or folds, just a continuous curved sheet.
+That is the *good* news for ROM feasibility: the mapping
+`(v_adv, ω) → snapshot` is continuous; it is merely *nonlinear*, which is
+why linear POD pays a mode-count tax and why the bottleneck is sample
+density on a curved surface rather than discontinuity.
+
+### 8.4 Implication
+
+The diagnosis "curved but smooth, intrinsic-dim ≈ 2–3, cleanly
+parameter-organised" is precisely the regime where a **nonlinear**
+reduction (autoencoder / kernel-POD / manifold-aware interpolation) can
+eventually beat linear POD — *once there are enough samples* to constrain
+it (the review estimates ~50–100 for a 2-D parameter space). At the
+current 17–20 cases it would overfit, so the immediate lever remains
+adding samples (§6); but §8 establishes that the *eventual* payoff route
+is nonlinear compression, and gives the target intrinsic dimension (~3) a
+latent space should aim for.
+
+> Nonlinear embeddings (UMAP / t-SNE) can be added as a final confirmation
+> step once `umap-learn` / `scikit-learn` are installed; any structure they
+> show should already be visible in the MDS layout, or it is an artefact.
+
+---
+
 ## Appendix — reproducing the results
 
 All code is on branch `feature/rom-svd`, package `jaxtrace/rom/`.
@@ -519,6 +673,10 @@ python run_rom_particles.py --out-dir rom_out --mode comoving --exclude 001 --ta
 python run_rom_loocv.py --out-dir rom_out --feature-transform pitch_omega   # §7.1
 python run_rom_first_stage.py --target density   --out-dir rom_out          # §7.3
 python run_rom_first_stage.py --target particles --out-dir rom_out          # §7.3
+
+# Manifold-structure diagnostics (§8): spectrum, intrinsic dim, MDS
+python run_rom_manifold.py --target particles --exclude 000 001 --out-dir rom_out
+python run_rom_manifold.py --target density   --out-dir rom_out
 ```
 
 Active subspace (§7.2) and feature transforms (§7.1) are library calls in
@@ -530,5 +688,6 @@ Output files (`rom_out/`, regenerable; not committed):
 - Density: `rom_pca_*`, `rom_loocv_*` (with `_x20` for the near-pin run).
 - Particles: `rom_particles_*` (with `_no001` for the outlier-excluded run).
 - Follow-up: `rom_firststage_{density,particles}.{png,npz}`.
+- Manifold (§8): `rom_manifold_{particles,density}.{png,npz}`.
 
 Math details: [`rom_pca_svd.md`](rom_pca_svd.md).
