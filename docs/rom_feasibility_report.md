@@ -38,7 +38,17 @@ the higher-level, shareable summary.
 | field | `mean_density` (ImageData) | per-particle positions (trajectory) |
 | snapshot | one static 3D field | final-step displacement of 360k particles |
 | cases available | 19 (002 has no density file) | 20 (all cases) |
-| cases used | 17 (see §2.1) | 20, or 19 excluding the 001 outlier |
+| cases used | 19 (see §9) | 20 (see §9) |
+
+> **Update (full-dataset rerun, §9).** Sections 2–8 were first carried out
+> with cases 000/001 *excluded*, because their original runs contained
+> runaway particles (see §9 for the root cause). Those two cases were
+> **re-run and are now clean** (0 % runaways, consistent grids, identical
+> seeds), so the studies were repeated **including all cases** — 19 for
+> density (002 still has no density file) and **all 20** for particles.
+> The numbers in §§2–8 below are the original (reduced-set) values;
+> **§9 reports the corrected all-cases results**, which are very close,
+> confirming the conclusions were not driven by the exclusions.
 
 **Authoritative parameters** come from each case's `run_jaxtrace.sh`
 (`INLET_VELOCITY`, `DT`, `N_STEPS`, `PIN_RPM`). The `dt` column in
@@ -652,31 +662,127 @@ latent space should aim for.
 
 ---
 
+## 9. Full-dataset rerun (cases 000/001 fixed)
+
+### 9.1 Root cause of the 000/001 anomaly, and the fix
+
+Cases 000 and 001 were excluded from §§2–8 for two seemingly separate
+reasons (density grid-extent outlier; particle runaway). They are in fact
+**one and the same defect**: their original tracking runs produced
+**~1.4–2.5 % runaway particles** that diverged to `x ≈ 2–3.7 m` against a
+~0.08 m physical domain. Because the density driver sizes its voxel grid
+from the trajectory bounding box, those runaways inflated the grid to
+10¹¹–10¹² voxels → a 284 GiB–1.75 TiB allocation → CUDA out-of-memory and
+int32 overflow. So the runs "succeeded" (exit 0) but their density was
+broken/missing, and the particle clouds carried non-physical outliers that
+dominated every Euclidean distance and singular value.
+
+The two cases were **re-run** (cloned tracking config from a known-good
+case; the density side made robust with an absolute physical ROI box that
+caps the grid and excludes runaways). The reruns are now **clean and
+consistent with the rest of the set**:
+
+- **0 % runaways** — final-step extents `x ∈ [−0.008, 0.080]`, matching the
+  clean cases exactly;
+- **seed positions byte-identical** to the other cases (particle
+  correspondence preserved);
+- **density grids back in family** — case 001 is no longer the short-x
+  outlier; the all-cases intersection box recovers to **x-span ≈ 0.048**
+  (it had collapsed to ≈ 0.005 with the old 001).
+
+With this, **no case needs to be dropped** (002 still lacks a density file).
+
+### 9.2 Corrected results — all cases
+
+The full suite was re-run on **19 density** (000/001 added; 002 absent) and
+**all 20 particle** cases. Headline comparison:
+
+| study | metric | reduced set (§§2–8) | **all cases (§9)** |
+|---|---|---|---|
+| density | cases | 17 | **19** |
+| density | linear PCs for 90 % | 9 | **10** |
+| density | LOOCV, full domain (rbf) | 28.2 % (K=7) | **28.2 %** (K=8) |
+| density | LOOCV, near-pin x20 (best) | 25.9 % (rbf) | **24.8 %** (per_case_l2, K=7) |
+| density | best normalization (full) | per_case_l2 27.9 % | per_case_l2 **27.8 %** |
+| particles | cases | 19 (excl 001) | **20** |
+| particles | mode-1 energy | 38.8 % | **37.1 %** |
+| particles | linear PCs for 90 % | 11 | **11** |
+| particles | LOOCV, comoving (rbf) | 36.9 % (K=8) | **36.1 %** (K=8) |
+
+**Every conclusion from §§2–8 holds, and the numbers barely move** — the
+clearest evidence that the earlier exclusions did not bias the study. Two
+small improvements appear because the dataset is now complete and clean:
+the particle PCA is no longer outlier-dominated (mode-1 drops from the
+runaway-inflated value to a healthy 37 %, so the all-20 run is *usable*
+where the old all-20 run gave 99 % LOOCV), and the near-pin density LOOCV
+edges down to **24.8 %** — the best result in the whole study.
+
+The first-stage-input and normalization findings are unchanged: velocity
+coefficients alone are marginally best for density (27.5 %), first-stage
+inputs do not help particles, and piling on all fields overfits.
+
+### 9.3 Manifold diagnostics — cleaner, same conclusion
+
+Re-running §8 with all cases sharpens the geometry result, because the
+runaway outliers that previously perturbed the distance matrix are gone:
+
+| quantity | particles (20) | density (19) |
+|---|---|---|
+| linear PCs for 90 % | 11 | 10 |
+| intrinsic dim (correlation) | ≈ 3.3 | ≈ 2.7 |
+| **MDS negative eigenvalues** | **0 / 20** | **0 / 19** |
+| MDS axis-1 corr (v_adv, ω) | (+0.45, −0.86) | (−0.13, **−0.91**) |
+| MDS axis-2 corr (v_adv, ω) | (**+0.88**, +0.47) | (+0.85, −0.32) |
+
+The **high-linear / low-intrinsic-dimension curved-manifold** signature is
+unchanged. Notably the negative-eigenvalue count drops from 1 to **0** for
+both: with the outliers removed the distances are essentially
+Euclidean-embeddable in the leading directions, so the residual "curvature"
+seen earlier was partly an outlier artefact — the *true* manifold is a
+clean, smoothly `(v_adv, ω)`-parametrised curved sheet. The axis pattern
+is also unchanged in character: **axis 1 ≈ ω for both** (now even stronger
+for density, corr −0.91), particles give a clean `(ω, v_adv)` split, and
+density's axis 2 still mixes the parameters (the §8.3 explanation stands).
+
+### 9.4 Bottom line
+
+The data-quality fix removes the last caveat from the study: the surrogate
+results (~28 % density, ~36 % particle LOOCV; near-pin best ≈ 25 %), the
+sample-starvation diagnosis, and the curved-manifold geometry all hold on
+the **complete, clean 19/20-case dataset**. The recommended next step is
+unchanged — add samples in the high-|ω| / low-v_adv corner — and is now
+unobstructed by any excluded or suspect cases.
+
+---
+
 ## Appendix — reproducing the results
 
 All code is on branch `feature/rom-svd`, package `jaxtrace/rom/`.
 
-```bash
-# Density: elbow + normalization comparison, then LOOCV
-python run_rom_pca.py    --out-dir rom_out
-python run_rom_loocv.py  --out-dir rom_out
-python run_rom_loocv.py  --out-dir rom_out --compare-normalize --compare-regressor rbf
-# Density: near-pin first 20% of x (separate filenames via --tag)
-python run_rom_pca.py    --out-dir rom_out --x-keep-fraction 0.2 --tag x20
-python run_rom_loocv.py  --out-dir rom_out --x-keep-fraction 0.2 --tag x20
+All-cases commands (post §9 rerun: 002 has no density file; particles use
+all 20). Drop `--exclude 002` / add exclusions to reproduce the original
+reduced-set numbers in §§2–8.
 
-# Particles: stats + elbow comparison + LOOCV (exclude the 001 outlier)
-python run_rom_particles.py --out-dir rom_out --mode comoving
-python run_rom_particles.py --out-dir rom_out --mode comoving --exclude 001 --tag no001
+```bash
+# Density (19 cases): elbow + normalization comparison, then LOOCV
+python run_rom_pca.py    --exclude 002 --out-dir rom_out
+python run_rom_loocv.py  --exclude 002 --out-dir rom_out
+python run_rom_loocv.py  --exclude 002 --out-dir rom_out --compare-normalize --compare-regressor rbf
+# Density: near-pin first 20% of x (separate filenames via --tag)
+python run_rom_pca.py    --exclude 002 --x-keep-fraction 0.2 --tag x20 --out-dir rom_out
+python run_rom_loocv.py  --exclude 002 --x-keep-fraction 0.2 --tag x20 --out-dir rom_out
+
+# Particles (all 20): stats + elbow comparison + LOOCV
+python run_rom_particles.py --mode comoving --out-dir rom_out
 
 # Follow-up (§7): input features and first-stage ROM coefficients
-python run_rom_loocv.py --out-dir rom_out --feature-transform pitch_omega   # §7.1
-python run_rom_first_stage.py --target density   --out-dir rom_out          # §7.3
-python run_rom_first_stage.py --target particles --out-dir rom_out          # §7.3
+python run_rom_loocv.py --exclude 002 --feature-transform pitch_omega --out-dir rom_out  # §7.1
+python run_rom_first_stage.py --target density   --exclude 002 --out-dir rom_out         # §7.3
+python run_rom_first_stage.py --target particles --out-dir rom_out                       # §7.3
 
-# Manifold-structure diagnostics (§8): spectrum, intrinsic dim, MDS
-python run_rom_manifold.py --target particles --exclude 000 001 --out-dir rom_out
-python run_rom_manifold.py --target density   --out-dir rom_out
+# Manifold-structure diagnostics (§8/§9): spectrum, intrinsic dim, MDS
+python run_rom_manifold.py --target particles --exclude    --out-dir rom_out   # all 20
+python run_rom_manifold.py --target density   --exclude 002 --out-dir rom_out  # 19
 ```
 
 Active subspace (§7.2) and feature transforms (§7.1) are library calls in
