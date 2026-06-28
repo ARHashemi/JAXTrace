@@ -1014,6 +1014,21 @@ def create_rk4_comparison(
         ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
         return valid & (ls_val < 0.0)
 
+    # ---- Velocity provider abstraction ----
+    # The RK4 body reaches the mesh through exactly two surfaces per stage:
+    # a search (host element from position) and an interpolate (velocity
+    # from element + position), plus an optional tool-region check used by
+    # the skip_step failed-substage policy. We wrap those closures in a
+    # MeshVelocityProvider so the per-stage call site has the same shape
+    # as the analytic path (AnalyticVelocityProvider in
+    # jaxtrace/gpu/tracking/velocity_provider.py). Behaviour is unchanged.
+    from jaxtrace.gpu.tracking.velocity_provider import build_mesh_provider
+    _provider = build_mesh_provider(
+        search_fn=search_l0_l1_l2,
+        interpolate_fn=interpolate_velocity_single,
+        check_inside_tool_fn=(check_inside_tool if use_skip_step_on_tool else None),
+    )
+
     # ---- RK4 step ----
     # Two modes selected at create-time (Python-level, not traced):
     #   'fused'  — vmap(rk4_single): all stages fused per particle (validated)
@@ -1115,23 +1130,31 @@ def create_rk4_comparison(
 
     else:
         # ---- Fused mode (default, validated) ----
+        # Per-stage velocity fetch goes through _provider.sample() so the
+        # mesh and analytic paths share one body shape. Behaviour is
+        # unchanged: for the mesh provider, sample() is exactly
+        #   elem = search_l0_l1_l2(pos, hint)
+        #   vel  = interpolate_velocity_single(pos, elem, velocity_field)
+        # and tool_mask() is check_inside_tool() when use_skip_step_on_tool.
         @jax.jit
         def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
             n_timesteps = velocity_fields_gpu.shape[0]
             vel_idx = time_idx % n_timesteps
             velocity_field = velocity_fields_gpu[vel_idx]
+            # Real-valued physical time at the start of this step.
+            # The mesh provider ignores it (slice already picked above);
+            # the analytic provider uses it when is_time_dependent=True.
+            t_phys = (time_idx.astype(dt.dtype) if hasattr(time_idx, 'dtype') else jnp.asarray(time_idx, dtype=dt.dtype)) * dt
 
             def rk4_single(pos, elem_id):
                 # Stage 1
-                elem_k1 = search_l0_l1_l2(pos, elem_id)
-                vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+                vel_k1, elem_k1 = _provider.sample(pos, elem_id, velocity_field, t_phys)
                 pos_k1 = pos + 0.5 * dt * vel_k1
 
                 # Stage 2
                 if use_bbox_clamp:
                     pos_k1 = clamp_to_bbox(pos_k1)
-                elem_k2 = search_l0_l1_l2(pos_k1, elem_k1)
-                vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+                vel_k2, elem_k2 = _provider.sample(pos_k1, elem_k1, velocity_field, t_phys + 0.5 * dt)
                 if use_last_valid_vel:
                     vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
                 pos_k2 = pos + 0.5 * dt * vel_k2
@@ -1139,8 +1162,7 @@ def create_rk4_comparison(
                 # Stage 3
                 if use_bbox_clamp:
                     pos_k2 = clamp_to_bbox(pos_k2)
-                elem_k3 = search_l0_l1_l2(pos_k2, elem_k2)
-                vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+                vel_k3, elem_k3 = _provider.sample(pos_k2, elem_k2, velocity_field, t_phys + 0.5 * dt)
                 if use_last_valid_vel:
                     vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
                 pos_k3 = pos + dt * vel_k3
@@ -1148,13 +1170,12 @@ def create_rk4_comparison(
                 # Stage 4
                 if use_bbox_clamp:
                     pos_k3 = clamp_to_bbox(pos_k3)
-                elem_k4 = search_l0_l1_l2(pos_k3, elem_k3)
-                vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+                vel_k4, elem_k4 = _provider.sample(pos_k3, elem_k3, velocity_field, t_phys + dt)
                 if use_last_valid_vel:
                     vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
 
                 pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
-                elem_final = search_l0_l1_l2(pos_final, elem_k4)
+                _, elem_final = _provider.sample(pos_final, elem_k4, velocity_field, t_phys + dt)
 
                 if use_skip_step_on_fail:
                     any_failed = (elem_k1 < 0) | (elem_k2 < 0) | (elem_k3 < 0) | (elem_k4 < 0)
@@ -1163,10 +1184,10 @@ def create_rk4_comparison(
 
                 if use_skip_step_on_tool:
                     any_inside = (
-                        check_inside_tool(pos, elem_k1) |
-                        check_inside_tool(pos_k1, elem_k2) |
-                        check_inside_tool(pos_k2, elem_k3) |
-                        check_inside_tool(pos_k3, elem_k4)
+                        _provider.tool_mask(pos,    elem_k1, t_phys) |
+                        _provider.tool_mask(pos_k1, elem_k2, t_phys + 0.5 * dt) |
+                        _provider.tool_mask(pos_k2, elem_k3, t_phys + 0.5 * dt) |
+                        _provider.tool_mask(pos_k3, elem_k4, t_phys + dt)
                     )
                     pos_final = jnp.where(any_inside, pos, pos_final)
                     elem_final = jnp.where(any_inside, elem_id, elem_final)
@@ -1176,7 +1197,7 @@ def create_rk4_comparison(
                     pos_clamped = clamp_to_bbox(pos_final)
                     pos_search = jnp.where(lost, pos_clamped, pos_final)
                     hint_elem = jnp.where(lost, elem_k4, elem_final)
-                    elem_recovered = search_l0_l1_l2(pos_search, hint_elem)
+                    _, elem_recovered = _provider.sample(pos_search, hint_elem, velocity_field, t_phys + dt)
                     pos_final = jnp.where(lost, pos_clamped, pos_final)
                     elem_final = jnp.where(lost, elem_recovered, elem_final)
 
