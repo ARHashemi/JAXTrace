@@ -1212,6 +1212,173 @@ def create_rk4_comparison(
 
 
 # =============================================================================
+# Analytic RK4 builder — for --velocity-source analytic
+# =============================================================================
+
+def create_rk4_analytic(
+    provider,
+    domain_bbox_min=None,
+    domain_bbox_max=None,
+    clamp_min_mask=None,
+    clamp_max_mask=None,
+    use_substep_bbox_clamp=None,
+    use_boundary_projection_clamp=None,
+    boundary_projection_tol=None,
+):
+    """Build a fully-fused RK4 step function for an analytic velocity provider.
+
+    Same per-particle step shape as create_rk4_comparison()'s fused mode
+    but with no mesh-search, no level-set, no interpolation. The
+    velocity at every sub-stage comes from
+        provider.sample(pos, _, _, t) -> (vel, _)
+    where `_` are placeholders the analytic provider ignores.
+
+    The signature of the returned `rk4_step` matches the mesh version:
+        rk4_step(positions, element_ids, dt, velocity_fields_gpu, time_idx)
+            -> (positions_final, element_ids_final)
+    so run_tracking.py's main loop can call either kernel
+    interchangeably. `element_ids` and `velocity_fields_gpu` are
+    accepted but ignored on the analytic path; `element_ids_final` is
+    returned as a constant -1 array (analytic particles have no host
+    element).
+
+    Optional clamping / boundary projection
+    ---------------------------------------
+    The analytic path does NOT perform mesh-based boundary recovery
+    (there is no "lost" state — sample() always succeeds). However,
+    the user-supplied `domain_bbox` defines a logical domain, and we
+    optionally:
+
+      * `use_substep_bbox_clamp` — clamp positions inside the bbox
+        between RK4 sub-stages. Numerical safety only; off by default.
+        Set via config.RK4_SUBSTEP_BBOX_CLAMP, same as the mesh path.
+
+      * `use_boundary_projection_clamp` — at the end of each step,
+        clamp the final position to the bbox (no recovery search,
+        just a snap). When the driver wants per-wall clamp/ballistic/
+        freeze behaviour, the same post-step logic that already runs
+        on the mesh path (in run_tracking.py) applies here too — this
+        kernel just returns positions; wall classification happens
+        outside.
+
+    Args
+    ----
+    provider : AnalyticVelocityProvider
+        Constructed by velocity_provider.load_analytic_provider().
+    domain_bbox_min, domain_bbox_max : (3,) jnp.ndarray, optional
+        Domain bbox for substep clamp and boundary projection. Falls
+        back to provider.domain_bbox when not supplied.
+    clamp_min_mask, clamp_max_mask : (3,) jnp.ndarray of bool, optional
+        Per-axis enable masks for the clamp. Defaults to all-True.
+    use_substep_bbox_clamp : bool, optional
+        Whether to clamp positions between sub-stages. Defaults to
+        config.RK4_SUBSTEP_BBOX_CLAMP.
+    use_boundary_projection_clamp : bool, optional
+        Whether to clamp the final position to the bbox. Defaults to
+        config.RK4_BOUNDARY_PROJECTION.
+    boundary_projection_tol : float, optional
+        Inward offset applied when clamping. Defaults to
+        config.RK4_BOUNDARY_PROJECTION_TOL.
+    """
+    if not hasattr(provider, 'is_mesh_based') or provider.is_mesh_based:
+        raise TypeError(
+            "create_rk4_analytic() requires an AnalyticVelocityProvider; "
+            f"got {type(provider).__name__}."
+        )
+
+    # Resolve defaults from config when caller didn't override.
+    if use_substep_bbox_clamp is None:
+        use_substep_bbox_clamp = config.RK4_SUBSTEP_BBOX_CLAMP
+    if use_boundary_projection_clamp is None:
+        use_boundary_projection_clamp = config.RK4_BOUNDARY_PROJECTION
+    if boundary_projection_tol is None:
+        boundary_projection_tol = config.RK4_BOUNDARY_PROJECTION_TOL
+
+    # Domain bbox: prefer explicit args; fall back to provider's bbox.
+    if domain_bbox_min is None or domain_bbox_max is None:
+        if provider.domain_bbox is None:
+            use_substep_bbox_clamp = False
+            use_boundary_projection_clamp = False
+            domain_bbox_min = jnp.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+            domain_bbox_max = jnp.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+        else:
+            xb, yb, zb = provider.domain_bbox
+            domain_bbox_min = jnp.asarray(
+                [xb[0], yb[0], zb[0]], dtype=config.FLOAT_DTYPE_NP
+            )
+            domain_bbox_max = jnp.asarray(
+                [xb[1], yb[1], zb[1]], dtype=config.FLOAT_DTYPE_NP
+            )
+
+    if clamp_min_mask is None:
+        clamp_min_mask = jnp.array([True, True, True])
+    if clamp_max_mask is None:
+        clamp_max_mask = jnp.array([True, True, True])
+
+    tol = boundary_projection_tol
+
+    def clamp_to_bbox(pos):
+        """Clamp to bbox, applying +tol inward only on the clamped axis."""
+        hit_min = clamp_min_mask & (pos < domain_bbox_min)
+        clamped = jnp.where(hit_min, domain_bbox_min + tol, pos)
+        hit_max = clamp_max_mask & (clamped > domain_bbox_max)
+        clamped = jnp.where(hit_max, domain_bbox_max - tol, clamped)
+        return clamped
+
+    @jax.jit
+    def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
+        # Real physical time at start of step. Unused if the provider is steady.
+        # We do the cast carefully so float32/64 paths both work.
+        t_phys = (
+            time_idx.astype(dt.dtype)
+            if hasattr(time_idx, 'dtype')
+            else jnp.asarray(time_idx, dtype=dt.dtype)
+        ) * dt
+
+        # velocity_fields_gpu is accepted for signature symmetry with
+        # the mesh kernel; the analytic provider ignores it.
+        _dummy_field = velocity_fields_gpu  # noqa: F841
+
+        def rk4_single(pos, elem_id):
+            # Stage 1
+            vel_k1, _ = provider.sample(pos, elem_id, velocity_fields_gpu, t_phys)
+            pos_k1 = pos + 0.5 * dt * vel_k1
+            if use_substep_bbox_clamp:
+                pos_k1 = clamp_to_bbox(pos_k1)
+
+            # Stage 2
+            vel_k2, _ = provider.sample(pos_k1, elem_id, velocity_fields_gpu, t_phys + 0.5 * dt)
+            pos_k2 = pos + 0.5 * dt * vel_k2
+            if use_substep_bbox_clamp:
+                pos_k2 = clamp_to_bbox(pos_k2)
+
+            # Stage 3
+            vel_k3, _ = provider.sample(pos_k2, elem_id, velocity_fields_gpu, t_phys + 0.5 * dt)
+            pos_k3 = pos + dt * vel_k3
+            if use_substep_bbox_clamp:
+                pos_k3 = clamp_to_bbox(pos_k3)
+
+            # Stage 4
+            vel_k4, _ = provider.sample(pos_k3, elem_id, velocity_fields_gpu, t_phys + dt)
+
+            pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
+
+            if use_boundary_projection_clamp:
+                pos_final = clamp_to_bbox(pos_final)
+
+            # element_id stays whatever the caller passed (typically -1).
+            # We don't have a host element to report.
+            return pos_final, elem_id
+
+        positions_final, element_ids_final = jax.vmap(rk4_single)(
+            positions_gpu, element_ids_gpu
+        )
+        return positions_final, element_ids_final
+
+    return rk4_step
+
+
+# =============================================================================
 # Comparison Analysis
 # =============================================================================
 
