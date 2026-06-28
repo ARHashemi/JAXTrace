@@ -70,6 +70,35 @@ ENABLE_UNION=0
 
 # ── [2] Precision & velocity field ───────────────────────────────────────────
 PRECISION=float32          # float32 | float64
+
+# VELOCITY_SOURCE picks the velocity-field backend:
+#   mesh      — load nodal velocity from --input PVTU files; per-RK4-stage
+#               interpolate via L0/L1/L2 octree search. Default for every
+#               cohort case today.
+#   analytic  — call a user-supplied JAX function on every sub-stage. No
+#               mesh load, no search, no interpolation. Particles are
+#               seeded inside DOMAIN_BBOX (or the velocity module's own
+#               default). Inlet drift / FEMUSS / level-set / pin-velocity
+#               are mesh-only and are silently ignored on the analytic
+#               path; embed any upstream behaviour in velocity_fn itself.
+VELOCITY_SOURCE=mesh
+
+# VELOCITY_MODULE: path to the user .py exposing
+#     build_provider(domain_bbox, dt, t_start=0.0) -> AnalyticVelocityProvider
+# Required when VELOCITY_SOURCE=analytic. Reference fields ship under
+# $JAXTRACE/jaxtrace/analytic_fields/:
+#   uniform.py                       — v(x) = (V_ref, 0, 0). Sanity baseline.
+#   divergence_free_recirculation.py — streamfunction-derived field from
+#                                       FSW Internal Summary §A (steady,
+#                                       divergence-free, recirculation).
+VELOCITY_MODULE=""
+
+# DOMAIN_BBOX: six floats "XMIN XMAX YMIN YMAX ZMIN ZMAX" for the
+# analytic path. When empty, the velocity module's own default bbox is
+# used. Mesh path ignores this.
+DOMAIN_BBOX=""
+
+# ── [2b] Mesh-path velocity field (ignored on analytic path) ─────────────────
 VEL_START=159
 VEL_END=159
 VELOCITY_FIELD=Displacement
@@ -563,6 +592,7 @@ ARGS=(
     --mesh-subdir        "$MESH_SUBDIR"
     --femuss-subdir      "$FEMUSS_SUBDIR"
     --precision          "$PRECISION"
+    --velocity-source    "$VELOCITY_SOURCE"
     --vel-range          "$VEL_START" "$VEL_END"
     --velocity-field     "$VELOCITY_FIELD"
     --levelset-field     "$LEVELSET_FIELD"
@@ -600,6 +630,11 @@ if [ -n "${INLET_WALL:-}" ]; then
     ARGS+=( --inlet-wall "$INLET_WALL" --inlet-velocity "$INLET_VELOCITY" )
 fi
 [ -n "$REGISTRATION"     ] && ARGS+=( --registration        "$REGISTRATION"     )
+# Analytic-velocity knobs. Only --velocity-source is always passed (its
+# default is "mesh"); the others are only added when set, so they don't
+# clutter the mesh-path CLI.
+[ -n "$VELOCITY_MODULE"  ] && ARGS+=( --velocity-module     "$VELOCITY_MODULE"  )
+[ -n "$DOMAIN_BBOX"      ] && ARGS+=( --domain-bbox         $DOMAIN_BBOX        )
 [ "$ORPHAN_FALLBACK"    = "0" ] && ARGS+=( --no-orphan-fallback  )
 [ "$HYBRID_NON_KUHN"    = "0" ] && ARGS+=( --no-hybrid-non-kuhn  )
 [ "$LEVELSET_ENABLE"    = "0" ] && ARGS+=( --no-levelset         )

@@ -63,6 +63,7 @@ os.environ.setdefault('JAX_PLATFORMS', 'cuda,rocm,cpu')
 
 import sys
 import time
+import json
 import argparse
 import numpy as np
 from pathlib import Path
@@ -179,14 +180,47 @@ def parse_args():
                         choices=["float32", "float64"],
                         help="Floating-point precision (parsed early from sys.argv)")
 
-    # --- Velocity field ---
+    # --- Velocity source: mesh or analytic ---
+    # Two paths through the kernel:
+    #   mesh      — load velocity from mesh PVTU files; per-stage interpolate
+    #               via L0/L1/L2 octree search (default; this is what every
+    #               cohort case uses today).
+    #   analytic  — load a user-supplied JAX-pure velocity function
+    #               (velocity_module). No mesh, no search, no interpolation;
+    #               the same fully fused RK4 step calls velocity_fn(pos) or
+    #               velocity_fn(pos, t) at each sub-stage. Particles are
+    #               seeded inside --domain-bbox; wall behaviour (clamp /
+    #               outlet) is controlled by --boundary-walls as on the
+    #               mesh path. Inlet drift / FEMUSS / level-set masking
+    #               are NOT used here — fold any upstream-stream behaviour
+    #               into velocity_fn itself.
+    parser.add_argument("--velocity-source", type=str, default="mesh",
+                        choices=["mesh", "analytic"],
+                        help="Where velocity values come from per sub-stage")
+    parser.add_argument("--velocity-module", type=str, default=None,
+                        help="Path to a user .py exporting build_provider(...). "
+                             "Required when --velocity-source=analytic. See "
+                             "jaxtrace/analytic_fields/uniform.py for a template "
+                             "and jaxtrace/analytic_fields/divergence_free_recirculation.py "
+                             "for the streamfunction-derived field from the FSW "
+                             "Internal Summary appendix §A.")
+    parser.add_argument("--domain-bbox", type=float, nargs=6, default=None,
+                        metavar=("XMIN", "XMAX", "YMIN", "YMAX", "ZMIN", "ZMAX"),
+                        help="Six floats defining the logical domain bounding box "
+                             "for the analytic path (xmin xmax ymin ymax zmin zmax). "
+                             "When omitted, the velocity module's default bbox is "
+                             "used; if both are absent, falls back to a generous "
+                             "10m cube around the origin.")
+
+    # --- Velocity field (mesh path) ---
     parser.add_argument("--vel-range", type=int, nargs=2, default=[159, 159],
                         metavar=("START", "END"),
-                        help="Velocity timestep range (inclusive) for cyclic loading")
+                        help="Velocity timestep range (inclusive) for cyclic loading "
+                             "(mesh path only)")
     parser.add_argument("--velocity-field", type=str, default=VELOCITY_FIELD_NAME,
-                        help="Velocity field name in mesh PVTU")
+                        help="Velocity field name in mesh PVTU (mesh path only)")
     parser.add_argument("--levelset-field", type=str, default=LEVELSET_FIELD_NAME,
-                        help="Level-set field name in mesh PVTU")
+                        help="Level-set field name in mesh PVTU (mesh path only)")
 
     # --- Simulation parameters ---
     parser.add_argument("--n-steps", type=int, default=2684,
@@ -775,8 +809,384 @@ def _resolve_case_paths(args):
     return stem
 
 
+# =============================================================================
+# Analytic-source path
+# =============================================================================
+
+def _run_analytic_tracking(args):
+    """Drive RK4 tracking against a user-supplied analytic velocity field.
+
+    No mesh load, no octree build, no FEMUSS comparison. Particles are
+    seeded inside `--domain-bbox` (or the velocity module's default
+    bbox) according to `--seed-source`. The RK4 step is built via
+    create_rk4_analytic(); per-step plumbing (export, monitor, manifest)
+    is shared with the mesh path where it doesn't depend on the mesh.
+
+    This function is intentionally simpler than the mesh main(). Several
+    features are deliberately not supported on the analytic path:
+
+      * --seed-source femuss / file (mesh-tied)
+      * --inlet-wall / --inlet-velocity (mesh-tied; embed any upstream
+        stream behaviour in velocity_fn directly)
+      * --pin-velocity / --no-levelset (mesh-tied)
+      * --femuss-compare (mesh-tied)
+      * --export-temperature / --track-max-temperature (mesh-tied)
+      * --boundary-walls ballistic / freeze (would require last_vel
+        tracking and pre/post-step snapshots; out of scope here)
+
+    Supported:
+      * --seed-source grid / box / grid-frac / box-frac
+      * --seed-grid / --seed-box / --seed-fraction
+      * --domain-bbox (or auto from the velocity module)
+      * --boundary-walls clamp / outlet (per-axis via the bbox clamp)
+      * --n-steps / --dt
+      * --output / --export-freq / --log-interval
+      * --no-export (skip particle export entirely)
+      * --bbox-clamp / --no-bbox-clamp (substep clamp)
+    """
+    import datetime
+    import time as _time
+
+    from jaxtrace.gpu.tracking.velocity_provider import (
+        load_analytic_provider,
+    )
+    from benchmark_femuss_comparison import create_rk4_analytic
+
+    # ----- Validate args for the analytic path -----
+    if not args.velocity_module:
+        print("ERROR: --velocity-source=analytic requires --velocity-module PATH",
+              file=sys.stderr)
+        return 2
+    if not Path(args.velocity_module).is_file():
+        print(f"ERROR: --velocity-module file not found: {args.velocity_module}",
+              file=sys.stderr)
+        return 2
+
+    # Reject features that are genuinely incompatible with the analytic
+    # path (so the user fails fast). Silently downgrade pin / level-set /
+    # temperature: those default to "on" but only do anything when a mesh
+    # is loaded, so leaving them in their CLI defaults must not block an
+    # analytic run.
+    rejected = []
+    if args.seed_source not in ("grid", "box", "grid-frac", "box-frac"):
+        rejected.append(
+            f"--seed-source={args.seed_source} (analytic path: use grid/box/grid-frac/box-frac)"
+        )
+    if getattr(args, "femuss_compare", False):
+        rejected.append("--femuss-compare (mesh-tied)")
+    if getattr(args, "inlet_wall", "none") != "none":
+        rejected.append("--inlet-wall (mesh-tied; embed upstream stream in velocity_fn)")
+    if rejected:
+        print("ERROR: the following options are not supported on --velocity-source=analytic:",
+              file=sys.stderr)
+        for r in rejected:
+            print(f"  {r}", file=sys.stderr)
+        return 2
+
+    # Silently disable mesh-tied features that the user may have left at
+    # their CLI defaults. The analytic path doesn't load a mesh, so
+    # nothing reads these anyway — printing a notice keeps the run banner
+    # honest without forcing the user to add `--no-pin-velocity` etc.
+    silently_disabled = []
+    if getattr(args, "pin_velocity", False) and not getattr(args, "no_pin_velocity", False):
+        silently_disabled.append("pin-velocity")
+    if not getattr(args, "no_levelset", False):
+        silently_disabled.append("level-set masking")
+    if getattr(args, "track_max_temperature", False):
+        silently_disabled.append("max-temperature tracking")
+    if getattr(args, "export_temperature", False):
+        silently_disabled.append("temperature export")
+    if silently_disabled:
+        print(f"  [info] mesh-only features ignored on analytic path: "
+              f"{', '.join(silently_disabled)}")
+
+    # ----- Apply CLI flags to config -----
+    config.RK4_SUBSTEP_BBOX_CLAMP = args.bbox_clamp and not args.no_bbox_clamp
+    config.RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
+    config.RK4_BOUNDARY_PROJECTION_TOL = args.boundary_proj_tol
+
+    DT = args.dt
+    N_STEPS = args.n_steps
+    LOG_INTERVAL = args.log_interval
+    EXPORT_FREQUENCY = args.export_freq
+
+    # ----- Banner -----
+    print("=" * 80)
+    print("JAXTrace Production Tracking — ANALYTIC velocity source")
+    print("=" * 80)
+    print(f"JAX version: {jax.__version__}")
+    print(f"JAX devices: {jax.devices()}")
+    print()
+
+    # ----- Load the user analytic-velocity module -----
+    print("[1/4] Loading analytic velocity module...")
+    t_load = _time.time()
+
+    # Resolve the domain bbox precedence: explicit --domain-bbox wins;
+    # otherwise the velocity module's default; otherwise a generous cube.
+    cli_bbox = None
+    if args.domain_bbox is not None:
+        cli_bbox = (
+            (args.domain_bbox[0], args.domain_bbox[1]),
+            (args.domain_bbox[2], args.domain_bbox[3]),
+            (args.domain_bbox[4], args.domain_bbox[5]),
+        )
+
+    provider = load_analytic_provider(
+        module_path=args.velocity_module,
+        domain_bbox=cli_bbox,
+        dt=DT,
+    )
+
+    if provider.domain_bbox is None:
+        print("  WARNING: no domain bbox supplied via --domain-bbox or velocity "
+              "module; falling back to ((-10,10),(-10,10),(-10,10))")
+        provider = provider.__class__(
+            velocity_fn=provider.velocity_fn,
+            is_time_dependent=provider.is_time_dependent,
+            level_set_fn=provider.level_set_fn,
+            domain_bbox=((-10.0, 10.0), (-10.0, 10.0), (-10.0, 10.0)),
+            meta=provider.meta,
+        )
+
+    domain_bbox = provider.domain_bbox
+    bbox_min_np = np.asarray(
+        [domain_bbox[0][0], domain_bbox[1][0], domain_bbox[2][0]],
+        dtype=config.FLOAT_DTYPE_NP,
+    )
+    bbox_max_np = np.asarray(
+        [domain_bbox[0][1], domain_bbox[1][1], domain_bbox[2][1]],
+        dtype=config.FLOAT_DTYPE_NP,
+    )
+
+    print(f"  Module:        {args.velocity_module}")
+    if provider.meta:
+        print(f"  Field name:    {provider.meta.get('name', '<unnamed>')}")
+        if 'source' in provider.meta:
+            print(f"  Field source:  {provider.meta['source']}")
+        if 'params' in provider.meta:
+            print(f"  Parameters:    {provider.meta['params']}")
+    print(f"  Time-dependent: {provider.is_time_dependent}")
+    print(f"  Domain bbox:   x=[{bbox_min_np[0]:g}, {bbox_max_np[0]:g}]  "
+          f"y=[{bbox_min_np[1]:g}, {bbox_max_np[1]:g}]  "
+          f"z=[{bbox_min_np[2]:g}, {bbox_max_np[2]:g}]")
+    print(f"  Loaded in {_time.time() - t_load:.2f}s")
+    print()
+
+    # ----- Seed particles -----
+    print("[2/4] Seeding particles...")
+    t_seed = _time.time()
+    rng = np.random.default_rng(args.seed if hasattr(args, 'seed') else 42)
+
+    if args.seed_source in ("grid", "grid-frac"):
+        # Build a uniform grid inside the bbox.
+        if args.seed_source == "grid-frac":
+            if args.seed_fraction is None or len(args.seed_fraction) != 6:
+                print("ERROR: --seed-source=grid-frac requires "
+                      "--seed-fraction 'XLO XHI YLO YHI ZLO ZHI'", file=sys.stderr)
+                return 2
+            fx0, fx1, fy0, fy1, fz0, fz1 = args.seed_fraction
+            seed_lo = bbox_min_np + np.array([fx0, fy0, fz0]) * (bbox_max_np - bbox_min_np)
+            seed_hi = bbox_min_np + np.array([fx1, fy1, fz1]) * (bbox_max_np - bbox_min_np)
+        else:
+            # absolute box from --seed-box
+            if args.seed_box is None or len(args.seed_box) != 6:
+                print("ERROR: --seed-source=grid requires --seed-box "
+                      "'XMIN XMAX YMIN YMAX ZMIN ZMAX'", file=sys.stderr)
+                return 2
+            seed_lo = np.array(args.seed_box[::2], dtype=config.FLOAT_DTYPE_NP)
+            seed_hi = np.array(args.seed_box[1::2], dtype=config.FLOAT_DTYPE_NP)
+
+        if args.seed_grid is None or len(args.seed_grid) != 3:
+            print("ERROR: --seed-grid 'NX NY NZ' required for grid seeding",
+                  file=sys.stderr)
+            return 2
+        nx, ny, nz = args.seed_grid
+        xs = np.linspace(seed_lo[0], seed_hi[0], nx, endpoint=True)
+        ys = np.linspace(seed_lo[1], seed_hi[1], ny, endpoint=True)
+        zs = np.linspace(seed_lo[2], seed_hi[2], nz, endpoint=True)
+        X, Y, Z = np.meshgrid(xs, ys, zs, indexing='ij')
+        positions = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1).astype(
+            config.FLOAT_DTYPE_NP
+        )
+        n_particles = positions.shape[0]
+        print(f"  Grid:          {nx} x {ny} x {nz} = {n_particles:,} particles")
+        print(f"  Seed box:      x=[{seed_lo[0]:g}, {seed_hi[0]:g}]  "
+              f"y=[{seed_lo[1]:g}, {seed_hi[1]:g}]  "
+              f"z=[{seed_lo[2]:g}, {seed_hi[2]:g}]")
+
+    else:  # box / box-frac
+        if args.seed_source == "box-frac":
+            fx0, fx1, fy0, fy1, fz0, fz1 = args.seed_fraction
+            seed_lo = bbox_min_np + np.array([fx0, fy0, fz0]) * (bbox_max_np - bbox_min_np)
+            seed_hi = bbox_min_np + np.array([fx1, fy1, fz1]) * (bbox_max_np - bbox_min_np)
+        else:
+            seed_lo = np.array(args.seed_box[::2], dtype=config.FLOAT_DTYPE_NP)
+            seed_hi = np.array(args.seed_box[1::2], dtype=config.FLOAT_DTYPE_NP)
+
+        n_particles = args.n_particles
+        positions = rng.uniform(
+            low=seed_lo, high=seed_hi, size=(n_particles, 3)
+        ).astype(config.FLOAT_DTYPE_NP)
+        print(f"  Random uniform: {n_particles:,} particles")
+        print(f"  Seed box:      x=[{seed_lo[0]:g}, {seed_hi[0]:g}]  "
+              f"y=[{seed_lo[1]:g}, {seed_hi[1]:g}]  "
+              f"z=[{seed_lo[2]:g}, {seed_hi[2]:g}]")
+
+    print(f"  Seeded in {_time.time() - t_seed:.2f}s")
+    print()
+
+    # ----- Build kernel -----
+    print("[3/4] Building analytic RK4 kernel...")
+    t_build = _time.time()
+
+    # Per-wall clamp masks. We accept --boundary-walls "x_max=outlet,..." with
+    # the same syntax as the mesh path, but on the analytic side only "clamp"
+    # and "outlet" make sense (no mesh, no ballistic last-vel tracking).
+    clamp_min_mask = jnp.array([True, True, True])
+    clamp_max_mask = jnp.array([True, True, True])
+    if args.boundary_walls:
+        wall_dict = {}
+        for pair in args.boundary_walls.split(','):
+            if '=' not in pair:
+                continue
+            w, m = pair.split('=', 1)
+            wall_dict[w.strip()] = m.strip()
+        if any(m in ("ballistic", "freeze") for m in wall_dict.values()):
+            print("  WARNING: --boundary-walls ballistic/freeze is mesh-only; "
+                  "on analytic path those walls behave as 'outlet' (no clamp).")
+        clamp_min_mask = jnp.array([
+            wall_dict.get('x_min', 'clamp') == 'clamp',
+            wall_dict.get('y_min', 'clamp') == 'clamp',
+            wall_dict.get('z_min', 'clamp') == 'clamp',
+        ])
+        clamp_max_mask = jnp.array([
+            wall_dict.get('x_max', 'clamp') == 'clamp',
+            wall_dict.get('y_max', 'clamp') == 'clamp',
+            wall_dict.get('z_max', 'clamp') == 'clamp',
+        ])
+
+    bbox_min_gpu = jnp.asarray(bbox_min_np)
+    bbox_max_gpu = jnp.asarray(bbox_max_np)
+    rk4_step = create_rk4_analytic(
+        provider,
+        domain_bbox_min=bbox_min_gpu,
+        domain_bbox_max=bbox_max_gpu,
+        clamp_min_mask=clamp_min_mask,
+        clamp_max_mask=clamp_max_mask,
+    )
+
+    positions_gpu = jax.device_put(positions)
+    # element_ids: always 0 on the analytic path so "active" mask is uniformly
+    # True throughout. The provider doesn't track host elements; -1 would make
+    # every particle "lost" by the mesh-path convention.
+    element_ids_gpu = jnp.zeros(n_particles, dtype=jnp.int32)
+
+    # Dummy velocity-fields array (analytic kernel ignores it; just a
+    # placeholder that satisfies the signature).
+    velocity_sequence_gpu = jnp.zeros((1, 1, 3), dtype=config.FLOAT_DTYPE_JNP)
+
+    # Warmup compile.
+    positions_gpu, element_ids_gpu = rk4_step(
+        positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, 0
+    )
+    jax.block_until_ready(positions_gpu)
+    print(f"  Compiled + warmup in {_time.time() - t_build:.2f}s")
+    print()
+
+    # ----- Output directory + exporter -----
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    field_name = (provider.meta or {}).get('name', 'analytic')
+    output_subdir = output_dir / f"run_analytic_{field_name}_n{n_particles}_s{N_STEPS}"
+    output_subdir.mkdir(parents=True, exist_ok=True)
+    print(f"  Output subdir: {output_subdir}")
+
+    # Reuse the mesh-path exporter when available; for simplicity here we
+    # write a minimal per-step .npz instead of full VTKHDF.  Users wanting
+    # VTKHDF on the analytic path can be added later.
+    EXPORT = not args.no_export
+    if EXPORT:
+        # Initial state
+        np.savez(
+            output_subdir / f"step_{0:06d}.npz",
+            positions=np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP),
+            step=0,
+            t_phys=0.0,
+        )
+
+    # ----- Run the loop -----
+    print("[4/4] Running {} RK4 steps...".format(N_STEPS))
+    print("=" * 80)
+    t_start = _time.time()
+    DT_jnp = jnp.asarray(DT, dtype=config.FLOAT_DTYPE_JNP)
+
+    for step in range(1, N_STEPS + 1):
+        positions_gpu, element_ids_gpu = rk4_step(
+            positions_gpu, element_ids_gpu, DT_jnp, velocity_sequence_gpu, step - 1
+        )
+
+        do_log = (step % LOG_INTERVAL == 0) or (step == N_STEPS)
+        do_export = EXPORT and ((step % EXPORT_FREQUENCY == 0) or (step == N_STEPS))
+
+        if do_log:
+            elapsed = _time.time() - t_start
+            sps = step / elapsed if elapsed > 0 else 0
+            eta = (N_STEPS - step) / sps if sps > 0 else 0
+            print(f"  Step {step:5d}/{N_STEPS}: active={n_particles:,} lost=0  "
+                  f"[{elapsed:.0f}s, {sps:.1f} step/s, ETA {eta:.0f}s]")
+
+        if do_export:
+            pos_cpu = np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
+            np.savez(
+                output_subdir / f"step_{step:06d}.npz",
+                positions=pos_cpu,
+                step=step,
+                t_phys=float(step) * DT,
+            )
+
+    elapsed = _time.time() - t_start
+    print("=" * 80)
+    print(f"\nTRACKING SUMMARY")
+    print("=" * 80)
+    print(f"  Particles:   {n_particles:,}")
+    print(f"  Steps:       {N_STEPS}")
+    print(f"  Wall time:   {elapsed:.1f}s ({n_particles*N_STEPS/elapsed:,.0f} p·step/s)")
+    print(f"  Output:      {output_subdir}")
+
+    # Manifest
+    manifest = {
+        "velocity_source": "analytic",
+        "velocity_module": str(Path(args.velocity_module).resolve()),
+        "field_meta": provider.meta or {},
+        "domain_bbox": list(map(list, provider.domain_bbox)),
+        "n_particles": int(n_particles),
+        "n_steps": int(N_STEPS),
+        "dt": float(DT),
+        "seed_source": args.seed_source,
+        "started": datetime.datetime.now().isoformat(timespec='seconds'),
+        "wall_time_s": float(elapsed),
+        "throughput_p_step_per_s": float(n_particles * N_STEPS / elapsed),
+    }
+    with open(output_subdir / "manifest.json", "w") as f:
+        json.dump(manifest, f, indent=2, default=str)
+    print(f"  Manifest:    {output_subdir}/manifest.json")
+    return 0
+
+
 def main():
     args = parse_args()
+
+    # Fork on velocity source. The analytic path lives in
+    # _run_analytic_tracking() below and shares all the post-RK4
+    # plumbing (export, monitor, manifest) but skips the mesh-loading
+    # stages and uses create_rk4_analytic() instead of
+    # create_rk4_comparison(). Argument validation for the analytic
+    # path is centralised at the top of that function so any user
+    # configuration error fails before we touch the GPU.
+    if args.velocity_source == "analytic":
+        return _run_analytic_tracking(args)
+
     case_stem = _resolve_case_paths(args)
     print(f"[case] stem='{case_stem}'  post_dir={args.input}")
     print(f"[case] mesh_dir='{args._mesh_dir}'  femuss_dir='{args._femuss_dir}'")
