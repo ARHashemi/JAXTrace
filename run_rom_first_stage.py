@@ -31,6 +31,8 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fom-root", type=Path, default=DEFAULT_FOM_ROOT)
     p.add_argument("--out-dir", type=Path, default=Path("rom_out"))
+    p.add_argument("--density-filename", default="particles_union_density.vtkhdf",
+                   help="Density product: particles_union_density.vtkhdf (union/time-avg, default) or finalstep_union_density.vtkhdf (final step).")
     p.add_argument("--target", choices=["density", "particles"], default="density")
     p.add_argument("--regressor", default="rbf")
     p.add_argument("--exclude", nargs="*", default=None,
@@ -65,7 +67,9 @@ def main():
     if args.target == "density":
         excl = tuple(args.exclude) if args.exclude is not None else ("000", "001", "002")
         ds = load_dataset(exclude=excl, x_keep_fraction=args.x_keep_fraction,
-                          verbose=False)
+                          verbose=False,
+        density_filename=args.density_filename,
+    )
     else:
         excl = tuple(args.exclude) if args.exclude is not None else ("001",)
         ds = load_particle_dataset(mode="comoving", exclude=excl, verbose=False)

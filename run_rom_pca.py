@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
                    help="Root of the FOM cases.")
     p.add_argument("--out-dir", type=Path, default=Path("rom_out"),
                    help="Where to write the plot and the PCA .npz.")
+    p.add_argument("--density-filename", default="particles_union_density.vtkhdf",
+                   help="Density product: particles_union_density.vtkhdf (union/time-avg, default) or finalstep_union_density.vtkhdf (final step).")
     p.add_argument("--resolution", type=int, nargs=3, default=None,
                    metavar=("NX", "NY", "NZ"),
                    help="Common-grid resolution. Default: from median native spacing.")
@@ -177,6 +179,7 @@ def main() -> int:
         trim_lo=trim_lo,
         trim_hi=trim_hi,
         x_keep_fraction=args.x_keep_fraction,
+        density_filename=args.density_filename,
     )
     print(f"[rom] snapshot matrix: {ds.matrix.shape} "
           f"({ds.matrix.nbytes / 1024**2:.1f} MiB)")

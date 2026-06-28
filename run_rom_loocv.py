@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fom-root", type=Path, default=DEFAULT_FOM_ROOT)
     p.add_argument("--out-dir", type=Path, default=Path("rom_out"))
+    p.add_argument("--density-filename", default="particles_union_density.vtkhdf",
+                   help="Density product: particles_union_density.vtkhdf (union/time-avg, default) or finalstep_union_density.vtkhdf (final step).")
     p.add_argument("--resolution", type=int, nargs=3, default=None,
                    metavar=("NX", "NY", "NZ"))
     p.add_argument("--exclude", nargs="*", default=list(DEFAULT_EXCLUDE))
@@ -238,6 +240,7 @@ def main() -> int:
         trim_lo=trim_lo,
         trim_hi=trim_hi,
         x_keep_fraction=args.x_keep_fraction,
+        density_filename=args.density_filename,
     )
     print(f"[cv] snapshot matrix: {ds.matrix.shape}")
 

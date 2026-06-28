@@ -145,10 +145,15 @@ def discover_cases(
     fom_root: Path = DEFAULT_FOM_ROOT,
     exclude: Sequence[str] = DEFAULT_EXCLUDE,
     params_csv: Optional[Path] = None,
+    density_filename: str = "particles_union_density.vtkhdf",
 ) -> List[CaseSnapshot]:
     """
-    Find every ``particles_union_density.vtkhdf`` under ``fom_root`` and
-    attach its ``(v_adv, omega_pin)`` parameters.
+    Find every density file named ``density_filename`` under ``fom_root``
+    and attach its ``(v_adv, omega_pin)`` parameters.
+
+    ``density_filename`` selects which density product to load:
+    ``particles_union_density.vtkhdf`` (time-averaged union, default) or
+    ``finalstep_union_density.vtkhdf`` (final-step only).
 
     Parameters are read from ``case_parameters.csv`` when present (faster
     and authoritative); otherwise from each case's ``run_jaxtrace.sh``.
@@ -160,7 +165,7 @@ def discover_cases(
 
     pattern = str(
         fom_root / "cylindrical_*.gid" / "post_pt" / "*" / "union"
-        / "particles_union_density.vtkhdf"
+        / density_filename
     )
     snapshots: List[CaseSnapshot] = []
     for p in sorted(glob.glob(pattern)):
@@ -346,6 +351,7 @@ def load_dataset(
     trim_lo: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_LO,
     trim_hi: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_HI,
     x_keep_fraction: Optional[float] = None,
+    density_filename: str = "particles_union_density.vtkhdf",
     verbose: bool = True,
 ) -> SnapshotDataset:
     """
@@ -364,7 +370,8 @@ def load_dataset(
     removed), by dropping the appropriate number of high-x voxels. ``None``
     keeps the whole x-extent.
     """
-    snapshots = discover_cases(fom_root, exclude=exclude, params_csv=params_csv)
+    snapshots = discover_cases(fom_root, exclude=exclude, params_csv=params_csv,
+                               density_filename=density_filename)
     grid = build_reference_grid(snapshots, resolution=resolution)
     if verbose:
         print(f"[rom] {len(snapshots)} cases (excluded {list(exclude)})")
