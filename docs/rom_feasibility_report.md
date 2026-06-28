@@ -773,6 +773,67 @@ next step.
 
 ---
 
+## 10. Final-step vs union (time-averaged) density
+
+All the density results above use the **union** density: the
+time-*averaged* material distribution over the whole trajectory (the
+deduplicated cloud across all 2000–8000 steps). The particle study, by
+contrast, uses the **final step** only. To compare like with like — and to
+test whether a single converged snapshot is a better ROM target — we
+computed a **final-step density** for all 20 cases and re-ran the suite.
+
+**Construction.** From each (already-clean) trajectory we took only the
+last step (`--step-tail 1`, no dedup) and binned it onto a single
+**common absolute grid shared by every case**: the max bounding box of the
+final-step clouds across all cases, at the seed-grid voxel size
+(≈ 587×71×73 after trimming). Because the grid is identical for all cases,
+no per-case resampling is needed (unlike the union study). Cost is
+negligible — one step, ~360 k points per case.
+
+**Result — the union density is markedly better for ROM:**
+
+| metric | union (time-avg) | final-step |
+|---|---|---|
+| PCA modes for 90 % | **10** | 12 |
+| PC-1 energy | **37.9 %** | 25.5 % |
+| **LOOCV, full domain (rbf)** | **28.3 %** (K=7) | 49.3 % (K=8) |
+| **LOOCV, near-pin x20 (rbf)** | **24.6 %** (K=6) | 75.2 % (K=3) |
+| manifold intrinsic dim | **2.5** | 4.8 |
+
+Plot: `rom_density_union_vs_finalstep.png` (coverage + LOOCV-vs-modes,
+both domains).
+
+**Interpretation.** The final-step density is **harder to compress**
+(12 vs 10 modes, lower PC-1 energy, intrinsic dim ~4.8 vs ~2.5) and **far
+harder to predict** (LOOCV ~49 % vs ~28 % full domain; ~75 % vs ~25 %
+near-pin). This is the expected consequence of *temporal averaging as
+denoising*: the union integrates the cloud over the whole pass, smoothing
+the case-to-case stochastic variability of any single instant, so its
+field varies more smoothly and lower-dimensionally with `(v_adv, ω)`. A
+single final snapshot retains all that instantaneous noise, which the
+2-input regressor cannot track — especially in the near-pin stir zone,
+where the instantaneous field is most chaotic (hence the dramatic 75 %).
+
+**Consequence for the comparison with particles.** The particle ROM
+(~36 % LOOCV, final-step) and the *final-step* density ROM (~49 %) are now
+on equal footing, and both are worse than the *union* density (~28 %). So
+the density ROM's advantage over particles is partly because density was
+**time-averaged**; on a like-for-like final-step basis, the Eulerian field
+is still somewhat better than the Lagrangian cloud (49 % vs ... note the
+particle metric is a displacement L2, not directly comparable in absolute
+terms), but the gap narrows. The practical takeaway is unchanged and
+sharpened: **use the time-averaged union density as the ROM target** — it
+is both cheaper to represent and substantially more predictable. The
+final-step density is not recommended as the surrogate target.
+
+> Caveat: the final-step density runs did not emit the co-moving
+> (`mean_density_comoving`) field — only `mean_density` was produced — so
+> the §2.4-style normalization sweep on final-step used the standard
+> options only. This does not affect the union-vs-final-step `mean_density`
+> comparison above.
+
+---
+
 ## Appendix — reproducing the results
 
 All code is on branch `feature/rom-svd`, package `jaxtrace/rom/`.
@@ -801,6 +862,15 @@ python run_rom_first_stage.py --target particles --out-dir rom_out              
 # Manifold-structure diagnostics (§8/§9): spectrum, intrinsic dim, MDS
 python run_rom_manifold.py --target particles --exclude --out-dir rom_out  # all 20
 python run_rom_manifold.py --target density   --exclude --out-dir rom_out  # all 20
+
+# Final-step density (§10): same drivers, --density-filename + a distinct --tag
+DF=finalstep_union_density.vtkhdf
+python run_rom_pca.py     --exclude --density-filename $DF --tag finalstep --out-dir rom_out
+python run_rom_loocv.py   --exclude --density-filename $DF --tag finalstep --out-dir rom_out
+python run_rom_pca.py     --exclude --density-filename $DF --x-keep-fraction 0.2 --tag finalstep_x20 --out-dir rom_out
+python run_rom_loocv.py   --exclude --density-filename $DF --x-keep-fraction 0.2 --tag finalstep_x20 --out-dir rom_out
+python run_rom_manifold.py --target density --exclude --density-filename $DF --tag finalstep --out-dir rom_out
+python run_rom_density_compare.py --out-dir rom_out   # union vs final-step figure + table
 ```
 
 Active subspace (§7.2) and feature transforms (§7.1) are library calls in
