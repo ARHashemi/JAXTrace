@@ -296,6 +296,13 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
 | particles | velocity-coeff inputs (§7.3) | 19 | — | 37.8 % | no gain |
 | particles | manifold geometry (§8) | 18 | 11 lin / ~3 intr | — | curved manifold, ω-led MDS axis 1 |
 | density | manifold geometry (§8) | 17 | 9 lin / ~2.5 intr | — | curved manifold, mixed-param axis 2 |
+| density | **union, all cases** (§9) | 20 | 10 | **28.3 %** (rbf) | full clean dataset; conclusions hold |
+| density | **union, near-pin** (§9) | 20 | 11 | **24.4 %** (per_case_l2) | overall study-best |
+| density | **final-step, full** (§10) | 20 | 12 | 49.3 % (rbf) | time-avg union far better |
+| density | **final-step, near-pin** (§10) | 20 | — | 75.2 % (rbf) | instantaneous noise unpredictable |
+
+> Rows above the divider are the original reduced-set (17/19-case) values;
+> the four bold rows are the final, complete **20-case** results (§§9–10).
 
 ---
 
@@ -502,6 +509,10 @@ particle runaway (case 001, `max|ξ| ≈ 2.0`) persists after a clean rerun,
 the next step is a finer DT (1.875e-3). Results pending; once available,
 all studies should be re-run with the fuller dataset (≈19 density / 20
 particle cases).
+
+> **Resolved — see §9.** The 000/001 reruns (and case 002's density) were
+> completed; the full study now runs on all 20 cases. The root cause and
+> corrected results are in §9; the final-step-density comparison in §10.
 
 ### 7.5 Net conclusion of the follow-up
 
