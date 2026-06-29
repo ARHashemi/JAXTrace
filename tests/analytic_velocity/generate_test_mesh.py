@@ -177,6 +177,173 @@ def build_kuhn_connectivity(n_cells, n_per_axis):
 
 
 # =============================================================================
+# Adaptive Kuhn refinement
+# =============================================================================
+#
+# Each hex cell is represented as a 4-tuple (i, j, k, level) where (i, j, k)
+# are integer grid indices at that level: the cell occupies
+#     [bbox_min + (i, j, k) * cell_size_l,  bbox_min + (i+1, j+1, k+1) * cell_size_l]
+# with cell_size_l = base_cell_size / 2**level.
+#
+# Refinement zone: for each (radius, center) in the user-supplied list,
+# we replace every cell whose centroid lies within `radius` of `center`
+# by its 8 child cells at level+1. Refinements compose: a level-2 region
+# inside a level-1 region needs two passes with successively smaller
+# radii.
+#
+# Result: a flat list of (i, j, k, level) cells AT MULTIPLE LEVELS, plus a
+# shared node array deduplicated by exact float position. Nodes are emitted
+# per-cell from the 8 corner coordinates; the dedup map collapses
+# coincident corners (which is what makes adjacent same-level cells
+# share faces; T-junctions between levels do NOT dedup because the
+# coarse cell's corner doesn't sit on the fine cell's edge-midpoint).
+#
+# T-junctions are intentional: JAXTrace's L2 search walks every neighbour
+# octree cell across every level, so a particle near a level boundary
+# finds candidate tets from both sides. The mesh is "search-conformal"
+# without being "topologically conformal".
+
+
+def _hex_centroid(i, j, k, level, bbox_min, base_cs):
+    cs = base_cs / (2 ** level)
+    return (
+        bbox_min[0] + (i + 0.5) * cs[0],
+        bbox_min[1] + (j + 0.5) * cs[1],
+        bbox_min[2] + (k + 0.5) * cs[2],
+    )
+
+
+def _subdivide_cell(i, j, k, level):
+    """Replace one hex cell with its 8 children at level+1."""
+    i2 = 2 * i
+    j2 = 2 * j
+    k2 = 2 * k
+    L2 = level + 1
+    return [
+        (i2,     j2,     k2,     L2),
+        (i2 + 1, j2,     k2,     L2),
+        (i2,     j2 + 1, k2,     L2),
+        (i2 + 1, j2 + 1, k2,     L2),
+        (i2,     j2,     k2 + 1, L2),
+        (i2 + 1, j2,     k2 + 1, L2),
+        (i2,     j2 + 1, k2 + 1, L2),
+        (i2 + 1, j2 + 1, k2 + 1, L2),
+    ]
+
+
+def build_adaptive_kuhn_mesh(bbox_min, bbox_max, base_n_cells, refinements):
+    """Build a multi-level Kuhn-tet mesh.
+
+    Args
+    ----
+    bbox_min, bbox_max : (3,) array of float
+    base_n_cells       : (3,) array of int
+        Hex grid at level 0 (the coarsest level).
+    refinements        : list of (radius, center) tuples
+        For each pair, every current cell whose centroid is within
+        `radius` of `center` is subdivided into 8 child cells at the
+        next level. Pairs are applied in order, so successive entries
+        create successively finer nested regions.
+
+    Returns
+    -------
+    nodes        : (n_nodes, 3) float64
+        Deduplicated by exact position.
+    connectivity : (n_tets, 4) int32
+        Six Kuhn tets per surviving hex cell.
+    cell_levels  : (n_cells,) int32
+        Level of each hex cell (for diagnostics; len = n_tets // 6).
+    """
+    bbox_min = np.asarray(bbox_min, dtype=np.float64)
+    bbox_max = np.asarray(bbox_max, dtype=np.float64)
+    base_n_cells = np.asarray(base_n_cells, dtype=np.int64)
+    base_cs = (bbox_max - bbox_min) / base_n_cells
+
+    # Start with one cell per base grid position at level 0.
+    cells = [
+        (i, j, k, 0)
+        for k in range(int(base_n_cells[2]))
+        for j in range(int(base_n_cells[1]))
+        for i in range(int(base_n_cells[0]))
+    ]
+
+    # Apply refinement zones successively.
+    for r_idx, (radius, center) in enumerate(refinements):
+        r2 = float(radius) ** 2
+        cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+        new_cells = []
+        n_refined = 0
+        for (i, j, k, level) in cells:
+            x, y, z = _hex_centroid(i, j, k, level, bbox_min, base_cs)
+            d2 = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2
+            if d2 <= r2:
+                new_cells.extend(_subdivide_cell(i, j, k, level))
+                n_refined += 1
+            else:
+                new_cells.append((i, j, k, level))
+        cells = new_cells
+        print(f"  Refinement pass {r_idx + 1}: radius={radius:g}, "
+              f"center={tuple(center)}: refined {n_refined:,} cells "
+              f"-> {len(cells):,} total")
+
+    # Build per-cell corner coordinates and dedup into a single node array.
+    # We key by quantised position to avoid float-fuzz collisions. The
+    # quantisation scale is the minimum cell-size component over the
+    # finest level present, divided by 1024 — finer than any geometric
+    # feature in the mesh.
+    if not cells:
+        raise RuntimeError("Adaptive mesh ended up empty.")
+    max_level = max(level for _, _, _, level in cells)
+    finest_cs = base_cs / (2 ** max_level)
+    quant_eps = float(np.min(finest_cs)) / 1024.0
+
+    node_map: dict[tuple[int, int, int], int] = {}
+    nodes_list: list[tuple[float, float, float]] = []
+
+    def _add_node(x, y, z):
+        key = (
+            int(round(x / quant_eps)),
+            int(round(y / quant_eps)),
+            int(round(z / quant_eps)),
+        )
+        nid = node_map.get(key)
+        if nid is None:
+            nid = len(nodes_list)
+            node_map[key] = nid
+            nodes_list.append((x, y, z))
+        return nid
+
+    # Bit-pattern → axis offset (matches the uniform mesh convention).
+    bit_offsets = [
+        (0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0),
+        (0, 0, 1), (1, 0, 1), (0, 1, 1), (1, 1, 1),
+    ]
+
+    connectivity = np.empty((len(cells) * 6, 4), dtype=np.int32)
+    cell_levels_out = np.empty(len(cells), dtype=np.int32)
+    t = 0
+    for c_idx, (i, j, k, level) in enumerate(cells):
+        cell_levels_out[c_idx] = level
+        cs = base_cs / (2 ** level)
+        x0 = bbox_min[0] + i * cs[0]
+        y0 = bbox_min[1] + j * cs[1]
+        z0 = bbox_min[2] + k * cs[2]
+        corners = []
+        for di, dj, dk in bit_offsets:
+            nid = _add_node(x0 + di * cs[0], y0 + dj * cs[1], z0 + dk * cs[2])
+            corners.append(nid)
+        for tet in KUHN_TETS:
+            connectivity[t, 0] = corners[tet[0]]
+            connectivity[t, 1] = corners[tet[1]]
+            connectivity[t, 2] = corners[tet[2]]
+            connectivity[t, 3] = corners[tet[3]]
+            t += 1
+
+    nodes = np.asarray(nodes_list, dtype=np.float64)
+    return nodes, connectivity, cell_levels_out
+
+
+# =============================================================================
 # Evaluate the analytic velocity at every node
 # =============================================================================
 
@@ -347,7 +514,28 @@ def main():
         "--batch-size", type=int, default=4096,
         help="Per-batch node count for the JAX-vmap evaluation.",
     )
+    ap.add_argument(
+        "--refinement", action="append", default=None, metavar="R,CX,CY,CZ",
+        help="Adaptive refinement zone (repeatable). Each cell whose centroid "
+             "lies within radius R of (CX, CY, CZ) is subdivided into 8 child "
+             "cells AT THIS PASS. Pass --refinement multiple times to nest "
+             "successive levels (e.g. once for level-1 region, again with a "
+             "smaller R for level-2 inside it). All four values are floats; "
+             "delimit with commas. Example: --refinement 1.5,0,0,0",
+    )
     args = ap.parse_args()
+
+    # Parse refinement zones.
+    refinements = []
+    if args.refinement:
+        for spec in args.refinement:
+            parts = [float(x) for x in spec.split(",")]
+            if len(parts) != 4:
+                raise SystemExit(
+                    f"--refinement '{spec}': expected 4 comma-separated "
+                    f"floats (R,CX,CY,CZ), got {len(parts)}"
+                )
+            refinements.append((parts[0], (parts[1], parts[2], parts[3])))
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -388,8 +576,21 @@ def main():
     velocity_fn = provider.velocity_fn
 
     print(f"[1/3] Building node grid + connectivity...")
-    nodes, n_per_axis = build_node_grid(bbox_min, bbox_max, n_cells)
-    connectivity = build_kuhn_connectivity(n_cells, n_per_axis)
+    if refinements:
+        print(f"  Adaptive refinement, {len(refinements)} pass(es):")
+        for k, (r, c) in enumerate(refinements):
+            print(f"    pass {k + 1}: radius={r:g}, center={c}")
+        nodes, connectivity, cell_levels = build_adaptive_kuhn_mesh(
+            bbox_min, bbox_max, n_cells, refinements,
+        )
+        # Level histogram for diagnostics.
+        unique_levels, counts = np.unique(cell_levels, return_counts=True)
+        print(f"  cell-level histogram:")
+        for lvl, cnt in zip(unique_levels.tolist(), counts.tolist()):
+            print(f"    level {lvl}: {cnt:,} cells ({6*cnt:,} tets)")
+    else:
+        nodes, n_per_axis = build_node_grid(bbox_min, bbox_max, n_cells)
+        connectivity = build_kuhn_connectivity(n_cells, n_per_axis)
     print(f"  nodes:        {nodes.shape}")
     print(f"  connectivity: {connectivity.shape}")
     print()
