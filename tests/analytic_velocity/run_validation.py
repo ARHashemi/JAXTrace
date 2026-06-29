@@ -71,6 +71,36 @@ def run_subprocess(cmd, log_file=None, env=None):
     return subprocess.run(cmd, env=env).returncode
 
 
+def tail_log(log_file, n_lines=40):
+    """Return the last n_lines of a log file as a string, or an explanation."""
+    try:
+        with open(log_file) as f:
+            lines = f.readlines()
+        if not lines:
+            return "(log file is empty)"
+        return "".join(lines[-n_lines:])
+    except FileNotFoundError:
+        return f"(log file does not exist: {log_file})"
+    except OSError as e:
+        return f"(could not read log file: {e})"
+
+
+def _conservative_jax_env():
+    """Return an env dict that caps JAX's VRAM appetite on the subprocess.
+
+    The harness runs each subprocess fresh, but the parent driver still
+    holds its own JAX session and a scipy import that may have touched
+    JAX. On a contended GPU the mesh-tracking subprocess's default
+    pre-allocation can OOM. Capping XLA_PYTHON_CLIENT_MEM_FRACTION at
+    a small value forces JAX to fall back to dynamic allocation, which
+    is fine for these tiny problems (≤ 20 particles, 100k tets).
+    """
+    env = os.environ.copy()
+    env.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    env.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.4")
+    return env
+
+
 def load_npz_trajectory(run_dir):
     """Load all step_*.npz files; return (steps, positions(T,N,3))."""
     files = sorted(run_dir.glob("step_*.npz"))
@@ -132,9 +162,13 @@ def run_analytic_path(args, work_dir):
         "--output", str(run_dir),
     ]
     print(f"  cmd: run_tracking.py --velocity-source analytic ...")
-    rc = run_subprocess(cmd, log_file=run_dir / "log.txt")
+    rc = run_subprocess(cmd, log_file=run_dir / "log.txt", env=_conservative_jax_env())
     if rc != 0:
-        raise RuntimeError(f"analytic path failed rc={rc}; see {run_dir}/log.txt")
+        log_tail = tail_log(run_dir / "log.txt")
+        raise RuntimeError(
+            f"analytic path failed rc={rc}\n"
+            f"--- last 40 lines of {run_dir}/log.txt ---\n{log_tail}"
+        )
 
     runs = list(run_dir.glob("run_analytic_*"))
     if not runs:
@@ -160,10 +194,14 @@ def generate_mesh_and_run_mesh_path(args, work_dir, n_cells):
         "--stem", "mesh_0",
     ]
     print(f"  cmd: generate_test_mesh.py --n-cells {n_cells}")
-    rc = run_subprocess(cmd, log_file=mesh_dir / "mesh_gen_log.txt")
+    rc = run_subprocess(
+        cmd, log_file=mesh_dir / "mesh_gen_log.txt", env=_conservative_jax_env(),
+    )
     if rc != 0:
+        log_tail = tail_log(mesh_dir / "mesh_gen_log.txt")
         raise RuntimeError(
-            f"mesh generation rc={rc}; see {mesh_dir}/mesh_gen_log.txt"
+            f"mesh generation rc={rc}\n"
+            f"--- last 40 lines of {mesh_dir}/mesh_gen_log.txt ---\n{log_tail}"
         )
 
     # 2. Run mesh-path tracking.
@@ -189,10 +227,14 @@ def generate_mesh_and_run_mesh_path(args, work_dir, n_cells):
         "--output", str(track_dir),
     ]
     print(f"  cmd: run_tracking.py --velocity-source mesh ...")
-    rc = run_subprocess(cmd, log_file=mesh_dir / "tracking_log.txt")
+    rc = run_subprocess(
+        cmd, log_file=mesh_dir / "tracking_log.txt", env=_conservative_jax_env(),
+    )
     if rc != 0:
+        log_tail = tail_log(mesh_dir / "tracking_log.txt")
         raise RuntimeError(
-            f"mesh tracking rc={rc}; see {mesh_dir}/tracking_log.txt"
+            f"mesh tracking rc={rc}\n"
+            f"--- last 40 lines of {mesh_dir}/tracking_log.txt ---\n{log_tail}"
         )
 
     # Find the VTKHDF.
