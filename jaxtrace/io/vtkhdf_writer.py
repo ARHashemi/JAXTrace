@@ -583,6 +583,12 @@ class VTKHDFExportThread:
             pass
 
     def stop(self) -> None:
+        # Drain pending writes BEFORE asking the worker to stop. Otherwise a
+        # very fast run can call stop() while the worker is still spinning
+        # in its initial queue.get(timeout=1.0) and the _STOP sentinel
+        # arrives ahead of unprocessed export items, dropping them.
+        # join() blocks until task_done() has been called for every put().
+        self.export_queue.join()
         self.export_queue.put(self._STOP)
         self.stop_event.set()
         if self.worker_thread:

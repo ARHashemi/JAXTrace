@@ -101,20 +101,6 @@ def _conservative_jax_env():
     return env
 
 
-def load_npz_trajectory(run_dir):
-    """Load all step_*.npz files; return (steps, positions(T,N,3))."""
-    files = sorted(run_dir.glob("step_*.npz"))
-    if not files:
-        raise FileNotFoundError(f"no step_*.npz under {run_dir}")
-    arrs = []
-    steps = []
-    for f in files:
-        d = np.load(f)
-        arrs.append(d["positions"])
-        steps.append(int(d["step"]))
-    return np.asarray(steps), np.stack(arrs, axis=0)
-
-
 def load_vtkhdf_trajectory(particles_vtkhdf):
     """Load positions from a transient VTKHDF particle file produced by
     run_tracking.py's mesh path. Returns (steps, positions(T,N,3))."""
@@ -170,10 +156,12 @@ def run_analytic_path(args, work_dir):
             f"--- last 40 lines of {run_dir}/log.txt ---\n{log_tail}"
         )
 
-    runs = list(run_dir.glob("run_analytic_*"))
-    if not runs:
-        raise FileNotFoundError(f"no run_analytic_* under {run_dir}")
-    return load_npz_trajectory(runs[0])
+    candidates = sorted(run_dir.glob("run_analytic_*/particles.vtkhdf"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"no run_analytic_*/particles.vtkhdf under {run_dir}"
+        )
+    return load_vtkhdf_trajectory(candidates[0])
 
 
 def generate_mesh_and_run_mesh_path(args, work_dir, n_cells):

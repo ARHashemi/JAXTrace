@@ -1102,18 +1102,92 @@ def _run_analytic_tracking(args):
     output_subdir.mkdir(parents=True, exist_ok=True)
     print(f"  Output subdir: {output_subdir}")
 
-    # Reuse the mesh-path exporter when available; for simplicity here we
-    # write a minimal per-step .npz instead of full VTKHDF.  Users wanting
-    # VTKHDF on the analytic path can be added later.
+    # Particle exporter — mirrors the mesh path's VTKHDF / VTU choice via
+    # --export-format. Provider-level mesh-tied extras (Temperature,
+    # MaxTemperature, Density) are not available on the analytic path
+    # and are simply omitted; Group (initial-X bucketing) and Escaped
+    # (bbox-clamp triggered) are mesh-independent and supported here.
     EXPORT = not args.no_export
+    EXPORT_ELEMENT_IDS = bool(getattr(args, "export_element_ids", False))
+    N_GROUPS = args.n_groups if not args.no_groups else 0
+    particle_ids = np.arange(n_particles, dtype=np.int32)
+
+    # Particle groups by initial X (same convention as mesh path).
+    particle_groups = None
+    if N_GROUPS > 0:
+        initial_x = np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP)[:, 0]
+        x_min, x_max = float(initial_x.min()), float(initial_x.max())
+        x_range = x_max - x_min
+        if x_range > 0:
+            g = (initial_x - x_min) / x_range * N_GROUPS
+            particle_groups = np.clip(g.astype(np.int32), 0, N_GROUPS - 1).astype(np.uint8)
+        else:
+            particle_groups = np.zeros(n_particles, dtype=np.uint8)
+    extra_scalars_base = (
+        {'Group': particle_groups} if particle_groups is not None else None
+    )
+
+    # Escaped tracking: a particle is marked Escaped on the first step its
+    # position is exactly on a bbox face (the substep / boundary-projection
+    # machinery just clamped it). bbox_min_np / bbox_max_np are already in
+    # scope from the kernel-build stage above.
+    track_escaped = bool(args.export_escaped_flag)
+    escaped_ever = (
+        np.zeros(n_particles, dtype=np.uint8) if track_escaped else None
+    )
+
+    exporter = None
     if EXPORT:
-        # Initial state
-        np.savez(
-            output_subdir / f"step_{0:06d}.npz",
-            positions=np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP),
-            step=0,
-            t_phys=0.0,
+        if args.export_format == "vtkhdf":
+            exporter = VTKHDFExportThread(
+                output_subdir,
+                n_particles_hint=int(n_particles),
+            )
+            print(f"  Particle export: VTKHDF -> {exporter.output_path}")
+        else:
+            exporter = VTKExportThread(output_subdir)
+            print(f"  Particle export: VTU+.pvd -> {output_subdir}")
+        exporter.start()
+
+    # Graceful shutdown so a SIGTERM/SIGINT during the loop still leaves
+    # a recoverable archive (same pattern as the mesh path).
+    import signal as _signal
+    _shutdown_called = [False]
+
+    def _graceful_shutdown(signum, frame):
+        if _shutdown_called[0]:
+            return
+        _shutdown_called[0] = True
+        print(f"\n[!] Received signal {signum}; flushing exporter and exiting.")
+        try:
+            if exporter is not None:
+                exporter.stop()
+        except Exception as e:
+            print(f"  Exporter shutdown error: {e}")
+        _signal.signal(signum, _signal.SIG_DFL)
+        import os as _os
+        _os.kill(_os.getpid(), signum)
+
+    _signal.signal(_signal.SIGTERM, _graceful_shutdown)
+    _signal.signal(_signal.SIGINT, _graceful_shutdown)
+
+    # Export initial state.
+    if exporter is not None:
+        pos_cpu = np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
+        eid_cpu = (
+            np.asarray(element_ids_gpu, dtype=np.int32)
+            if EXPORT_ELEMENT_IDS else None
         )
+        init_extras = dict(extra_scalars_base) if extra_scalars_base else {}
+        if track_escaped:
+            init_extras['Escaped'] = escaped_ever.copy()
+        exporter.enqueue_export(
+            0, pos_cpu,
+            particle_ids=particle_ids,
+            element_ids=eid_cpu,
+            extra_scalars=init_extras or None,
+        )
+        print(f"  Exported initial state (step 0)")
 
     # ----- Run the loop -----
     print("[4/4] Running {} RK4 steps...".format(N_STEPS))
@@ -1136,16 +1210,42 @@ def _run_analytic_tracking(args):
             print(f"  Step {step:5d}/{N_STEPS}: active={n_particles:,} lost=0  "
                   f"[{elapsed:.0f}s, {sps:.1f} step/s, ETA {eta:.0f}s]")
 
-        if do_export:
+        if do_export and exporter is not None:
             pos_cpu = np.asarray(positions_gpu, dtype=config.FLOAT_DTYPE_NP)
-            np.savez(
-                output_subdir / f"step_{step:06d}.npz",
-                positions=pos_cpu,
-                step=step,
-                t_phys=float(step) * DT,
+            if track_escaped:
+                # Particle sits at a bbox face (within boundary_projection_tol
+                # of an inset face) => the clamp has fired. Use 2x the tol
+                # so the inset clamp position (= bbox ± tol) is reliably
+                # caught even in float32.
+                _esc_tol = max(2.0 * config.RK4_BOUNDARY_PROJECTION_TOL, 1e-6)
+                on_face = (
+                    np.any(np.isclose(pos_cpu, bbox_min_np, atol=_esc_tol, rtol=0), axis=1)
+                    | np.any(np.isclose(pos_cpu, bbox_max_np, atol=_esc_tol, rtol=0), axis=1)
+                )
+                escaped_ever |= on_face.astype(np.uint8)
+            step_extras = dict(extra_scalars_base) if extra_scalars_base else {}
+            if track_escaped:
+                step_extras['Escaped'] = escaped_ever.copy()
+            eid_cpu = (
+                np.asarray(element_ids_gpu, dtype=np.int32)
+                if EXPORT_ELEMENT_IDS else None
+            )
+            exporter.enqueue_export(
+                step, pos_cpu,
+                particle_ids=particle_ids,
+                element_ids=eid_cpu,
+                extra_scalars=step_extras or None,
             )
 
     elapsed = _time.time() - t_start
+    if exporter is not None:
+        exporter.stop()
+        if args.export_format == "vtkhdf":
+            print(f"  Exported {exporter.n_exported} steps to "
+                  f"{exporter.output_path}")
+        else:
+            print(f"  Exported {exporter.n_exported} VTU files")
+
     print("=" * 80)
     print(f"\nTRACKING SUMMARY")
     print("=" * 80)
