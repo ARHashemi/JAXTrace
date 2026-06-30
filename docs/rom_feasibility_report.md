@@ -300,6 +300,8 @@ underfit, too many overfit the noisy high-mode coefficients. The minimum
 | density | **union, near-pin** (§9) | 20 | 11 | **24.4 %** (per_case_l2) | overall study-best |
 | density | **final-step, full** (§10) | 20 | 12 | 49.3 % (rbf) | time-avg union far better |
 | density | **final-step, near-pin** (§10) | 20 | — | 75.2 % (rbf) | instantaneous noise unpredictable |
+| density | **2D (y,z) cross-section** (§11) | 20 | **6** | **20.6 %** (rbf) | **best density result** (collapse x) |
+| particles | **2D (y,z)** (§11) | 20 | 14 | 41.4 % (rbf) | worse — x is the signal for particles |
 
 > Rows above the divider are the original reduced-set (17/19-case) values;
 > the four bold rows are the final, complete **20-case** results (§§9–10).
@@ -845,6 +847,77 @@ final-step density is not recommended as the surrogate target.
 
 ---
 
+## 11. 2D cross-section representation (collapse the advection axis)
+
+All sections above use the full **3D** field/cloud. The wake stretches
+along **x** (the advection direction) and its *length* scales with
+`v_adv` — the very feature that dominates the ROM error. This motivates a
+**2D (y, z) cross-section** representation with **x as the normal**:
+collapse the x-axis so the snapshot becomes the weld cross-section
+(through-thickness z × transverse y), removing the advection-driven
+variability by integration.
+
+**Construction.**
+- **Density** — from the 3D `mean_density(x,y,z)` on the common grid,
+  **sum over an x-window** (the data-containing mass band, ≈ x ∈
+  [0.029, 0.071] m) into a single **(y, z) plane** (≈ 70×66 ≈ 4 620
+  values, a **~300× dimensionality reduction**). This is the "squeeze the
+  slab" idea: every voxel contributes, nothing is sliced away.
+- **Particles** — the per-particle co-moving displacement with the
+  **x-component dropped**: snapshot = (Δy, Δz) on the seed grid.
+
+This is pure post-processing of the existing data (no re-simulation):
+`load_dataset(project_2d="sum")` for density, `components=["y","z"]` for
+particles.
+
+**Result — 2D helps DENSITY, hurts PARTICLES:**
+
+| | 3D | 2D (y, z) |
+|---|---|---|
+| **density** — PCA modes for 90 % | 10 | **6** |
+| **density** — LOOCV (rbf) | 28.3 % | **20.6 %** |
+| **density** — intrinsic dim | 2.5 | **1.7** |
+| **particles** — PCA modes for 90 % | 11 | 14 |
+| **particles** — LOOCV (rbf) | 36.1 % | 41.4 % |
+| **particles** — intrinsic dim | 3.3 | 4.3 |
+
+Plots: `rom_pca_elbow_coverage_2d.png`, `rom_loocv_error_*_2d.png`,
+`rom_manifold_density_2d.png` / `rom_manifold_particles_2d.png`.
+
+**Interpretation — the two media respond oppositely, for the same reason.**
+
+- **Density improves markedly** (LOOCV **28.3 % → 20.6 %**, the best
+  density result in the study; intrinsic dim 2.5 → 1.7; 90 % in 6 vs 10
+  modes). Integrating along x **averages out the v_adv-driven wake-length
+  variability** and per-voxel noise, so the cross-section varies more
+  smoothly and lower-dimensionally with `(v_adv, ω)`. It is the *spatial*
+  analogue of the temporal denoising that made the union beat the
+  final-step density (§10): collapse the noisy, parameter-sensitive axis.
+
+- **Particles get worse** (LOOCV 36.1 % → 41.4 %; intrinsic dim 3.3 →
+  4.3; mode-1 energy 88 % → 29 %). For the Lagrangian cloud the x
+  displacement is the **large, smooth, easily-predicted advection mode**;
+  dropping it removes the "free" component and leaves only the small,
+  chaotic in-plane stir motion, which is *harder* to predict. So for
+  particles the x-axis is signal, not noise.
+
+**Takeaway.** The 2D (y, z) cross-section is a genuine improvement for the
+**density** surrogate — recommended as the density ROM target (LOOCV
+~21 %, ~6 modes, intrinsic dim ~1.7). For **particles** the full 3D
+displacement (or at least keeping x) is better. This is consistent with
+the whole study's theme: removing the v_adv-driven, axially-stretched
+variability helps the Eulerian field, whereas the Lagrangian cloud carries
+its main predictable signal in exactly that axis.
+
+> Caveats: the 2D-particle LOOCV error is a (Δy, Δz)-only displacement
+> metric, not directly comparable in absolute terms to the 3D (Δx, Δy, Δz)
+> value — but the *direction* of change (worse, higher intrinsic dim) is
+> robust. Separately, this analysis exposed and fixed a data issue: stray
+> short test runs (case 005, `s100`/`s500`) were poisoning the common grid;
+> the loader now selects the **largest-step run per case**.
+
+---
+
 ## Appendix — reproducing the results
 
 All code is on branch `feature/rom-svd`, package `jaxtrace/rom/`.
@@ -882,6 +955,13 @@ python run_rom_pca.py     --exclude --density-filename $DF --x-keep-fraction 0.2
 python run_rom_loocv.py   --exclude --density-filename $DF --x-keep-fraction 0.2 --tag finalstep_x20 --out-dir rom_out
 python run_rom_manifold.py --target density --exclude --density-filename $DF --tag finalstep --out-dir rom_out
 python run_rom_density_compare.py --out-dir rom_out   # union vs final-step figure + table
+
+# 2D (y,z) cross-section (§11): collapse the x axis
+python run_rom_pca.py      --exclude --project-2d sum --tag 2d --out-dir rom_out
+python run_rom_loocv.py    --exclude --project-2d sum --tag 2d --out-dir rom_out
+python run_rom_manifold.py --target density --exclude --project-2d sum --tag 2d --out-dir rom_out
+python run_rom_particles.py --mode comoving --components y z --tag 2d --out-dir rom_out
+python run_rom_manifold.py --target particles --components y z --exclude --tag 2d --out-dir rom_out
 ```
 
 Active subspace (§7.2) and feature transforms (§7.1) are library calls in
