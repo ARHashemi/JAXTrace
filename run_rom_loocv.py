@@ -39,6 +39,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-dir", type=Path, default=Path("rom_out"))
     p.add_argument("--density-filename", default="particles_union_density.vtkhdf",
                    help="Density product: particles_union_density.vtkhdf (union/time-avg, default) or finalstep_union_density.vtkhdf (final step).")
+    p.add_argument("--project-2d", default=None, choices=["sum","slice"],
+                   help="Reduce 3D density to a 2D (y,z) cross-section: sum over an x-window (slab) or single x-slice.")
+    p.add_argument("--x-window", type=float, nargs=2, default=None,
+                   metavar=("XLO","XHI"), help="x-window [m] for --project-2d sum (default: data band).")
+    p.add_argument("--x-slice", type=float, default=None,
+                   help="x position [m] for --project-2d slice (default: peak-mass x).")
     p.add_argument("--resolution", type=int, nargs=3, default=None,
                    metavar=("NX", "NY", "NZ"))
     p.add_argument("--exclude", nargs="*", default=list(DEFAULT_EXCLUDE))
@@ -241,6 +247,7 @@ def main() -> int:
         trim_hi=trim_hi,
         x_keep_fraction=args.x_keep_fraction,
         density_filename=args.density_filename,
+        project_2d=args.project_2d, x_window=(tuple(args.x_window) if args.x_window else None), x_slice=args.x_slice,
     )
     print(f"[cv] snapshot matrix: {ds.matrix.shape}")
 

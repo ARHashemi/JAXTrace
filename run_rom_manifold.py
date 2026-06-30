@@ -42,9 +42,18 @@ def parse_args():
     p.add_argument("--out-dir", type=Path, default=Path("rom_out"))
     p.add_argument("--density-filename", default="particles_union_density.vtkhdf",
                    help="Density product: particles_union_density.vtkhdf (union/time-avg, default) or finalstep_union_density.vtkhdf (final step).")
+    p.add_argument("--project-2d", default=None, choices=["sum","slice"],
+                   help="Reduce 3D density to a 2D (y,z) cross-section: sum over an x-window (slab) or single x-slice.")
+    p.add_argument("--x-window", type=float, nargs=2, default=None,
+                   metavar=("XLO","XHI"), help="x-window [m] for --project-2d sum (default: data band).")
+    p.add_argument("--x-slice", type=float, default=None,
+                   help="x position [m] for --project-2d slice (default: peak-mass x).")
     p.add_argument("--target", choices=["particles", "density"], default="particles")
     p.add_argument("--mode", default="final",
                    help="Particle snapshot mode (final/raw/comoving). Ignored for density.")
+    p.add_argument("--components", nargs="+", default=["x", "y", "z"],
+                   choices=["x", "y", "z"],
+                   help="Particle components (use 'y z' for the 2D y,z study).")
     p.add_argument("--exclude", nargs="*", default=None,
                    help="Cases to drop. Default: particles 000 001 (runaways); "
                         "density 000 001 002.")
@@ -131,11 +140,13 @@ def main():
 
     if args.target == "particles":
         excl = tuple(args.exclude) if args.exclude is not None else ("000", "001")
-        ds = load_particle_dataset(mode=args.mode, exclude=excl, verbose=False)
+        ds = load_particle_dataset(mode=args.mode, components=args.components,
+                                   exclude=excl, verbose=False)
     else:
         excl = tuple(args.exclude) if args.exclude is not None else ("000", "001", "002")
         ds = load_dataset(exclude=excl, verbose=False,
         density_filename=args.density_filename,
+        project_2d=args.project_2d, x_window=(tuple(args.x_window) if args.x_window else None), x_slice=args.x_slice,
     )
 
     print(f"[mfld] target={args.target}, {ds.matrix.shape[0]} cases, "

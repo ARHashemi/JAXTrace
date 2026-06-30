@@ -38,6 +38,7 @@ DEFAULT_FOM_ROOT = Path(
 DEFAULT_EXCLUDE = ("000", "001", "002")
 
 _CASE_RE = re.compile(r"cylindrical_(\d+)\.gid")
+_S_RE = re.compile(r"_s(\d+)")
 
 
 @dataclass(frozen=True)
@@ -167,15 +168,26 @@ def discover_cases(
         fom_root / "cylindrical_*.gid" / "post_pt" / "*" / "union"
         / density_filename
     )
-    snapshots: List[CaseSnapshot] = []
-    for p in sorted(glob.glob(pattern)):
-        path = Path(p)
+    # Pick ONE density file per case: the run with the MOST timesteps
+    # (run_grid-frac_*_s<N>). Short s100/s500 *test* runs would otherwise
+    # win on mtime and poison the common grid (their x-extent differs).
+    best: Dict[str, Tuple[int, str]] = {}
+    for p in glob.glob(pattern):
         m = _CASE_RE.search(p)
         if m is None:
             continue
         case = m.group(1)
         if case in exclude:
             continue
+        sm = _S_RE.search(p)
+        n_steps = int(sm.group(1)) if sm else -1
+        if case not in best or n_steps > best[case][0]:
+            best[case] = (n_steps, p)
+
+    snapshots: List[CaseSnapshot] = []
+    for case in sorted(best):
+        p = best[case][1]
+        path = Path(p)
         if case not in param_map:
             raise KeyError(
                 f"case {case} found on disk but has no (v_adv, omega_pin) "
@@ -352,6 +364,9 @@ def load_dataset(
     trim_hi: Optional[Tuple[int, int, int]] = DEFAULT_TRIM_HI,
     x_keep_fraction: Optional[float] = None,
     density_filename: str = "particles_union_density.vtkhdf",
+    project_2d: Optional[str] = None,
+    x_window: Optional[Tuple[float, float]] = None,
+    x_slice: Optional[float] = None,
     verbose: bool = True,
 ) -> SnapshotDataset:
     """
@@ -369,6 +384,13 @@ def load_dataset(
     applied *after* the voxel margin trims (so the wall artefacts are still
     removed), by dropping the appropriate number of high-x voxels. ``None``
     keeps the whole x-extent.
+
+    ``project_2d`` reduces the 3D field to a 2D (y, z) cross-section with x
+    (the advection axis) as the normal: ``"sum"`` integrates over an
+    x-window (slab; default the data-containing x-band, or ``x_window`` =
+    (x_lo, x_hi) in metres) into one (y, z) plane; ``"slice"`` takes a
+    single (y, z) plane at ``x_slice`` (metres) or the peak-mass x-column.
+    The snapshot becomes the flattened (ny, nz) plane.
     """
     snapshots = discover_cases(fom_root, exclude=exclude, params_csv=params_csv,
                                density_filename=density_filename)
@@ -421,6 +443,57 @@ def load_dataset(
             print(f"[rom]   rho after trim: [min,max] over all cases = "
                   f"[{rows.min():.4g}, {rows.max():.4g}]")
         grid = cropped_grid
+
+    # --- optional 2D (y,z) projection: collapse the x (advection) axis ---
+    # ``project_2d`` = "sum"  -> slab: sum rho over an x-window (default the
+    #                            data-containing x-band) into one (y,z) plane;
+    #               = "slice" -> single (y,z) plane at x = x_slice (or peak-x).
+    # The output snapshot is the flattened (ny, nz) plane; ``grid`` is
+    # replaced by a degenerate nx=1 grid so n_voxels etc. stay consistent.
+    if project_2d is not None:
+        if project_2d not in ("sum", "slice"):
+            raise ValueError(f"project_2d must be 'sum' or 'slice'; got {project_2d!r}")
+        gnx, gny, gnz = grid.shape
+        cube = rows.reshape(len(snapshots), gnx, gny, gnz)  # (n, x, y, z)
+        xs = grid.origin[0] + grid.spacing[0] * np.arange(gnx)
+
+        if project_2d == "slice":
+            if x_slice is not None:
+                xi = int(np.clip(np.round((x_slice - grid.origin[0]) /
+                                          grid.spacing[0]), 0, gnx - 1))
+            else:
+                # peak-mass x-column (over all cases)
+                xi = int(np.argmax(cube.sum(axis=(0, 2, 3))))
+            plane = cube[:, xi, :, :]                       # (n, y, z)
+            if verbose:
+                print(f"[rom] project_2d=slice at x-index {xi} "
+                      f"(x={xs[xi]:.4f} m) -> (y,z) plane {gny}x{gnz}")
+        else:  # sum over an x-window
+            if x_window is not None:
+                xlo, xhi = x_window
+            else:
+                # data-containing band: central 99% of total mass along x
+                mass_x = cube.sum(axis=(0, 2, 3))
+                cum = np.cumsum(mass_x) / max(mass_x.sum(), 1e-30)
+                ilo = int(np.searchsorted(cum, 0.005))
+                ihi = int(np.searchsorted(cum, 0.995))
+                xlo, xhi = float(xs[ilo]), float(xs[min(ihi, gnx - 1)])
+            xmask = (xs >= xlo) & (xs <= xhi)
+            if not xmask.any():
+                xmask[:] = True
+            plane = cube[:, xmask, :, :].sum(axis=1)        # (n, y, z)
+            if verbose:
+                print(f"[rom] project_2d=sum over x in [{xlo:.4f},{xhi:.4f}] m "
+                      f"({int(xmask.sum())} of {gnx} cols) -> (y,z) plane "
+                      f"{gny}x{gnz}")
+
+        rows = plane.reshape(len(snapshots), -1).copy()
+        # Degenerate nx=1 reference grid over (1, ny, nz).
+        grid = ReferenceGrid(
+            origin=grid.origin.copy(),
+            spacing=grid.spacing.copy(),
+            shape=(1, gny, gnz),
+        )
 
     return SnapshotDataset(
         snapshots=snapshots,
