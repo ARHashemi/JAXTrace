@@ -195,7 +195,7 @@ def parse_args():
     #               are NOT used here — fold any upstream-stream behaviour
     #               into velocity_fn itself.
     parser.add_argument("--velocity-source", type=str, default="mesh",
-                        choices=["mesh", "analytic"],
+                        choices=["mesh", "analytic", "rom"],
                         help="Where velocity values come from per sub-stage")
     parser.add_argument("--velocity-module", type=str, default=None,
                         help="Path to a user .py exporting build_provider(...). "
@@ -204,6 +204,32 @@ def parse_args():
                              "and jaxtrace/analytic_fields/divergence_free_recirculation.py "
                              "for the streamfunction-derived field from the FSW "
                              "Internal Summary appendix §A.")
+
+    # --- ROM velocity reconstruction (--velocity-source rom) ---
+    parser.add_argument("--rom-basis", type=str, default=None,
+                        help="Path to the FSW-ROM basis file (*.fswrom.basis). "
+                             "Required when --velocity-source=rom.")
+    parser.add_argument("--rom-romdata", type=str, default=None,
+                        help="Path to the FSW-ROM per-case coefficient file "
+                             "(*.fswrom.romdata). Required when "
+                             "--velocity-source=rom.")
+    parser.add_argument("--rom-case-idx", type=int, default=1,
+                        help="0-based case index into the ROM coefficient "
+                             "table (0..19 for the cohort cylindrical dataset). "
+                             "Used only when --velocity-source=rom.")
+    parser.add_argument("--rom-formula", type=str, default="centered",
+                        choices=["centered", "sigma_c", "c_over_sig",
+                                 "no_mean", "no_mean_sig"],
+                        help="ROM reconstruction formula. 'centered' = "
+                             "SnapshotsMean + sum_k c_k * mode_k. See "
+                             "jaxtrace/rom/velocity_recon.py for the others. "
+                             "If unsure which formula the ROM was built with, "
+                             "run tests/rom/compare_rom_recon.py against a "
+                             "known FOM snapshot first.")
+    parser.add_argument("--rom-field-group", type=str, default="Displacement",
+                        help="HDF5 group name inside the basis/romdata files. "
+                             "Default 'Displacement' matches the cohort "
+                             "cylindrical case.")
     parser.add_argument("--domain-bbox", type=float, nargs=6, default=None,
                         metavar=("XMIN", "XMAX", "YMIN", "YMAX", "ZMIN", "ZMAX"),
                         help="Six floats defining the logical domain bounding box "
@@ -1287,6 +1313,29 @@ def main():
     if args.velocity_source == "analytic":
         return _run_analytic_tracking(args)
 
+    # ROM path validation: required inputs must exist before we touch
+    # the mesh or the GPU. Fails fast with a clear message.
+    if args.velocity_source == "rom":
+        missing = []
+        if not args.rom_basis:
+            missing.append("--rom-basis")
+        if not args.rom_romdata:
+            missing.append("--rom-romdata")
+        if missing:
+            print(
+                f"ERROR: --velocity-source=rom requires {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            return 2
+        for label, path in (
+            ("--rom-basis", args.rom_basis),
+            ("--rom-romdata", args.rom_romdata),
+        ):
+            if not Path(path).is_file():
+                print(f"ERROR: {label}: file not found: {path}",
+                      file=sys.stderr)
+                return 2
+
     case_stem = _resolve_case_paths(args)
     print(f"[case] stem='{case_stem}'  post_dir={args.input}")
     print(f"[case] mesh_dir='{args._mesh_dir}'  femuss_dir='{args._femuss_dir}'")
@@ -1509,6 +1558,38 @@ def main():
         print(f"    Loaded fields in single pass: {fields_to_load}")
         print(f"    Temperature: {temperature_sequence.shape}  "
               f"({temperature_sequence.nbytes / (1024**2):.1f} MB)")
+
+    # ROM reconstruction path. When --velocity-source=rom the mesh path
+    # loads the connectivity + node positions from the reference case's
+    # PVTU (above) BUT DISCARDS the per-node velocity field it loaded
+    # and replaces it with a POD-reconstructed field for the selected
+    # case index. The reconstruction is a one-shot per-node compute
+    # before the RK4 loop; downstream (dedup, GPU upload, tracking) is
+    # completely unchanged.
+    if args.velocity_source == "rom":
+        from jaxtrace.rom.velocity_recon import precompute_case_velocity
+        print("[rom] Reconstructing per-node velocity from POD basis + coeffs")
+        rec = precompute_case_velocity(
+            basis_path=args.rom_basis,
+            romdata_path=args.rom_romdata,
+            case_idx=args.rom_case_idx,
+            formula=args.rom_formula,
+            field_group=args.rom_field_group,
+            verbose=True,
+        )
+        if rec.velocity.shape[0] != node_positions.shape[0]:
+            raise RuntimeError(
+                f"ROM node count ({rec.velocity.shape[0]}) does not match "
+                f"mesh node count ({node_positions.shape[0]}). The ROM was "
+                f"built on a different mesh than the --input case."
+            )
+        # Replace the mesh-loaded velocity with the ROM reconstruction.
+        # The velocity_sequence shape is (n_timesteps, n_nodes, 3); we
+        # keep n_timesteps=1 (steady field) and let the loader path's
+        # cyclic-indexing return the same field for every RK4 step.
+        velocity_sequence = rec.velocity.astype(config.FLOAT_DTYPE_NP)[None, :, :]
+        print(f"[rom] velocity_sequence replaced: shape={velocity_sequence.shape}, "
+              f"dtype={velocity_sequence.dtype}")
 
     print(f"  Elements: {connectivity.shape[0]:,}, Nodes: {node_positions.shape[0]:,}")
 
