@@ -694,6 +694,12 @@ def create_rk4_comparison(
     p0_gpu=None,
     rk4_mode="fused",
     use_l2_vectorized=False,
+    # Gradient-recovery / Taylor reconstruction (all-or-nothing; when
+    # every one is non-None the kernel uses v(x) = v_c + G_c @ (x - x_c)
+    # per element instead of raw P1 barycentric interp of nodal values).
+    element_centroid_gpu=None,
+    element_v_centroid_gpu=None,
+    element_gradient_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -928,11 +934,51 @@ def create_rk4_comparison(
 
     # ---- Velocity interpolation ----
     use_direct_inverse = (interpolation_method == "direct_inverse") and M_inv_gpu is not None
+    # Taylor reconstruction (from gradient recovery). Only enabled if the
+    # caller passed all three precomputed arrays. When enabled, the
+    # per-element evaluator is:
+    #     v(p) = v_centroid + G_centroid @ (p - centroid)
+    # which exactly reproduces the raw nodal velocities in a linear field
+    # and adds first-order correction using the SPR-recovered gradient
+    # elsewhere.
+    use_taylor = (
+        element_centroid_gpu is not None
+        and element_v_centroid_gpu is not None
+        and element_gradient_gpu is not None
+    )
 
     def interpolate_velocity_single(pos, elem_id, velocity_field):
         valid = (elem_id >= 0) & (elem_id < len(connectivity))
         nodes_idx = connectivity[elem_id]
         node_vels = velocity_field[nodes_idx]
+
+        if use_taylor:
+            # Gradient-recovery Taylor form. velocity_field is ignored
+            # for the value (v_centroid is precomputed once), but we
+            # still gather it if the level-set masking below needs it.
+            xc = element_centroid_gpu[elem_id]      # (3,)
+            vc = element_v_centroid_gpu[elem_id]    # (3,)
+            Gc = element_gradient_gpu[elem_id]      # (3, 3)
+            vel = vc + Gc @ (pos - xc)
+
+            if use_levelset_mask:
+                # Barycentric weights are still needed to blend the
+                # nodal level-set field, so fall through to the direct-
+                # inverse branch just for the mask lookup. Cheap:
+                # one 3x3 matvec.
+                if use_direct_inverse:
+                    M_inv = M_inv_gpu[elem_id]
+                    local = pos - p0_gpu[elem_id]
+                    bary = M_inv @ local
+                    b1, b2, b3 = bary[0], bary[1], bary[2]
+                    b0 = 1.0 - b1 - b2 - b3
+                    node_ls = levelset_gpu[nodes_idx]
+                    ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+                    vel = jnp.where(
+                        ls_val >= 0.0, vel,
+                        jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP),
+                    )
+            return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
         if use_direct_inverse:
             # Direct Jacobian inverse (FEMUSS-equivalent): bary = M_inv @ (pos - p0)

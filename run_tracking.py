@@ -359,6 +359,26 @@ def parse_args():
     parser.add_argument("--interpolation-method", type=str, default="direct_inverse",
                         choices=["direct_inverse", "gram_matrix"],
                         help="Velocity interpolation method")
+
+    # --- Gradient recovery / higher-order velocity reconstruction ---
+    parser.add_argument("--gradient-recovery", type=int, default=1,
+                        choices=[0, 1],
+                        help="Enable (1) or disable (0) SPR-based gradient "
+                             "recovery + higher-order velocity "
+                             "reconstruction before the RK4 loop. When "
+                             "enabled, the raw nodal velocities feed a "
+                             "Step 1-5 pipeline (see "
+                             "docs/gradient_recovery_pipeline.md) and the "
+                             "kernel samples the reconstruction instead of "
+                             "raw P1 barycentric interpolation. Default 1.")
+    parser.add_argument("--recovery-method", type=str, default="taylor",
+                        choices=["taylor"],
+                        help="Which reconstruction to build in Step 5. "
+                             "'taylor' = per-element (v_c, G_c, x_c) with "
+                             "v(p) = v_c + G_c @ (p - x_c). More methods "
+                             "(hct_cubic, ...) will be added; the CLI "
+                             "'choices' list will grow with them.")
+
     parser.add_argument("--boundary-proj-tol", type=float, default=1e-6,
                         help="Inward tolerance for boundary projection clamping")
 
@@ -1753,6 +1773,49 @@ def main():
 
     velocity_sequence_gpu = jax.device_put(velocity_sequence)
 
+    # ------------------------------------------------------------------
+    # Gradient recovery + higher-order velocity reconstruction.
+    #
+    # See docs/gradient_recovery_pipeline.md for the full derivation. This
+    # runs ONCE after velocity_sequence is finalised (post-dedup, post-
+    # pin-velocity, post-ROM/analytic-substitution) and produces three
+    # per-element arrays that the RK4 kernel samples in place of raw P1
+    # barycentric interpolation.
+    #
+    # Only supports single-timestep velocity fields for now. For
+    # time-dependent PVTU sequences (vel-range with multiple frames)
+    # we skip the recovery and fall back to raw P1 (which is what the
+    # kernel does when the taylor arrays are None).
+    # ------------------------------------------------------------------
+    element_centroid_gpu = None
+    element_v_centroid_gpu = None
+    element_gradient_gpu = None
+    if args.gradient_recovery == 1:
+        n_frames = velocity_sequence.shape[0]
+        if n_frames == 1:
+            from jaxtrace.gpu.recovery.gradient_recovery import build_recovery
+            print(f"\n[gradient-recovery] Building higher-order "
+                  f"velocity reconstruction (method='{args.recovery_method}')")
+            recovery = build_recovery(
+                node_positions=node_positions,
+                connectivity=connectivity,
+                node_velocities=velocity_sequence[0],
+                method=args.recovery_method,
+                verbose=True,
+            )
+            element_centroid_gpu = jax.device_put(recovery.element_centroid)
+            element_v_centroid_gpu = jax.device_put(recovery.element_v_centroid)
+            element_gradient_gpu = jax.device_put(recovery.element_gradient)
+            for k, v in recovery.stage_times.items():
+                stage_times[f'gr_{k}'] = v
+        else:
+            print(f"\n[gradient-recovery] SKIPPED: velocity_sequence has "
+                  f"{n_frames} frames; only single-frame (steady) fields "
+                  f"are supported today. Falling back to raw P1 "
+                  f"barycentric interpolation.")
+    else:
+        print(f"\n[gradient-recovery] disabled by --gradient-recovery=0")
+
     # Optional temperature stack (one extra (n_timesteps, n_nodes) scalar field).
     temperature_sequence_gpu = None
     if temperature_sequence is not None:
@@ -1926,6 +1989,9 @@ def main():
         p0_gpu=p0_gpu,
         rk4_mode=RK4_MODE,
         use_l2_vectorized=L2_VECTORIZED,
+        element_centroid_gpu=element_centroid_gpu,
+        element_v_centroid_gpu=element_v_centroid_gpu,
+        element_gradient_gpu=element_gradient_gpu,
     )
 
     # Per-step inlet drift helper. Drifts only particles whose

@@ -309,7 +309,36 @@ no per-step ROM overhead.
 
 ---
 
-## 3. Testing
+## 3. Gradient recovery (post-process, all mesh sources)
+
+After the per-node velocity field is assembled — whether from a real
+FOM PVTU, from ROM reconstruction, or from an analytic function
+projected onto a mesh — `run_tracking.py` runs a one-shot SPR-based
+gradient recovery + Step-5 velocity reconstruction pipeline before
+the RK4 loop. The full derivation is in
+`docs/gradient_recovery_pipeline.md` and the implementation lives at
+`jaxtrace/gpu/recovery/gradient_recovery.py`. Two CLI knobs:
+
+```
+--gradient-recovery {0,1}   (default 1)
+--recovery-method {taylor}  (default 'taylor'; more methods pending)
+```
+
+The default Taylor reconstruction is
+`v(p) = v_centroid + G_centroid @ (p - centroid)` per element, where
+`G_centroid` comes from the SPR-recovered nodal gradient tensor.
+Exact for linear fields; first-order in the recovered gradient
+elsewhere. The pipeline runs on the CPU with NumPy in seconds for
+meshes up to ~10^6 tets; the per-step RK4 cost is unchanged (one
+tensor-vector product per query replaces the P1 barycentric interp).
+
+Analytic-source runs bypass gradient recovery entirely — there is no
+mesh field to recover gradients of. The flag is silently ignored on
+that path.
+
+---
+
+## 4. Testing
 
 Locations of the validation harnesses:
 
@@ -334,3 +363,4 @@ Locations of the validation harnesses:
 | 4c13b44 | Analytic path: emit VTKHDF (and VTU) like the mesh path. |
 | ab3ba32 | `generate_test_mesh.py`: add adaptive Kuhn refinement. |
 | a919e6e | `run_tracking.py`: `--velocity-source rom` for FSW-ROM velocity reconstruction. |
+| (this)  | Gradient recovery: SPR nodal gradient + Taylor Step 5 reconstruction, `--gradient-recovery {0,1}`. |
