@@ -694,12 +694,22 @@ def create_rk4_comparison(
     p0_gpu=None,
     rk4_mode="fused",
     use_l2_vectorized=False,
-    # Gradient-recovery / Taylor reconstruction (all-or-nothing; when
-    # every one is non-None the kernel uses v(x) = v_c + G_c @ (x - x_c)
-    # per element instead of raw P1 barycentric interp of nodal values).
+    # Gradient-recovery / higher-order velocity reconstruction. Two
+    # methods supported; kernel picks by which arrays are non-None.
+    #
+    # centroid_taylor: v(x) = v_c + G_c @ (x - x_c) per element.
+    #   Pass element_centroid_gpu, element_v_centroid_gpu, element_gradient_gpu.
+    # vertex_taylor:   v(x) = sum_a N_a(x) * ( v_a + G_a @ (x - x_a) )
+    #                  where N_a are P1 barycentric weights.
+    #   Pass node_gradient_gpu. Reuses node_positions and velocity_field.
+    #
+    # Passing both sets of arrays is allowed; vertex_taylor is selected
+    # (it strictly dominates centroid_taylor in accuracy at the cost of
+    # 4x more matvecs per query). Passing neither falls back to raw P1.
     element_centroid_gpu=None,
     element_v_centroid_gpu=None,
     element_gradient_gpu=None,
+    node_gradient_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -934,15 +944,12 @@ def create_rk4_comparison(
 
     # ---- Velocity interpolation ----
     use_direct_inverse = (interpolation_method == "direct_inverse") and M_inv_gpu is not None
-    # Taylor reconstruction (from gradient recovery). Only enabled if the
-    # caller passed all three precomputed arrays. When enabled, the
-    # per-element evaluator is:
-    #     v(p) = v_centroid + G_centroid @ (p - centroid)
-    # which exactly reproduces the raw nodal velocities in a linear field
-    # and adds first-order correction using the SPR-recovered gradient
-    # elsewhere.
-    use_taylor = (
-        element_centroid_gpu is not None
+    # Two Taylor variants gated by which arrays the caller passed.
+    # vertex_taylor wins if both sets are present.
+    use_vertex_taylor = node_gradient_gpu is not None
+    use_centroid_taylor = (
+        (not use_vertex_taylor)
+        and element_centroid_gpu is not None
         and element_v_centroid_gpu is not None
         and element_gradient_gpu is not None
     )
@@ -952,10 +959,57 @@ def create_rk4_comparison(
         nodes_idx = connectivity[elem_id]
         node_vels = velocity_field[nodes_idx]
 
-        if use_taylor:
-            # Gradient-recovery Taylor form. velocity_field is ignored
-            # for the value (v_centroid is precomputed once), but we
-            # still gather it if the level-set masking below needs it.
+        if use_vertex_taylor:
+            # Per-vertex Taylor blended with P1 shape functions:
+            #   v(p) = sum_a N_a(p) * ( v_a + G_a @ (p - x_a) )
+            # Gathers 4 nodal gradients and 4 nodal positions per query.
+            node_grads = node_gradient_gpu[nodes_idx]  # (4, 3, 3)
+            node_pos = node_positions[nodes_idx]       # (4, 3)
+            # Barycentric weights via direct-inverse (preferred) or
+            # gram-matrix. Duplicated from the raw-P1 branch below with
+            # only the final blend step differing.
+            if use_direct_inverse:
+                M_inv = M_inv_gpu[elem_id]
+                local = pos - p0_gpu[elem_id]
+                bary = M_inv @ local
+                b1, b2, b3 = bary[0], bary[1], bary[2]
+                b0 = 1.0 - b1 - b2 - b3
+            else:
+                nodes = node_positions[nodes_idx]
+                v0 = nodes[1] - nodes[0]
+                v1 = nodes[2] - nodes[0]
+                v2 = nodes[3] - nodes[0]
+                vp = pos - nodes[0]
+                d00, d01, d02 = jnp.dot(v0, v0), jnp.dot(v0, v1), jnp.dot(v0, v2)
+                d11, d12 = jnp.dot(v1, v1), jnp.dot(v1, v2)
+                d22 = jnp.dot(v2, v2)
+                dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
+                det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+                det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+                b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
+                b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
+                b3 = (d00*(d11*dp2-d12*dp1) - d01*(d01*dp2-d02*dp1) + dp0*(d01*d12-d02*d11)) / det
+                b0 = 1.0 - b1 - b2 - b3
+            weights = jnp.stack([b0, b1, b2, b3])       # (4,)
+            # Per-vertex Taylor:  v_a + G_a @ (p - x_a)
+            per_vertex = node_vels + jnp.einsum(
+                "aij,aj->ai", node_grads, pos - node_pos,
+            )                                            # (4, 3)
+            vel = jnp.einsum("a,ai->i", weights, per_vertex)
+
+            if use_levelset_mask:
+                node_ls = levelset_gpu[nodes_idx]
+                ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+                vel = jnp.where(
+                    ls_val >= 0.0, vel,
+                    jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP),
+                )
+            return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
+
+        if use_centroid_taylor:
+            # Gradient-recovery centroid Taylor form. velocity_field is
+            # ignored for the value (v_centroid is precomputed once), but
+            # we still gather it if the level-set masking below needs it.
             xc = element_centroid_gpu[elem_id]      # (3,)
             vc = element_v_centroid_gpu[elem_id]    # (3,)
             Gc = element_gradient_gpu[elem_id]      # (3, 3)

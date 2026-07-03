@@ -11,28 +11,49 @@ not inside the nonlinear solver or time-marching loop.
 
 ## Implementation status
 
-Steps 1–4 (raw element gradient, patch build, SPR fit, C0 reassembly) and a
-first-order Step 5 (Taylor form: `v(p) = v_c + G_c @ (p - x_c)` per element)
-are implemented in `jaxtrace/gpu/recovery/gradient_recovery.py`.
+Steps 1–4 (raw element gradient, patch build, SPR fit, C0 reassembly)
+and two first-order Step 5 evaluators are implemented in
+`jaxtrace/gpu/recovery/gradient_recovery.py`.
 
-`run_tracking.py` exposes two flags:
+`run_tracking.py` exposes:
 
 * `--gradient-recovery {0,1}` — default `1`. When `1`, the mesh path runs
   the full Step 1–5 pipeline once on the loaded velocity field
   (whether from FOM PVTU, `--velocity-source rom`, or an analytic field
   projected onto a mesh) before the RK4 loop, and the JIT'd kernel
-  samples the Taylor reconstruction instead of raw P1 barycentric interp.
-* `--recovery-method {taylor}` — selects the Step 5 form. Currently
-  `taylor` is the only supported method; a future patch adds
-  `hct_cubic` (a Hsieh-Clough-Tocher / macro-element cubic Hermite
-  reconstruction) that will implement the full accuracy target
-  described below in Step 5.
+  samples the reconstruction instead of raw P1 barycentric interp.
+* `--recovery-method {centroid_taylor, vertex_taylor, taylor}` — selects
+  the Step 5 evaluator.
+  * `centroid_taylor` (== the legacy `taylor` alias): per-element
+    `v(p) = v_c + G_c @ (p − x_c)` with a frozen gradient at the
+    element centroid. One 3×3 matvec per query.
+  * `vertex_taylor` (recommended, current default): per-vertex Taylor
+    expansion blended with P1 shape functions,
+    `v(p) = Σₐ Nₐ(p) · (vₐ + Gₐ (p − xₐ))`. Exact at nodes; on smooth
+    fields with strong internal gradient variation it beats
+    `centroid_taylor` because it uses the recovered gradient at the
+    sampling vertex rather than an averaged centroid value. ~4× more
+    matvecs per query than `centroid_taylor`; practical per-step
+    cost is essentially unchanged.
 
-The Taylor form is exact for linear velocity fields (recovers the raw
-nodal velocities everywhere), first-order in the recovered gradient
-elsewhere. On highly non-linear regions of the field it may not
-outperform raw P1 sampled at nodes; the full Hermite reconstruction
-described in Step 5 below will.
+Both forms reduce to raw P1 nodal interpolation when the recovered
+gradients match the FEM's own piecewise-constant gradient (i.e. when
+SPR yields no correction). Both are exact for linear velocity fields.
+
+A future patch will add `hct_cubic` — a Hsieh-Clough-Tocher tetrahedral
+macro-element cubic Hermite reconstruction — implementing the full
+accuracy target described below in Step 5.
+
+Empirical accuracy on the recirc_2026 §A field (32×16×4 base mesh,
+200 random interior sample points):
+| method | mean err | max err |
+|---|---|---|
+| raw P1 | 3.9e-01 | 6.7e+00 |
+| centroid_taylor | 4.6e-01 | 6.2e+00 |
+| vertex_taylor | **1.5e-01** | **3.7e+00** |
+
+vertex_taylor beats raw P1 by 2.7× and centroid_taylor by 3.2× in
+mean-abs error on this field.
 
 ---
 

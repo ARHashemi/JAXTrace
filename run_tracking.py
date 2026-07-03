@@ -371,13 +371,21 @@ def parse_args():
                              "docs/gradient_recovery_pipeline.md) and the "
                              "kernel samples the reconstruction instead of "
                              "raw P1 barycentric interpolation. Default 1.")
-    parser.add_argument("--recovery-method", type=str, default="taylor",
-                        choices=["taylor"],
+    parser.add_argument("--recovery-method", type=str, default="centroid_taylor",
+                        choices=["taylor", "centroid_taylor", "vertex_taylor"],
                         help="Which reconstruction to build in Step 5. "
-                             "'taylor' = per-element (v_c, G_c, x_c) with "
-                             "v(p) = v_c + G_c @ (p - x_c). More methods "
-                             "(hct_cubic, ...) will be added; the CLI "
-                             "'choices' list will grow with them.")
+                             "'centroid_taylor' (default) = per-element "
+                             "(v_c, G_c, x_c) with v(p) = v_c + G_c @ "
+                             "(p - x_c). 'vertex_taylor' = v(p) = sum_a "
+                             "N_a(p) * (v_a + G_a @ (p - x_a)), which is "
+                             "exact at nodes and uses the recovered "
+                             "gradient at the sampling vertex rather "
+                             "than a frozen centroid value (better on "
+                             "smooth fields with strong internal "
+                             "curvature). 'taylor' is a legacy alias for "
+                             "'centroid_taylor' preserved so older "
+                             "configs keep working. More methods "
+                             "(hct_cubic, ...) will follow.")
 
     parser.add_argument("--boundary-proj-tol", type=float, default=1e-6,
                         help="Inward tolerance for boundary projection clamping")
@@ -1811,6 +1819,7 @@ def main():
     element_centroid_gpu = None
     element_v_centroid_gpu = None
     element_gradient_gpu = None
+    node_gradient_gpu = None
     if args.gradient_recovery == 1:
         n_frames = velocity_sequence.shape[0]
         if n_frames == 1:
@@ -1824,9 +1833,16 @@ def main():
                 method=args.recovery_method,
                 verbose=True,
             )
-            element_centroid_gpu = jax.device_put(recovery.element_centroid)
-            element_v_centroid_gpu = jax.device_put(recovery.element_v_centroid)
-            element_gradient_gpu = jax.device_put(recovery.element_gradient)
+            # Upload only the arrays the chosen method needs. Both are
+            # produced by build_recovery unconditionally so users can
+            # A/B methods without rebuilding the pipeline, but we skip
+            # the GPU upload of the unused set to save VRAM.
+            if recovery.method == "vertex_taylor":
+                node_gradient_gpu = jax.device_put(recovery.nodal_gradient)
+            else:  # centroid_taylor (and legacy 'taylor' alias)
+                element_centroid_gpu = jax.device_put(recovery.element_centroid)
+                element_v_centroid_gpu = jax.device_put(recovery.element_v_centroid)
+                element_gradient_gpu = jax.device_put(recovery.element_gradient)
             for k, v in recovery.stage_times.items():
                 stage_times[f'gr_{k}'] = v
         else:
@@ -2013,6 +2029,7 @@ def main():
         element_centroid_gpu=element_centroid_gpu,
         element_v_centroid_gpu=element_v_centroid_gpu,
         element_gradient_gpu=element_gradient_gpu,
+        node_gradient_gpu=node_gradient_gpu,
     )
 
     # Per-step inlet drift helper. Drifts only particles whose

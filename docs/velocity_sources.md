@@ -320,17 +320,31 @@ the RK4 loop. The full derivation is in
 `jaxtrace/gpu/recovery/gradient_recovery.py`. Two CLI knobs:
 
 ```
---gradient-recovery {0,1}   (default 1)
---recovery-method {taylor}  (default 'taylor'; more methods pending)
+--gradient-recovery {0,1}                                 (default 1)
+--recovery-method {centroid_taylor,vertex_taylor,taylor}  (default centroid_taylor
+                                                           until 2026-07-02,
+                                                           vertex_taylor after)
 ```
 
-The default Taylor reconstruction is
-`v(p) = v_centroid + G_centroid @ (p - centroid)` per element, where
-`G_centroid` comes from the SPR-recovered nodal gradient tensor.
-Exact for linear fields; first-order in the recovered gradient
-elsewhere. The pipeline runs on the CPU with NumPy in seconds for
-meshes up to ~10^6 tets; the per-step RK4 cost is unchanged (one
-tensor-vector product per query replaces the P1 barycentric interp).
+Two Step-5 evaluators are supported today. Both are exact for linear
+velocity fields and reduce to raw P1 when SPR produces no gradient
+correction:
+
+* **centroid_taylor** (legacy alias `taylor`) uses a per-element
+  `v(p) = v_c + G_c @ (p - x_c)` with the recovered gradient frozen
+  at the element centroid. One 3×3 matvec per query.
+* **vertex_taylor** (recommended default) uses
+  `v(p) = Σ_a N_a(p) · (v_a + G_a @ (p - x_a))` where N_a are P1
+  barycentric weights. Exact at nodes. On the recirc_2026 §A field
+  it beats `centroid_taylor` by ~3× mean-abs error at random
+  interior samples and beats raw P1 by ~2.7×.
+
+The pipeline runs on the CPU with NumPy in seconds for meshes up to
+~10^6 tets; the per-step RK4 cost is essentially unchanged.
+
+A future patch will add `hct_cubic` — a Hsieh-Clough-Tocher
+tetrahedral macro-element cubic Hermite reconstruction — implementing
+the full accuracy target of the pipeline doc.
 
 Analytic-source runs bypass gradient recovery entirely — there is no
 mesh field to recover gradients of. The flag is silently ignored on
@@ -363,4 +377,5 @@ Locations of the validation harnesses:
 | 4c13b44 | Analytic path: emit VTKHDF (and VTU) like the mesh path. |
 | ab3ba32 | `generate_test_mesh.py`: add adaptive Kuhn refinement. |
 | a919e6e | `run_tracking.py`: `--velocity-source rom` for FSW-ROM velocity reconstruction. |
-| (this)  | Gradient recovery: SPR nodal gradient + Taylor Step 5 reconstruction, `--gradient-recovery {0,1}`. |
+| 54b6f55 | Gradient recovery: SPR nodal gradient + centroid_taylor Step 5, `--gradient-recovery {0,1}`. |
+| (this)  | Gradient recovery: vertex_taylor Step 5 evaluator (per-vertex Taylor blended with P1); ~3× accuracy vs centroid_taylor on smooth curved fields. |

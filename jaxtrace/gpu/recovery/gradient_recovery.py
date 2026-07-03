@@ -13,11 +13,11 @@ Implements the pipeline documented in docs/gradient_recovery_pipeline.md:
     Step 6: RK4 samples the reconstruction (done in the kernel; this module
             only produces the reconstruction arrays)
 
-Step 5 supports one method today ('taylor') and is designed to accept
-more (e.g. 'hct_cubic' for a full Hsieh-Clough-Tocher tetrahedral macro-
-element) as they are implemented.
+Step 5 supports two methods today ('centroid_taylor' and 'vertex_taylor')
+and is designed to accept more (e.g. 'hct_cubic' for a full Hsieh-
+Clough-Tocher tetrahedral macro-element) as they are implemented.
 
-Taylor form (default):
+centroid_taylor (Step 5.a):
     For each element e we precompute
       x_c  = centroid of e                              (3,)
       v_c  = P1-interpolated nodal velocity at x_c      (3,)
@@ -28,6 +28,25 @@ Taylor form (default):
     field, and adds first-order correction from the recovered gradient in
     smooth regions where the raw P1 gradient has jumps across element
     boundaries. For P1 elements, v_c is the mean of the 4 nodal velocities.
+    Simple: one 3x3 matvec per query, no P1 blend, no per-vertex gather.
+
+vertex_taylor (Step 5.b):
+    For each element, evaluate a per-vertex Taylor expansion and blend
+    them with the P1 shape functions:
+      v(p) = sum_a  N_a(p) * ( v_a + G_a @ (p - x_a) )
+    where N_a(p) are the barycentric weights of p in the element and
+    (v_a, x_a, G_a) are the vertex velocity, position, and recovered
+    nodal gradient. Exact at nodes: v(x_a) = v_a for every a. Uses the
+    recovered gradient AT THE SAMPLING VERTEX rather than a frozen
+    centroid value, so smooth fields with strong gradient variation
+    inside an element are reconstructed with less bias than
+    centroid_taylor. Costs 4 matvecs + 4 barycentric weights per query
+    but no per-element precompute of a centroid tensor.
+
+Both methods reduce to raw P1 nodal interpolation when the recovered
+gradients Ga match the FEM's own piecewise-constant gradient (i.e.
+when SPR yields no correction). In smoother regions they diverge from
+raw P1 as the recovered gradient absorbs the P1 discontinuities.
 
 Everything here runs on the CPU (NumPy). We do the least-squares fits
 with numpy.linalg.lstsq / solve; for typical FSW meshes (10^5-10^6 elements,
@@ -48,21 +67,29 @@ import numpy as np
 class GradientRecoveryData:
     """Output of gradient recovery + velocity reconstruction precompute.
 
+    The ``method`` field picks which set of reconstruction arrays the
+    RK4 kernel should read. Fields not used by the chosen method are
+    still populated (for diagnostics and to make swapping cheap), but
+    the kernel only touches the ones its evaluator needs.
+
     Attributes
     ----------
     method : str
-        Reconstruction method name ('taylor' at present).
+        Reconstruction method name. Currently 'centroid_taylor' or
+        'vertex_taylor'. See module docstring for the formulas.
     element_centroid : (n_elements, 3) float
-        Centroid position of every element.
+        Centroid position of every element. Used by centroid_taylor.
     element_v_centroid : (n_elements, 3) float
         P1 velocity at the element centroid (== mean of 4 nodal velocities
-        for a P1 tetrahedron).
+        for a P1 tetrahedron). Used by centroid_taylor.
     element_gradient : (n_elements, 3, 3) float
         Recovered velocity gradient tensor at the element centroid.
         gradient[e, i, j] = ∂ u_i / ∂ x_j  at centroid of element e.
+        Used by centroid_taylor.
     nodal_gradient : (n_nodes, 3, 3) float
-        Recovered nodal gradient tensor (Step 4 output). Kept for
-        diagnostics / validation; not consumed by the Taylor evaluator.
+        Recovered nodal gradient tensor (Step 4 output). Used by
+        vertex_taylor (gathered per element via connectivity in the
+        kernel). Kept as diagnostic for centroid_taylor.
     raw_element_gradient : (n_elements, 3, 3) float
         Raw per-element gradient (Step 1 output). Kept for diagnostics.
     stage_times : dict[str, float]
@@ -324,14 +351,19 @@ def build_taylor_reconstruction(
 # Public entrypoint
 # ---------------------------------------------------------------------------
 
-_SUPPORTED_METHODS = ("taylor",)
+_SUPPORTED_METHODS = ("centroid_taylor", "vertex_taylor")
+
+# Legacy alias so 'taylor' from earlier configs keeps working. If either
+# 'taylor' or 'centroid_taylor' is requested, the output arrays are
+# byte-identical.
+_METHOD_ALIASES = {"taylor": "centroid_taylor"}
 
 
 def build_recovery(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
     node_velocities: np.ndarray,
-    method: str = "taylor",
+    method: str = "centroid_taylor",
     verbose: bool = True,
 ) -> GradientRecoveryData:
     """Run the full Steps 1-5 pipeline for a single steady velocity field.
@@ -344,14 +376,21 @@ def build_recovery(
         The velocity field we want to reconstruct — same values the raw
         P1 interp would use inside the RK4 kernel.
     method : str
-        Reconstruction method. Only 'taylor' is implemented today.
+        Reconstruction method. Currently 'centroid_taylor' (default,
+        one 3x3 matvec per query) or 'vertex_taylor' (per-vertex Taylor
+        expansion blended by P1 shape functions). See module docstring
+        for the exact formulas. The legacy name 'taylor' is accepted
+        as an alias for 'centroid_taylor'.
     verbose : bool
         If True, print per-stage wall time and simple statistics.
     """
+    # Resolve legacy method aliases.
+    method = _METHOD_ALIASES.get(method, method)
     if method not in _SUPPORTED_METHODS:
         raise ValueError(
             f"unknown recovery method '{method}'; "
-            f"expected one of {_SUPPORTED_METHODS}"
+            f"expected one of {_SUPPORTED_METHODS} "
+            f"(aliases: {list(_METHOD_ALIASES.keys())})"
         )
 
     n_nodes = node_positions.shape[0]
@@ -401,19 +440,25 @@ def build_recovery(
               f"mean={ng_norm.mean():.3e}  max={ng_norm.max():.3e}  "
               f"[{stage_times['3_spr']:.1f}s]")
 
-    # Step 5
+    # Step 5. Both currently supported methods share the centroid-array
+    # precompute — vertex_taylor uses only nodal_gradient for its
+    # evaluator, but centroid_* arrays are useful diagnostics and
+    # allow a user to swap methods post-facto without rebuilding.
     t0 = time.time()
-    if method == "taylor":
-        centroid, v_c, G_c = build_taylor_reconstruction(
-            node_positions, connectivity, node_velocities, nodal_gradient,
-        )
-    else:  # unreachable
-        raise AssertionError(method)
+    centroid, v_c, G_c = build_taylor_reconstruction(
+        node_positions, connectivity, node_velocities, nodal_gradient,
+    )
     stage_times["5_reconstruction"] = time.time() - t0
     if verbose:
-        print(f"  Step 5 (reconstruction, method='{method}'): "
-              f"element_centroid, v_centroid, G_centroid built  "
-              f"[{stage_times['5_reconstruction']:.1f}s]")
+        if method == "centroid_taylor":
+            print(f"  Step 5 (centroid_taylor): "
+                  f"element_centroid, v_centroid, G_centroid built  "
+                  f"[{stage_times['5_reconstruction']:.1f}s]")
+        elif method == "vertex_taylor":
+            print(f"  Step 5 (vertex_taylor): "
+                  f"nodal_gradient will be gathered per-element in the "
+                  f"kernel (no extra precompute)  "
+                  f"[{stage_times['5_reconstruction']:.1f}s]")
         total = sum(stage_times.values())
         print(f"[gradient-recovery] total wall time: {total:.1f}s")
 
