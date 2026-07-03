@@ -1016,6 +1016,7 @@ def _run_analytic_tracking(args):
     print(f"  Domain bbox:   x=[{bbox_min_np[0]:g}, {bbox_max_np[0]:g}]  "
           f"y=[{bbox_min_np[1]:g}, {bbox_max_np[1]:g}]  "
           f"z=[{bbox_min_np[2]:g}, {bbox_max_np[2]:g}]")
+    print(f"  Boundary walls: {args.boundary_walls or 'all clamp (default)'}")
     print(f"  Loaded in {_time.time() - t_load:.2f}s")
     print()
 
@@ -1087,8 +1088,23 @@ def _run_analytic_tracking(args):
     t_build = _time.time()
 
     # Per-wall clamp masks. We accept --boundary-walls "x_max=outlet,..." with
-    # the same syntax as the mesh path, but on the analytic side only "clamp"
-    # and "outlet" make sense (no mesh, no ballistic last-vel tracking).
+    # the same syntax as the mesh path. On the analytic path all non-clamp
+    # modes collapse to "no clamp on this axis" because there is no mesh
+    # boundary — the analytic velocity_fn is defined everywhere in R^3,
+    # so a particle past the bbox continues to see valid field values.
+    #   clamp     -> the kernel snaps the particle back inside the bbox
+    #   outlet    -> no clamp; particle continues at the field's velocity
+    #   ballistic -> no clamp; particle continues at the field's velocity
+    #                (analytic analogue of the mesh path's last-valid-vel
+    #                drift: on the mesh path the field value is unknown
+    #                past the wall so it uses the last in-domain velocity;
+    #                here the field IS defined, so the natural extension
+    #                is to use the field itself)
+    #   freeze    -> no clamp; particle continues at the field's velocity
+    #                (the mesh path stops the particle at the escape
+    #                point because it has no field to sample; not
+    #                supported on the analytic path — you can freeze
+    #                trajectories in post-processing if needed)
     clamp_min_mask = jnp.array([True, True, True])
     clamp_max_mask = jnp.array([True, True, True])
     if args.boundary_walls:
@@ -1098,9 +1114,14 @@ def _run_analytic_tracking(args):
                 continue
             w, m = pair.split('=', 1)
             wall_dict[w.strip()] = m.strip()
-        if any(m in ("ballistic", "freeze") for m in wall_dict.values()):
-            print("  WARNING: --boundary-walls ballistic/freeze is mesh-only; "
-                  "on analytic path those walls behave as 'outlet' (no clamp).")
+        _wall_modes_seen = {v for v in wall_dict.values()}
+        if _wall_modes_seen - {"clamp", "outlet"}:
+            _non_std = sorted(_wall_modes_seen - {"clamp", "outlet"})
+            print(f"  [info] --boundary-walls modes {_non_std} on the analytic "
+                  f"path collapse to 'no clamp on that axis'; particles cross "
+                  f"and keep flowing with the analytic field. To match the "
+                  f"mesh path's last-valid-vel ballistic behaviour exactly, "
+                  f"post-process trajectories where they leave the bbox.")
         clamp_min_mask = jnp.array([
             wall_dict.get('x_min', 'clamp') == 'clamp',
             wall_dict.get('y_min', 'clamp') == 'clamp',
