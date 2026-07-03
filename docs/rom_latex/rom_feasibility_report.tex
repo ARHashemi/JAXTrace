@@ -37,10 +37,14 @@ regression, not the POD basis. Two representation choices give clear
 gains: the \emph{time-averaged} density is far more predictable than a
 single final snapshot, and a \emph{2D $(y,z)$ cross-section} that
 collapses the advection axis reaches the best result of the study
-(${\sim}21\%$). Active-subspace and manifold diagnostics show the response
-is $\vadv$-dominated and lives on a smooth but curved low-dimensional
-manifold, so the practical next step is more samples in the sparsely
-covered high-$|\opin|$/low-$\vadv$ corner.
+(${\sim}21\%$). Active-subspace, manifold, and discrete-curvature
+diagnostics show the response is $\vadv$-dominated and lives on a smooth
+(un-bent) but curved low-dimensional manifold; notably, per-case error
+\emph{anti}-correlates with curvature and peaks on the low-curvature
+\emph{sampling boundary}, so the error is an extrapolation effect. The
+practical next step is therefore to extend and densify the sampling
+envelope at its edges (the high-$|\opin|$/low-$\vadv$ boundary), not merely
+its interior.
 \end{abstract}
 
 \tableofcontents
@@ -242,12 +246,68 @@ $\opin$ because the field couples them through the wake (length $\propto
 \vadv$, pattern $\propto\opin$). A small negative MDS eigenvalue is the
 expected mild-curvature signal.
 
+\subsection{Discrete curvature: how curved, and where}\label{sec:curv}
+The intrinsic-dimension gap above says the manifold \emph{is} curved; to
+see \emph{how much} and \emph{where}, we compute discrete secant-vector
+curvature directly in the high-dimensional snapshot space (not the MDS
+embedding). Three estimators are used: the \textbf{turning angle} between
+consecutive secants along 1D parameter paths (fix one input, sweep the
+other); the \textbf{Menger curvature}
+$\kappa=4\,\mathrm{Area}/(abc)=1/R_{\mathrm{circ}}$ of consecutive triples,
+scale-normalised by the median pairwise distance so it is dimensionless
+and comparable across manifolds; and a \textbf{local-PCA} curvature
+(trailing $k$-NN eigenvalue energy beyond the intrinsic dimension). The
+estimators were validated on known geometry (a straight line gives $0$; a
+circle of radius $R$ gives Menger $=1/R$ exactly).
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{rom_curvature_density.png}
+\caption{Density manifold curvature over the $(\vadv,\opin)$ plane
+(turning angle, Menger, local-PCA). Curvature is \emph{highest in the
+interior} (mid/high $\vadv$) and \emph{lowest along the $\opin=-800$
+sampling edge}.}\label{fig:curv}
+\end{figure}
+
+Two findings emerge, one of which \emph{revises} the earlier
+sampling recommendation.
+\begin{itemize}
+\item \textbf{The manifold is smooth, not sharply bent.} Turning angles
+sit at ${\sim}117^\circ$ for every target --- the honest high-dimensional
+signature that consecutive secants are near-orthogonal; there are no
+sharp folds. Scale-normalised Menger is ${\sim}1.7$--$1.9$ across all four
+representations (density/particle, 3D/2D), i.e.\ comparable and moderate.
+\item \textbf{Curvature does \emph{not} coincide with error --- it
+anti-correlates.} Per-case LOOCV error correlates \textbf{negatively} with
+Menger ($-0.74$) and local-PCA ($-0.58$) curvature. The highest-error
+cases (\texttt{002}, \texttt{003}, \texttt{005}, \texttt{015}, all at
+$\opin\approx-800$) sit on the \emph{convex-hull boundary} of the sampling
+box and have \emph{low} curvature; the lowest-error cases are in the
+well-surrounded interior and have the \emph{highest} curvature
+(Fig.~\ref{fig:curv}).
+\end{itemize}
+
+\paragraph{Interpretation (revised takeaway).} The error is driven by
+\textbf{extrapolation at the sampling boundary}, not by intrinsic
+curvature: LOOCV holds out an edge case and the regressor must
+extrapolate past the convex hull, where curvature happens to be lowest.
+This \emph{refines} the ``add samples in the high-$|\opin|$/low-$\vadv$
+corner'' recommendation --- that corner is hard because it is a
+\emph{boundary} the model extrapolates into, and the manifold there is
+\emph{smooth}, so extending / densifying the sampling \emph{envelope} at
+the edges (rather than only its interior) should pay off directly. (The
+local-PCA estimator's cross-manifold ranking is unreliable at $n{=}20$ ---
+consistent with its known fragility --- so it is used only for the
+within-manifold spatial pattern.)
+
 \subsection{The bottleneck}
 Projection error (${\sim}12\%$) $\ll$ LOOCV (${\sim}28\%$); neither
-normalization, input features, nor regressor choice moves the needle; and
-the active subspace is nearly 1D in $\vadv$. The limiting factor is
-unambiguously \textbf{sample count and placement} --- 20 points in a 2D
-space that is effectively 1D, sparsest exactly where the error peaks.
+normalization, input features, nor regressor choice moves the needle; the
+active subspace is nearly 1D in $\vadv$; and the manifold is smooth
+(Sec.~\ref{sec:curv}) but its worst-predicted cases lie on the sampling
+boundary. The limiting factor is unambiguously \textbf{sample count and,
+specifically, boundary coverage} --- 20 points in a 2D space that is
+effectively 1D, with the largest errors where the model must extrapolate
+past the sampling envelope.
 
 %======================================================================
 \section{Data-quality fixes (all 20 cases)}\label{sec:rerun}
@@ -380,18 +440,27 @@ and low-rank. The limit is 20 samples in an effectively-1D input space.
 (not a final snapshot), and the \emph{2D $(y,z)$ cross-section} as the
 density ROM target (LOOCV ${\sim}21\%$, ${\sim}6$ modes, intrinsic dim
 ${\sim}1.7$). Keep full 3D for particles.
-\item \textbf{The manifold is curved but smooth.} A nonlinear reduction
-(autoencoder / kernel-POD) is the \emph{eventual} route to lower error,
-but at 20 samples it would overfit; the target latent dimension is
-${\sim}2$--3.
+\item \textbf{The manifold is curved but smooth, and the error is a
+boundary effect.} Intrinsic dimension (${\sim}2.5$) sits below the linear
+mode count (${\sim}10$) --- curved --- but discrete curvature
+(Sec.~\ref{sec:curv}) shows no sharp folds (turning angles ${\sim}117^\circ$,
+moderate Menger). Crucially, per-case error \emph{anti}-correlates with
+curvature ($-0.74$): the worst cases lie on the low-curvature
+\emph{sampling boundary} ($\opin=-800$), where LOOCV extrapolates. So a
+nonlinear reduction (autoencoder / kernel-POD) is the \emph{eventual}
+route once more data exists (target latent dim ${\sim}2$--3), but it will
+not cure a boundary/extrapolation error --- more \emph{samples} will.
 \end{enumerate}
 
-\paragraph{Recommended next step.} \textbf{Add ${\sim}5$--8 samples in the
-high-$|\opin|$/low-$\vadv$ corner} and along the convex-hull edges, where
-the LOOCV error concentrates. Adding the previously-missing case (which
-sits in that corner) already reduced the worst-case density error from
-${\sim}48\%$ to ${\sim}43\%$ --- direct empirical support for this
-recommendation.
+\paragraph{Recommended next step (revised).} \textbf{Extend and densify the
+sampling \emph{envelope} at its edges} --- particularly the
+$\opin\approx-800$ / low-$\vadv$ boundary where the largest errors sit ---
+rather than only filling the interior. The curvature analysis shows this
+region is a smooth extrapolation boundary, not a sharply-bent one, so
+additional edge samples should convert extrapolation into interpolation and
+pay off directly. Empirical support: adding the previously-missing case
+(which sits on that boundary) already reduced the worst-case density error
+from ${\sim}48\%$ to ${\sim}43\%$.
 
 %======================================================================
 \section*{Reproducibility}
@@ -399,7 +468,8 @@ recommendation.
 All code is in the \texttt{jaxtrace/rom/} package (branch
 \texttt{feature/rom-svd}), with drivers \texttt{run\_rom\_pca.py},
 \texttt{run\_rom\_loocv.py}, \texttt{run\_rom\_particles.py},
-\texttt{run\_rom\_first\_stage.py}, \texttt{run\_rom\_manifold.py}, and
+\texttt{run\_rom\_first\_stage.py}, \texttt{run\_rom\_manifold.py},
+\texttt{run\_rom\_curvature.py}, and
 \texttt{run\_rom\_density\_compare.py}. Density product and 2D projection
 are selected via \texttt{-{}-density-filename} and
 \texttt{-{}-project-2d sum}; particle 2D via \texttt{-{}-components y z}.
