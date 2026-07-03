@@ -29,22 +29,30 @@ outcome of a friction-stir-welding (FSW) simulation from two process
 inputs --- advance velocity $\vadv$ (\texttt{INLET\_VELOCITY}) and pin
 rotation $\opin$ (\texttt{PIN\_RPM}) --- using linear Proper Orthogonal
 Decomposition (POD) via the SVD. Two output targets are studied: the
-Eulerian mean-density field and the Lagrangian particle cloud. The main
-conclusion is that \emph{linear POD is feasible but sample-limited}: with
-20 cases the density surrogate reaches ${\sim}28\%$ held-out error, and
-the dominant error source is the two-input$\to$mode-coefficient
-regression, not the POD basis. Two representation choices give clear
-gains: the \emph{time-averaged} density is far more predictable than a
-single final snapshot, and a \emph{2D $(y,z)$ cross-section} that
-collapses the advection axis reaches the best result of the study
-(${\sim}21\%$). Active-subspace, manifold, and discrete-curvature
-diagnostics show the response is $\vadv$-dominated and lives on a smooth
-(un-bent) but curved low-dimensional manifold; notably, per-case error
-\emph{anti}-correlates with curvature and peaks on the low-curvature
-\emph{sampling boundary}, so the error is an extrapolation effect. The
-practical next step is therefore to extend and densify the sampling
-envelope at its edges (the high-$|\opin|$/low-$\vadv$ boundary), not merely
-its interior.
+Eulerian mean-density field and the Lagrangian particle cloud. The
+manifold of responses is \emph{curved} (intrinsic dimension ${\sim}2.5$
+below ${\sim}10$ linear modes for 90\% energy), so linear POD is a
+\emph{convenient first approximation, not a fitted model} of the geometry.
+With only 20 cases the density surrogate reaches ${\sim}28\%$ held-out
+error (per-case spread $18$--$43\%$), and this error has \emph{two}
+non-negligible parts: a ${\sim}10$--14\% linear-POD \emph{basis} error (the
+singular spectrum has no elbow --- the curved ensemble is not low-rank in a
+linear basis) plus the additional \emph{regression} error, the latter most
+simply explained by degrees-of-freedom starvation (fitting ${\sim}7$--10
+mode coefficients from 20 points). Two representation choices
+reduce the error --- the \emph{time-averaged} density beats a single final
+snapshot, and a \emph{2D $(y,z)$ cross-section} reaches ${\sim}21\%$ (with
+the caveat that it also predicts a lower-information target). Curvature and
+active-subspace diagnostics are \emph{suggestive but not conclusive at
+$n{=}20$}: they hint that the error concentrates on the sampling boundary
+(extrapolation) rather than in high-curvature interior regions, but the
+correlations rest on ${\sim}20$ noisy LOOCV estimates and cannot separate
+this from ``too few samples, period.'' The unambiguous, method-independent
+conclusion is that \textbf{more samples are required} --- particularly to
+extend and densify the sampling envelope and to resolve where the curvature
+changes --- both to lower the linear-POD error and to \emph{unlock}
+nonlinear alternatives (patch/local POD, manifold learning, autoencoders)
+that 20 points cannot currently support.
 \end{abstract}
 
 \tableofcontents
@@ -101,8 +109,10 @@ $L^2$/mass, $\log$) were tested but change little (Sec.~\ref{sec:results}).
 \paragraph{Validation: projection vs.\ LOOCV.}
 Two error numbers appear throughout and must not be conflated.
 \emph{Projection error} fits POD on all cases and reconstructs case $i$
-from its \emph{own} coefficients --- it measures only basis
-expressiveness (${\sim}12\%$ at $K{=}7$ for density). \emph{Leave-one-out
+from its \emph{own} coefficients --- it isolates the \emph{basis} error
+(what linear POD cannot represent even with perfect coefficients). For
+density it is ${\sim}14\%$ at $K{=}7$ and still ${\sim}10\%$ at $K{=}10$
+(90\% energy) --- \emph{not} negligible. \emph{Leave-one-out
 cross-validation} (LOOCV) is the real generalization test: for each case
 $i$, fit POD on the other $n{-}1$, fit a regressor
 $(\vadv,\opin)\mapsto$ mode coefficients on them, predict the held-out
@@ -112,22 +122,34 @@ coefficients, reconstruct, and measure relative $L^2$ error:
 e_i=\frac{\lVert\hat\rho_i-\rho_i\rVert}{\lVert\rho_i\rVert}.
 \]
 A surrogate cannot project an unseen field, so LOOCV necessarily tests
-\emph{POD + regression together}. The gap between projection
-(${\sim}12\%$) and LOOCV (${\sim}28\%$) is the regression error. Three
-lightweight regressors are compared: \texttt{rbf} (thin-plate spline),
-\texttt{gp} (small NumPy Gaussian process), \texttt{poly} (degree-2).
+\emph{POD + regression together}. The total held-out error
+(${\sim}28\%$) thus has \emph{two} substantial components: a
+${\sim}10$--14\% \textbf{basis} error (the linear POD does not fit the
+curved ensemble well --- see the absence of a spectral elbow below) plus
+the additional regression error on top. Neither component is small; both
+trace back to the same cause (a curved manifold under-sampled by 20
+points). Three lightweight regressors are compared: \texttt{rbf}
+(thin-plate spline), \texttt{gp} (small NumPy Gaussian process),
+\texttt{poly} (degree-2).
 
 %======================================================================
 \section{Core results}\label{sec:results}
 %======================================================================
 
 \subsection{Density field}
-The singular-value spectrum decays gently (no sharp elbow): 90\%\ energy
-needs ${\sim}10$ modes. Normalization barely moves the held-out error.
-LOOCV is ${\sim}28\%$ (rbf); the error concentrates in the
-high-$|\opin|$/low-$\vadv$ corner and at the sampling convex-hull edges.
-Restricting to the near-pin first 20\% of $x$ (dropping the
-$\vadv$-sensitive wake) improves the surrogate.
+The singular-value spectrum decays \emph{gently, with no elbow at all}
+(consecutive ratios $\sigma_k/\sigma_1 = 1.00, 0.61, 0.53, 0.43, 0.41,
+0.33,\ldots$ --- a smooth taper, not a knee): 90\% energy needs ${\sim}10$
+modes and the coverage curve keeps climbing with diminishing returns. This
+is itself a negative result for linear POD: the field ensemble is
+\emph{not} low-rank-linear, so there is no natural truncation $K$ and even
+the best $K$ leaves a non-trivial basis error (Sec.~2.5). This is the
+expected fingerprint of a transport-dominated / high-Kolmogorov-width
+problem (density blobs shifted by $\vadv$ are nearly $L^2$-orthogonal).
+Normalization barely moves the held-out error. LOOCV is ${\sim}28\%$
+(rbf); the error concentrates in the high-$|\opin|$/low-$\vadv$ corner and
+at the sampling convex-hull edges. Restricting to the near-pin first 20\%
+of $x$ (dropping the $\vadv$-sensitive wake) improves the surrogate.
 
 \begin{figure}[H]\centering
 \includegraphics[width=\linewidth]{rom_pca_elbow_coverage.png}
@@ -198,13 +220,18 @@ lower-variance, more predictable quantity.
 Mapping the inputs to physics-motivated features --- weld pitch
 $p_w=\vadv/|\opin|$, $\log$ inputs, and the first-stage ROM (velocity /
 temperature / pressure) coefficients --- \emph{none} beat the raw
-two-scalar baseline. An active-subspace analysis explains why: the
-input$\to$coefficient map is nearly 1D, but its dominant direction is
-essentially \emph{pure $\vadv$}, not weld pitch, so collapsing onto $p_w$
-is the wrong reduction. The first-stage coefficients are largely a
-reparametrisation of the two scalars (leading modes have $R^2\approx1.0$
-with the inputs; only mode $\geq3$ carries new information, which does not
-drive the density modes), and adding all of them overfits.
+two-scalar baseline. An active-subspace analysis is consistent with this:
+the estimated input$\to$coefficient map is \emph{apparently} low-rank, with
+its dominant direction close to \emph{pure $\vadv$} rather than weld pitch
+--- so if a reduction to one input combination were warranted it would be
+$\vadv$, not $p_w$. We caution, however, that at $n{=}20$ over a 2D input
+space an ``apparently 1D'' active subspace cannot be cleanly distinguished
+from simply having too few samples to resolve the second direction's
+effect; small-sample regressions generically look artificially low-rank.
+The first-stage coefficients are largely a reparametrisation of the two
+scalars (leading modes have $R^2\approx1.0$ with the inputs; only mode
+$\geq3$ carries new information, which does not drive the density modes),
+and adding all of them overfits.
 
 \begin{figure}[H]\centering
 \includegraphics[width=0.85\linewidth]{rom_firststage_density.png}
@@ -268,46 +295,62 @@ interior} (mid/high $\vadv$) and \emph{lowest along the $\opin=-800$
 sampling edge}.}\label{fig:curv}
 \end{figure}
 
-Two findings emerge, one of which \emph{revises} the earlier
-sampling recommendation.
+One observation is robust; a second is only suggestive.
 \begin{itemize}
-\item \textbf{The manifold is smooth, not sharply bent.} Turning angles
-sit at ${\sim}117^\circ$ for every target --- the honest high-dimensional
-signature that consecutive secants are near-orthogonal; there are no
-sharp folds. Scale-normalised Menger is ${\sim}1.7$--$1.9$ across all four
-representations (density/particle, 3D/2D), i.e.\ comparable and moderate.
-\item \textbf{Curvature does \emph{not} coincide with error --- it
-anti-correlates.} Per-case LOOCV error correlates \textbf{negatively} with
-Menger ($-0.74$) and local-PCA ($-0.58$) curvature. The highest-error
-cases (\texttt{002}, \texttt{003}, \texttt{005}, \texttt{015}, all at
-$\opin\approx-800$) sit on the \emph{convex-hull boundary} of the sampling
-box and have \emph{low} curvature; the lowest-error cases are in the
-well-surrounded interior and have the \emph{highest} curvature
-(Fig.~\ref{fig:curv}).
+\item \textbf{(Robust) The manifold is smooth, not sharply bent.} Turning
+angles sit at ${\sim}117^\circ$ for every target --- the honest
+high-dimensional signature that consecutive secants are near-orthogonal;
+there are no sharp folds. Scale-normalised Menger is ${\sim}1.7$--$1.9$
+across all four representations (density/particle, 3D/2D), i.e.\ comparable
+and moderate. This says the response varies smoothly with the inputs ---
+good for interpolation, and an argument \emph{against} the presence of
+discontinuities that only a nonlinear method could handle.
+\item \textbf{(Suggestive) Error appears to concentrate on the sampling
+boundary.} Per-case LOOCV error correlates \emph{negatively} with Menger
+($-0.74$) and local-PCA ($-0.58$) curvature: the highest-error cases
+(\texttt{002}, \texttt{003}, \texttt{005}, \texttt{015}, all at
+$\opin\approx-800$) sit on the convex-hull boundary and have \emph{low}
+curvature, while the lowest-error cases are interior and most curved
+(Fig.~\ref{fig:curv}). We deliberately do \emph{not} treat this as an
+established mechanism: both the curvature correlation and the per-case
+LOOCV error are computed from ${\sim}20$ points, and LOOCV error is itself
+a high-variance, single-held-out estimate (here the per-case error spans
+$18$--$43\%$). A correlation of $-0.74$ on 20 noisy points has wide
+sampling uncertainty, and the pattern is equally consistent with the
+simpler ``too few samples, period.'' The local-PCA estimator's
+cross-manifold ranking is unreliable at $n{=}20$ (used only for the
+within-manifold pattern).
 \end{itemize}
 
-\paragraph{Interpretation (revised takeaway).} The error is driven by
-\textbf{extrapolation at the sampling boundary}, not by intrinsic
-curvature: LOOCV holds out an edge case and the regressor must
-extrapolate past the convex hull, where curvature happens to be lowest.
-This \emph{refines} the ``add samples in the high-$|\opin|$/low-$\vadv$
-corner'' recommendation --- that corner is hard because it is a
-\emph{boundary} the model extrapolates into, and the manifold there is
-\emph{smooth}, so extending / densifying the sampling \emph{envelope} at
-the edges (rather than only its interior) should pay off directly. (The
-local-PCA estimator's cross-manifold ranking is unreliable at $n{=}20$ ---
-consistent with its known fragility --- so it is used only for the
-within-manifold spatial pattern.)
+\paragraph{Interpretation (a hypothesis, not a diagnosis).} The most
+\emph{parsimonious} explanation of the projection-vs-LOOCV gap is
+degrees-of-freedom starvation: retaining ${\sim}7$--10 modes leaves only
+${\sim}10$--13 effective DOF for the regression, fitted from 20 points ---
+a very thin margin that alone predicts large held-out error. On top of
+that, the geometry \emph{hints} that the residual error is worst where the
+model must extrapolate past the sampling boundary rather than in
+high-curvature interior regions. Both readings point the same practical
+way (more, better-placed samples), so we adopt the recommendation without
+committing to the curvature-based causal story as fact.
 
 \subsection{The bottleneck}
-Projection error (${\sim}12\%$) $\ll$ LOOCV (${\sim}28\%$); neither
-normalization, input features, nor regressor choice moves the needle; the
-active subspace is nearly 1D in $\vadv$; and the manifold is smooth
-(Sec.~\ref{sec:curv}) but its worst-predicted cases lie on the sampling
-boundary. The limiting factor is unambiguously \textbf{sample count and,
-specifically, boundary coverage} --- 20 points in a 2D space that is
-effectively 1D, with the largest errors where the model must extrapolate
-past the sampling envelope.
+The total ${\sim}28\%$ error is limited on \emph{two} fronts. First, the
+linear POD \textbf{basis} itself is inadequate: the spectrum has no elbow
+and the projection (own-coefficient) error is ${\sim}10$--14\% at usable
+$K$, because the transport-dominated ensemble is not low-rank in a linear
+basis. Second, the \textbf{regression} adds error on top, most simply from
+\textbf{degrees-of-freedom starvation}: 20 samples cannot robustly fit
+${\sim}7$--10 mode coefficients plus the interpolation between them.
+Consistent with this, no lever that does \emph{not} add information
+helps --- normalization, input features, and regressor choice all converge
+to a similar floor, and every LOOCV number carries a standard error of
+order a few percentage points (e.g.\ density $28.3\%$ has per-case spread
+$18$--$43\%$), so the point estimates in the tables should be read as
+${\pm}$ several points, not exact. The suggestive boundary/curvature
+pattern (Sec.~\ref{sec:curv}) refines \emph{where} to add samples but is
+not needed for the core conclusion: both the basis inadequacy and the
+regression starvation stem from \textbf{too few samples of a curved
+response}, and both improve only with more data.
 
 %======================================================================
 \section{Data-quality fixes (all 20 cases)}\label{sec:rerun}
@@ -402,6 +445,15 @@ removes the ``free'' mode and leaves only the small, chaotic in-plane stir
 motion, which is harder to predict. So for the cloud, $x$ is signal, not
 noise.
 
+\paragraph{Caveat on the 2D ``improvement.''} Summing out $x$ is not a
+free lunch: it reduces the predicted field's information content by
+${\sim}300\times$. Part of the lower LOOCV error therefore reflects
+predicting an \emph{easier, less-informative target} (the cross-section
+integrates away exactly the $\vadv$-dependent wake the user may care
+about), not only a genuinely better ROM. The 2D result is the right choice
+\emph{if} the cross-section is the quantity of interest; it is not evidence
+that the surrogate ``understands'' the full field better.
+
 %======================================================================
 \section{Summary of variants}
 %======================================================================
@@ -413,7 +465,7 @@ target & variant & 90\% modes & best LOOCV & note \\
 density & union, full domain & 10 & 28.3\% & baseline (all 20) \\
 density & union, near-pin $x$ & 11 & 24.4\% & drops the $\vadv$-wake \\
 density & final-step & 12 & 49.3\% & time-avg far better \\
-density & \textbf{2D $(y,z)$} & \textbf{6} & \textbf{20.6\%} & \textbf{best density result} \\
+density & \textbf{2D $(y,z)$} & \textbf{6} & \textbf{20.6\%} & lowest error, but easier target \\
 particles & 3D comoving & 11 & 36.1\% & harder than density \\
 particles & 2D $(y,z)$ & 14 & 41.4\% & worse ($x$ is signal) \\
 \midrule
@@ -429,38 +481,51 @@ held-out relative $L^2$ error.}
 \section{Conclusions and next steps}
 %======================================================================
 \begin{enumerate}
-\item \textbf{Feasible, not yet accurate.} Linear POD + simple regression
-gives ${\sim}21$--$28\%$ held-out density error from two inputs ---
-promising for a first pass, not production-grade.
-\item \textbf{The bottleneck is data, not representation.} Projection
-error (${\sim}12\%$) $\ll$ LOOCV (${\sim}28\%$); no input encoding,
-normalization, or regressor helps; the active subspace is $\vadv$-dominated
-and low-rank. The limit is 20 samples in an effectively-1D input space.
-\item \textbf{Representation matters.} Use the \emph{time-averaged} density
-(not a final snapshot), and the \emph{2D $(y,z)$ cross-section} as the
-density ROM target (LOOCV ${\sim}21\%$, ${\sim}6$ modes, intrinsic dim
-${\sim}1.7$). Keep full 3D for particles.
-\item \textbf{The manifold is curved but smooth, and the error is a
-boundary effect.} Intrinsic dimension (${\sim}2.5$) sits below the linear
-mode count (${\sim}10$) --- curved --- but discrete curvature
-(Sec.~\ref{sec:curv}) shows no sharp folds (turning angles ${\sim}117^\circ$,
-moderate Menger). Crucially, per-case error \emph{anti}-correlates with
-curvature ($-0.74$): the worst cases lie on the low-curvature
-\emph{sampling boundary} ($\opin=-800$), where LOOCV extrapolates. So a
-nonlinear reduction (autoencoder / kernel-POD) is the \emph{eventual}
-route once more data exists (target latent dim ${\sim}2$--3), but it will
-not cure a boundary/extrapolation error --- more \emph{samples} will.
+\item \textbf{Linear POD is a workable first approximation, not a validated
+model of a linear response.} It gives ${\sim}21$--$28\%$ held-out density
+error (per-case spread wide, e.g.\ $18$--$43\%$) --- useful as a baseline,
+but the underlying manifold is \emph{curved} (intrinsic dimension
+${\sim}2.5$ vs.\ ${\sim}10$ linear modes for 90\% energy). Linear POD works
+here because it is a convenient global basis, not because the response is
+linear; that mismatch is a real, not merely cosmetic, limitation.
+\item \textbf{Both the basis and the regression are limited --- and both
+point to more data.} The ${\sim}28\%$ held-out error is not purely a
+regression failure: the linear POD \emph{basis} itself carries a
+${\sim}10$--14\% error with no spectral elbow, because the curved ensemble
+is not low-rank in a linear basis. The additional regression error is most
+simply explained by degrees-of-freedom starvation (${\sim}7$--10
+coefficients from 20 points). No information-free lever (normalization,
+input features, regressor) helps, and all LOOCV numbers carry a standard
+error of several points. Whether the residual error is \emph{specifically}
+a boundary/extrapolation effect (Sec.~\ref{sec:curv}) is a plausible but
+\emph{unconfirmed} hypothesis at $n{=}20$, not an established mechanism.
+\item \textbf{Representation matters (within limits).} The
+\emph{time-averaged} density is more predictable than a final snapshot, and
+the \emph{2D $(y,z)$ cross-section} reaches ${\sim}21\%$ --- but the latter
+also predicts a ${\sim}300\times$ smaller, lower-information target, so it
+is a good choice only if the cross-section is the quantity of interest.
+\item \textbf{More data is the prerequisite for everything else.} The
+manifold is curved but smooth (no sharp folds), which is encouraging ---
+but 20 points is too few to (i) fit the linear regression well, (ii)
+confidently diagnose \emph{where} and \emph{why} the error concentrates, or
+(iii) support any nonlinear alternative. Methods such as \emph{local /
+patch POD}, \emph{manifold learning} (t-SNE, UMAP), and \emph{autoencoders}
+would each overfit at $n{=}20$; they only become viable, and their value
+only becomes testable, with substantially more samples (the literature
+suggests ${\sim}50$--100 for a 2D parameter space of this complexity).
 \end{enumerate}
 
-\paragraph{Recommended next step (revised).} \textbf{Extend and densify the
-sampling \emph{envelope} at its edges} --- particularly the
-$\opin\approx-800$ / low-$\vadv$ boundary where the largest errors sit ---
-rather than only filling the interior. The curvature analysis shows this
-region is a smooth extrapolation boundary, not a sharply-bent one, so
-additional edge samples should convert extrapolation into interpolation and
-pay off directly. Empirical support: adding the previously-missing case
-(which sits on that boundary) already reduced the worst-case density error
-from ${\sim}48\%$ to ${\sim}43\%$.
+\paragraph{Recommended next step.} \textbf{Acquire more samples}, and place
+them to serve two goals at once: (a) \emph{extend and densify the sampling
+envelope at its edges} (particularly the $\opin\approx-800$/low-$\vadv$
+boundary, where the largest LOOCV errors sit), converting extrapolation
+into interpolation; and (b) \emph{add samples where the curvature changes},
+so the manifold's shape --- and hence the choice between linear POD, patch
+POD, and nonlinear reduction --- can actually be resolved rather than
+guessed. One suggestive (not conclusive) data point: adding the
+previously-missing boundary case reduced the worst-case density error from
+${\sim}48\%$ to ${\sim}43\%$; a larger, deliberately-placed batch is needed
+to confirm the strategy and to unlock the nonlinear methods above.
 
 %======================================================================
 \section*{Reproducibility}
