@@ -185,37 +185,53 @@ Phase 3 lands in three sub-commits:
 float32 = **864 MB VRAM for 900k tets**. Uploads once, never touched
 again after build_recovery.
 
-### Phase 4 — Kernel-side evaluation
+### Phase 4 — Kernel-side evaluation *(DONE)*
 
-Per query at position `p`:
+Per query at position `p` inside parent tet `elem_id`:
 
-1. **Locate the containing sub-tet** (4 candidates per parent). Each
-   parent face F_i separates the parent into two half-spaces via a
-   plane containing (vc, v_a, v_b). Compute signed volumes of
-   (p, vc, v_j, v_k), (p, vc, v_k, v_l), (p, vc, v_l, v_j) with the
-   parent face F_i; the point is in sub-tet T_i iff all three
-   signed volumes have the same sign as the reference. Fast:
-   4 vec cross products + 4 scalar signs. Total 4 branches, JAX-
-   friendly (implement via jnp.where cascade or bit-packed index).
+1. **Compute parent barycentric coords** `(b0, b1, b2, b3)` — reused
+   from the existing P1 direct-inverse or gram-matrix branch.
 
-2. **Compute barycentric coordinates in the sub-tet** using the
-   direct-inverse formula we already have (compute the sub-tet's
-   Jacobian inverse on the fly from vc + 3 sub-tet vertices).
+2. **Locate the containing sub-tet** via `s = argmin(b_parent)`. This
+   is a clean characterisation of Alfeld-split sub-tet containment:
+   sub-tet `s` is the one whose base triangle is opposite parent
+   vertex `s`, and the point is closest to that base (and farthest
+   from parent vertex `s`) precisely when `b_s` is the smallest of
+   the four. Verified numerically: 500/500 matches on random
+   interior points of a reference tet. Cost: one `jnp.argmin` — no
+   branches, no signed-volume computations.
 
-3. **Evaluate the Bernstein cubic** using de Casteljau or direct
-   Bernstein basis:
+3. **Compute sub-tet barycentric** from parent barycentric via a
+   closed-form transform:
 
-       v(p) = sum_{i+j+k+l = 3, i,j,k,l >= 0}
-              C_{ijkl} * B^3_{ijkl}(bary)
+       bw0 = 4 * b_s                       (weight on vc)
+       bw_{k+1} = b_{fs[k]} - b_s          for k in 0..2
+                                           (weights on parent vertices)
 
-   where `B^3_{ijkl}(b) = (3! / (i! j! k! l!)) * b_0^i b_1^j b_2^k b_3^l`.
+   with `fs = ALFELD_SUBTET_PARENT_VERTS[s]`. Verified bit-exact
+   (max error < 1e-15). Cost: 4 subtractions + 1 multiply.
 
-   Direct evaluation is 20 multiply-adds per component; de Casteljau
-   is 3 rounds of vertex-averaging, slightly cheaper.
+4. **Evaluate the Bernstein cubic** using precomputed powers of the
+   sub-tet barycentrics:
 
-Wall-clock estimate: with n_elements = 900k and float32 gather-heavy
-kernel, expect ~4-6x the vertex_taylor per-step cost. Still << search
-+ RK4 substage overhead for the recirc_2026 case.
+       bw*_pows[e] = bw*^e     (for exponents 0..3, per axis)
+       basis[k]    = mult[k] * bw0_pows[α0] * bw1_pows[α1]
+                             * bw2_pows[α2] * bw3_pows[α3]
+       v(p)        = einsum("k,kc->c", basis, coeffs_this_subtet)
+
+   where `mult[k] = 6 / (α0! α1! α2! α3!)` and `α = BERN_INDICES[k]`.
+   Both `mult` and `BERN_INDICES` are static jnp constants folded
+   into the JIT graph. Cost: ~50 multiplies + 1 dot.
+
+Kernel integration lives in
+`benchmark_femuss_comparison.py::interpolate_velocity_single` under
+the `use_hct_cubic` branch. Priority order:
+`hct_cubic > vertex_taylor > centroid_taylor > raw P1`.
+
+Measured smoke test (32-particle × 20-step recirc mesh):
+32/32 particles found, 0 lost, 117 p·step/s (comparable to
+vertex_taylor: 124 p·step/s). Search still dominates per-step
+cost at this problem size.
 
 ### Phase 5 — Validation gates
 

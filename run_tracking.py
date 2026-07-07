@@ -372,7 +372,9 @@ def parse_args():
                              "kernel samples the reconstruction instead of "
                              "raw P1 barycentric interpolation. Default 1.")
     parser.add_argument("--recovery-method", type=str, default="centroid_taylor",
-                        choices=["taylor", "centroid_taylor", "vertex_taylor"],
+                        choices=["taylor", "centroid_taylor", "vertex_taylor",
+                                 "hct_cubic", "hct_cubic_c0",
+                                 "hct_cubic_quad_faces"],
                         help="Which reconstruction to build in Step 5. "
                              "'centroid_taylor' (default) = per-element "
                              "(v_c, G_c, x_c) with v(p) = v_c + G_c @ "
@@ -382,10 +384,20 @@ def parse_args():
                              "gradient at the sampling vertex rather "
                              "than a frozen centroid value (better on "
                              "smooth fields with strong internal "
-                             "curvature). 'taylor' is a legacy alias for "
-                             "'centroid_taylor' preserved so older "
-                             "configs keep working. More methods "
-                             "(hct_cubic, ...) will follow.")
+                             "curvature). 'hct_cubic' (recommended for "
+                             "smooth fields with high curvature) = "
+                             "piecewise cubic Bernstein reconstruction on "
+                             "the Alfeld sub-tet split with Taylor-fit "
+                             "(μ, γ) at the parent centroid; bit-exact for "
+                             "quadratic fields at parent centroid, spoke-"
+                             "edge midpoints, and parent face centroids. "
+                             "'hct_cubic_c0' and 'hct_cubic_quad_faces' "
+                             "are the intermediate Phase 3a and 3a-plus "
+                             "variants preserved for A/B testing. 'taylor' "
+                             "is a legacy alias for 'centroid_taylor' "
+                             "preserved so older configs keep working. See "
+                             "docs/hct3d_implementation_plan.md for the "
+                             "full derivation.")
 
     parser.add_argument("--boundary-proj-tol", type=float, default=1e-6,
                         help="Inward tolerance for boundary projection clamping")
@@ -1820,31 +1832,95 @@ def main():
     element_v_centroid_gpu = None
     element_gradient_gpu = None
     node_gradient_gpu = None
+    hct_bernstein_gpu = None
     if args.gradient_recovery == 1:
         n_frames = velocity_sequence.shape[0]
         if n_frames == 1:
             from jaxtrace.gpu.recovery.gradient_recovery import build_recovery
             print(f"\n[gradient-recovery] Building higher-order "
                   f"velocity reconstruction (method='{args.recovery_method}')")
+            # HCT methods dispatch to gradient_recovery's Steps 1-4 with
+            # the centroid_taylor placeholder, then use its nodal_gradient
+            # to feed the hct3d Bernstein assembly. The centroid arrays
+            # from recovery are ignored on the HCT path.
+            hct_variants = {
+                "hct_cubic": "c1_taylor",
+                "hct_cubic_c0": "c0",
+                "hct_cubic_quad_faces": "c0_quad_faces",
+            }
+            is_hct = args.recovery_method in hct_variants
+            underlying_method = (
+                "centroid_taylor" if is_hct else args.recovery_method
+            )
             recovery = build_recovery(
                 node_positions=node_positions,
                 connectivity=connectivity,
                 node_velocities=velocity_sequence[0],
-                method=args.recovery_method,
+                method=underlying_method,
                 verbose=True,
             )
-            # Upload only the arrays the chosen method needs. Both are
-            # produced by build_recovery unconditionally so users can
-            # A/B methods without rebuilding the pipeline, but we skip
-            # the GPU upload of the unused set to save VRAM.
-            if recovery.method == "vertex_taylor":
+            for k, v in recovery.stage_times.items():
+                stage_times[f'gr_{k}'] = v
+
+            # Upload only the arrays the chosen method needs. Non-HCT
+            # methods keep the same wiring as before; HCT methods build
+            # the Bernstein coefficient array from the recovered nodal
+            # gradient.
+            if is_hct:
+                from jaxtrace.gpu.recovery.hct3d import (
+                    build_alfeld_geometry,
+                    edge_midpoint_gradients,
+                    build_hct_bernstein_c0,
+                    build_hct_bernstein_quad_faces,
+                    build_hct_bernstein_c1_taylor,
+                )
+                hct_variant = hct_variants[args.recovery_method]
+                print(f"[gradient-recovery] HCT-3D variant: {hct_variant}")
+                # Phase 1: Alfeld-split geometry.
+                t_hct = time.time()
+                geom = build_alfeld_geometry(
+                    node_positions, connectivity, verbose=True,
+                )
+                stage_times['gr_hct_geom'] = time.time() - t_hct
+                # Phase 2: edge-midpoint gradients (required by Phase 3b's
+                # signature; unused by the current C1-Taylor implementation).
+                t_hct = time.time()
+                edge_grads = edge_midpoint_gradients(
+                    node_positions, connectivity, recovery.nodal_gradient,
+                    verbose=True,
+                )
+                stage_times['gr_hct_edge_grads'] = time.time() - t_hct
+                # Phase 3: Bernstein coefficient assembly.
+                t_hct = time.time()
+                builder = {
+                    "c0": build_hct_bernstein_c0,
+                    "c0_quad_faces": build_hct_bernstein_quad_faces,
+                    "c1_taylor": build_hct_bernstein_c1_taylor,
+                }[hct_variant]
+                hct_data = builder(
+                    node_positions=node_positions,
+                    connectivity=connectivity,
+                    node_velocities=velocity_sequence[0],
+                    nodal_gradient=recovery.nodal_gradient,
+                    edge_grads=edge_grads,
+                    geom=geom,
+                    verbose=True,
+                )
+                stage_times['gr_hct_bernstein'] = time.time() - t_hct
+                # Upload to GPU. Only the coefficient array is passed
+                # to the kernel; the multi-index tables are folded in
+                # at JIT time via the hct3d module constants.
+                hct_bernstein_gpu = jax.device_put(hct_data.coeffs)
+                print(f"[gradient-recovery] HCT Bernstein coefficients "
+                      f"shape={hct_data.coeffs.shape}, "
+                      f"size={hct_data.coeffs.nbytes / 1e6:.1f} MB "
+                      f"(continuity='{hct_data.continuity}')")
+            elif recovery.method == "vertex_taylor":
                 node_gradient_gpu = jax.device_put(recovery.nodal_gradient)
             else:  # centroid_taylor (and legacy 'taylor' alias)
                 element_centroid_gpu = jax.device_put(recovery.element_centroid)
                 element_v_centroid_gpu = jax.device_put(recovery.element_v_centroid)
                 element_gradient_gpu = jax.device_put(recovery.element_gradient)
-            for k, v in recovery.stage_times.items():
-                stage_times[f'gr_{k}'] = v
         else:
             print(f"\n[gradient-recovery] SKIPPED: velocity_sequence has "
                   f"{n_frames} frames; only single-frame (steady) fields "
@@ -2030,6 +2106,7 @@ def main():
         element_v_centroid_gpu=element_v_centroid_gpu,
         element_gradient_gpu=element_gradient_gpu,
         node_gradient_gpu=node_gradient_gpu,
+        hct_bernstein_gpu=hct_bernstein_gpu,
     )
 
     # Per-step inlet drift helper. Drifts only particles whose

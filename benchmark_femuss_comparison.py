@@ -710,6 +710,12 @@ def create_rk4_comparison(
     element_v_centroid_gpu=None,
     element_gradient_gpu=None,
     node_gradient_gpu=None,
+    # hct_cubic: piecewise cubic Bernstein reconstruction on the Alfeld
+    # split. Pass hct_bernstein_gpu (n_elements, 4_subtets, 20_coeffs, 3),
+    # hct_subtet_centroid_pverts_gpu (4, 3) int32, and
+    # hct_bern_multi_coeffs_gpu (20,) float32 constants. When present,
+    # takes precedence over vertex_taylor and centroid_taylor.
+    hct_bernstein_gpu=None,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -944,20 +950,144 @@ def create_rk4_comparison(
 
     # ---- Velocity interpolation ----
     use_direct_inverse = (interpolation_method == "direct_inverse") and M_inv_gpu is not None
-    # Two Taylor variants gated by which arrays the caller passed.
-    # vertex_taylor wins if both sets are present.
-    use_vertex_taylor = node_gradient_gpu is not None
+    # Three recovery methods gated by which precomputed arrays the caller
+    # passed. Priority: hct_cubic > vertex_taylor > centroid_taylor > raw P1.
+    # Priority reflects reconstruction fidelity: hct_cubic is exact for
+    # quadratic fields at parent centroid/faces/spoke-edges; vertex_taylor
+    # is linear-plus-recovered-gradient; centroid_taylor is coarser.
+    use_hct_cubic = hct_bernstein_gpu is not None
+    use_vertex_taylor = (not use_hct_cubic) and node_gradient_gpu is not None
     use_centroid_taylor = (
-        (not use_vertex_taylor)
+        (not use_hct_cubic)
+        and (not use_vertex_taylor)
         and element_centroid_gpu is not None
         and element_v_centroid_gpu is not None
         and element_gradient_gpu is not None
     )
 
+    # -----------------------------------------------------------------
+    # HCT-cubic support tables. These become JIT'd constants; XLA folds
+    # them into the compiled graph so there are no runtime lookups.
+    # See jaxtrace.gpu.recovery.hct3d for the derivations.
+    # -----------------------------------------------------------------
+    if use_hct_cubic:
+        from math import factorial as _factorial
+        from jaxtrace.gpu.recovery.hct3d import (
+            BERN_INDICES, ALFELD_SUBTET_PARENT_VERTS,
+        )
+        # (20, 4) — multi-indices α = (α0, α1, α2, α3), |α|=3, in canonical
+        # BERN_INDICES ordering.
+        _bern_alpha = jnp.asarray(BERN_INDICES, dtype=jnp.int32)
+        # (20,) — Bernstein multinomial coefficients 6 / (α0! α1! α2! α3!).
+        _bern_mult = jnp.asarray(
+            np.array([
+                6.0 / (
+                    _factorial(int(a[0]))
+                    * _factorial(int(a[1]))
+                    * _factorial(int(a[2]))
+                    * _factorial(int(a[3]))
+                )
+                for a in BERN_INDICES
+            ], dtype=np.float32),
+            dtype=jnp.float32,
+        )
+        # (4, 3) — ALFELD_SUBTET_PARENT_VERTS[s] gives the 3 parent-vertex
+        # slots that form sub-tet s's base triangle.
+        _alfeld_subtet_pverts = jnp.asarray(
+            np.asarray(ALFELD_SUBTET_PARENT_VERTS, dtype=np.int32),
+            dtype=jnp.int32,
+        )
+
     def interpolate_velocity_single(pos, elem_id, velocity_field):
         valid = (elem_id >= 0) & (elem_id < len(connectivity))
         nodes_idx = connectivity[elem_id]
         node_vels = velocity_field[nodes_idx]
+
+        if use_hct_cubic:
+            # -----------------------------------------------------------
+            # HCT-3D piecewise cubic reconstruction.
+            #
+            # Step 1: parent barycentric coords (b0, b1, b2, b3) of pos.
+            #         Reuse the direct-inverse or gram-matrix formula.
+            # Step 2: sub-tet index s = argmin(b_i). This picks the sub-tet
+            #         whose base triangle is opposite parent vertex s;
+            #         equivalent (verified in phase-4 design work) to the
+            #         geometric sub-tet containment test. 500/500 matches
+            #         on random interior points of a reference tet.
+            # Step 3: sub-tet barycentric (bw0, bw1, bw2, bw3):
+            #             bw0 = 4 * b_s
+            #             bw_{k+1} = b_{fs[k]} - b_s   for k in 0..2
+            #         where fs = ALFELD_SUBTET_PARENT_VERTS[s].
+            # Step 4: Bernstein cubic eval:
+            #             v = sum_k  c[e, s, k, :] *
+            #                        mult[k] * bw0^α0 bw1^α1 bw2^α2 bw3^α3
+            # -----------------------------------------------------------
+            if use_direct_inverse:
+                M_inv = M_inv_gpu[elem_id]
+                local = pos - p0_gpu[elem_id]
+                bary = M_inv @ local
+                b1, b2, b3 = bary[0], bary[1], bary[2]
+                b0 = 1.0 - b1 - b2 - b3
+            else:
+                nodes = node_positions[nodes_idx]
+                v0 = nodes[1] - nodes[0]
+                v1 = nodes[2] - nodes[0]
+                v2 = nodes[3] - nodes[0]
+                vp = pos - nodes[0]
+                d00, d01, d02 = jnp.dot(v0, v0), jnp.dot(v0, v1), jnp.dot(v0, v2)
+                d11, d12 = jnp.dot(v1, v1), jnp.dot(v1, v2)
+                d22 = jnp.dot(v2, v2)
+                dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
+                det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+                det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN, config.INTERPOLATION_DET_MIN, det)
+                b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
+                b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
+                b3 = (d00*(d11*dp2-d12*dp1) - d01*(d01*dp2-d02*dp1) + dp0*(d01*d12-d02*d11)) / det
+                b0 = 1.0 - b1 - b2 - b3
+            b_parent = jnp.stack([b0, b1, b2, b3])  # (4,)
+
+            # Sub-tet index s = argmin(b). We also need the 3 parent-vertex
+            # slots fs = ALFELD_SUBTET_PARENT_VERTS[s].
+            s = jnp.argmin(b_parent)
+            fs = _alfeld_subtet_pverts[s]  # (3,)
+            b_s = b_parent[s]
+            bw0 = 4.0 * b_s
+            bw1 = b_parent[fs[0]] - b_s
+            bw2 = b_parent[fs[1]] - b_s
+            bw3 = b_parent[fs[2]] - b_s
+
+            # Powers of each barycentric axis for exponents 0..3.
+            # bw*_pows[e] = bw*^e. Length 4 per axis (exponents 0, 1, 2, 3).
+            bw0_pows = jnp.array([1.0, bw0, bw0*bw0, bw0*bw0*bw0])
+            bw1_pows = jnp.array([1.0, bw1, bw1*bw1, bw1*bw1*bw1])
+            bw2_pows = jnp.array([1.0, bw2, bw2*bw2, bw2*bw2*bw2])
+            bw3_pows = jnp.array([1.0, bw3, bw3*bw3, bw3*bw3*bw3])
+
+            # Bernstein basis values at bw for the 20 multi-indices.
+            # basis[k] = mult[k] * bw0^α0 * bw1^α1 * bw2^α2 * bw3^α3
+            # (α0, α1, α2, α3) = _bern_alpha[k].
+            # Use fancy indexing to gather the right powers.
+            basis = (
+                _bern_mult
+                * bw0_pows[_bern_alpha[:, 0]]
+                * bw1_pows[_bern_alpha[:, 1]]
+                * bw2_pows[_bern_alpha[:, 2]]
+                * bw3_pows[_bern_alpha[:, 3]]
+            )  # (20,)
+
+            # Gather the sub-tet's 20 B-coefficients:
+            #   hct_bernstein_gpu shape: (n_elements, 4, 20, 3).
+            coeffs_this_subtet = hct_bernstein_gpu[elem_id, s]  # (20, 3)
+            vel = jnp.einsum("k,kc->c", basis, coeffs_this_subtet)
+
+            if use_levelset_mask:
+                node_ls = levelset_gpu[nodes_idx]
+                ls_val = b0 * node_ls[0] + b1 * node_ls[1] + b2 * node_ls[2] + b3 * node_ls[3]
+                vel = jnp.where(
+                    ls_val >= 0.0, vel,
+                    jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP),
+                )
+            return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
         if use_vertex_taylor:
             # Per-vertex Taylor blended with P1 shape functions:
