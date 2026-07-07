@@ -461,6 +461,26 @@ for _i in range(4):
         [j for j in range(4) if j != _i], dtype=np.int32,
     )
 
+# _FACE_EDGE_COEFF_INDEX[i_opp, k] = the k-th of 6 rows in BERN_INDICES
+# corresponding to the 2-per-edge × 3-edges edge B-coefficients on the
+# face opposite vertex i_opp. These are the α-tuples with α_{i_opp} = 0
+# and non-zero counts summing to 3 across the 3 face vertices.
+_FACE_EDGE_COEFF_INDEX = np.zeros((4, 6), dtype=np.int32)
+for _i_opp in range(4):
+    _face_verts = [j for j in range(4) if j != _i_opp]
+    # 3 edges among the face verts, each with 2 B-coeff rows.
+    _rows = []
+    for _fa, _fb in [(_face_verts[0], _face_verts[1]),
+                     (_face_verts[0], _face_verts[2]),
+                     (_face_verts[1], _face_verts[2])]:
+        _alpha_ab = np.zeros(4, dtype=np.int32)
+        _alpha_ab[_fa] = 2; _alpha_ab[_fb] = 1
+        _rows.append(_bern_index_of(tuple(_alpha_ab)))
+        _alpha_ba = np.zeros(4, dtype=np.int32)
+        _alpha_ba[_fa] = 1; _alpha_ba[_fb] = 2
+        _rows.append(_bern_index_of(tuple(_alpha_ba)))
+    _FACE_EDGE_COEFF_INDEX[_i_opp] = np.array(_rows, dtype=np.int32)
+
 
 @dataclass(frozen=True)
 class HCTBernstein:
@@ -748,6 +768,137 @@ if _HAS_JAX:
     _bernstein_c0_jax = jax.jit(_bernstein_c0_jax_body)
 else:  # pragma: no cover
     _bernstein_c0_jax = None
+
+
+# =============================================================================
+# Phase 3a-plus — quadratic-precision face-centroid coefficients
+# =============================================================================
+#
+# For a cubic Bézier on a triangle, the face-centroid coefficient c_{111}
+# that gives QUADRATIC exactness (rather than just linear exactness of
+# the "c_111 = P1 average of vertex values" rule used in Phase 3a) is:
+#
+#     c_{111}^face  =  -1/6 * sum(3 vertex B-coeffs on face)
+#                    + 1/4 * sum(6 edge B-coeffs on face)
+#
+# The formula was verified symbolically in the design work for this
+# commit: fit the two coefficients (x_v, x_e) to satisfy c_111 exactness
+# for the two independent quadratic monomials u = b1^2 and u = b1*b2 on
+# a reference triangle; the unique solution is (-1/6, 1/4). The third
+# independent quadratic monomial (b2^2, etc.) satisfies the same
+# equation automatically (checked as a consistency test).
+#
+# This rule is a strict refinement over Phase 3a: Phase 3a's c_111 rule
+# is exact for LINEAR fields but NOT for quadratics. This rule is exact
+# for BOTH linear and quadratic. The vertex, edge and non-face
+# coefficients are unchanged from Phase 3a, so linear exactness is
+# preserved everywhere and quadratic exactness is added at the parent
+# face centroids.
+#
+# What this does NOT do: it does not upgrade c_{3000} at vc (= μ, still
+# the P1 average) or the spoke-edge coefficients to quadratic exactness.
+# Doing that requires solving for μ and γ = ∇u(vc), which is the full
+# Phase 3b macro-element C¹ solve. See docs/hct3d_implementation_plan.md
+# for the full construction.
+
+
+def _apply_quadratic_face_upgrade_body(
+    coeffs: "jnp.ndarray",   # (n_elements, 4, 20, 3) — from Phase 3a
+) -> "jnp.ndarray":
+    """Overwrite the 4 face-centroid B-coefficients in each sub-tet
+    with the quadratic-precision Farin formula.
+
+    Reads only the vertex and edge B-coefficients on each face (via
+    the precomputed static index tables) and writes the 4 face
+    coefficients.
+    """
+    face_coeff_idx    = jnp.asarray(_FACE_COEFF_INDEX, dtype=jnp.int32)      # (4,)
+    face_vertex_idx   = jnp.asarray(_FACE_VERTEX_INDEX, dtype=jnp.int32)     # (4, 3)
+    face_edge_idx     = jnp.asarray(_FACE_EDGE_COEFF_INDEX, dtype=jnp.int32) # (4, 6)
+    vertex_coeff_idx  = jnp.asarray(_VERTEX_COEFF_INDEX, dtype=jnp.int32)    # (4,)
+
+    for i_opp in range(4):
+        # 3 vertex coefficients on this face (the 3 non-i_opp vertices).
+        # face_vertex_idx[i_opp] gives local vertex slots {0,1,2,3}\{i_opp}.
+        # Vertex-coeff row for local vertex j is vertex_coeff_idx[j].
+        js = _FACE_VERTEX_INDEX[i_opp]  # length 3
+        sum_vertex = (
+            coeffs[:, :, int(_VERTEX_COEFF_INDEX[int(js[0])]), :]
+            + coeffs[:, :, int(_VERTEX_COEFF_INDEX[int(js[1])]), :]
+            + coeffs[:, :, int(_VERTEX_COEFF_INDEX[int(js[2])]), :]
+        )
+        # 6 edge coefficients on this face.
+        edge_rows = _FACE_EDGE_COEFF_INDEX[i_opp]  # length 6
+        sum_edge = jnp.zeros_like(sum_vertex)
+        for k in range(6):
+            sum_edge = sum_edge + coeffs[:, :, int(edge_rows[k]), :]
+        # Farin quadratic-precision face-centroid.
+        c_face = (-1.0 / 6.0) * sum_vertex + (1.0 / 4.0) * sum_edge
+        coeffs = coeffs.at[:, :, int(_FACE_COEFF_INDEX[i_opp]), :].set(c_face)
+    return coeffs
+
+
+if _HAS_JAX:
+    _apply_quadratic_face_upgrade = jax.jit(_apply_quadratic_face_upgrade_body)
+else:  # pragma: no cover
+    _apply_quadratic_face_upgrade = None
+
+
+def build_hct_bernstein_quad_faces(
+    node_positions: np.ndarray,
+    connectivity: np.ndarray,
+    node_velocities: np.ndarray,
+    nodal_gradient: np.ndarray,
+    edge_grads: np.ndarray,
+    geom: "AlfeldGeometry",
+    verbose: bool = False,
+) -> HCTBernstein:
+    """Phase 3a-plus. Same as build_hct_bernstein_c0 but upgrades the
+    face-centroid B-coefficients from linear-precision (P1 vertex
+    average) to quadratic-precision (Farin's formula involving vertex
+    AND edge coefficients on the face).
+
+    All other B-coefficients (vertex, edge, and the P1-averaged μ, γ at
+    the parent centroid) are IDENTICAL to Phase 3a. So this function is
+    a strict refinement: linear-field exactness is preserved, and
+    quadratic-field exactness is added at the parent face centroids.
+
+    Full C¹ continuity across sub-tet interior faces and quadratic/
+    cubic exactness at the parent centroid still require the Phase 3b
+    macro-element solve (upcoming).
+
+    Args and return type match build_hct_bernstein_c0.
+    """
+    import time
+    t0 = time.time()
+
+    if not _HAS_JAX:
+        raise RuntimeError(
+            "build_hct_bernstein_quad_faces requires JAX."
+        )
+
+    # Compute Phase 3a coefficients first.
+    hct_c0 = build_hct_bernstein_c0(
+        node_positions, connectivity, node_velocities,
+        nodal_gradient, edge_grads, geom, verbose=False,
+    )
+    # Upgrade face-centroid coefficients in-place on GPU.
+    coeffs_upgraded = _apply_quadratic_face_upgrade(
+        jnp.asarray(hct_c0.coeffs)
+    )
+    coeffs_upgraded.block_until_ready()
+    coeffs_np = np.asarray(coeffs_upgraded)
+
+    n_elements = int(connectivity.shape[0])
+    if verbose:
+        elapsed = time.time() - t0
+        print(f"[hct3d/bernstein-quad-faces] n_elements={n_elements:,}, "
+              f"wall={elapsed:.2f}s (includes Phase 3a build)")
+
+    return HCTBernstein(
+        coeffs=coeffs_np.astype(np.float32),
+        continuity="c0_quad_faces",
+    )
 
 
 # =============================================================================

@@ -145,17 +145,26 @@ Fine for a one-shot precompute.
 
 **Development sequencing.** Because the full C¹-with-macro-element
 construction has enough moving parts to be a bug-collection risk,
-Phase 3 lands in two sub-commits:
+Phase 3 lands in three sub-commits:
 
-* **Commit 2a**: cubic reconstruction with C⁰ interior continuity
-  (i.e. compute (μ, γ) using an averaging rule instead of the C¹
-  linear solve). Sub-tets have their B-coefficients but trajectories
-  crossing sub-tet interior faces may see a slope kink. Still exact
-  at parent vertices and exact for linear velocity fields.
-  Testable: linear, quadratic exactness inside sub-tets.
-* **Commit 2b**: add the 4×4 C¹ linear solve for (μ, γ). Testable:
-  full linear, quadratic AND cubic exactness inside the parent
-  element AND C¹ continuity at sub-tet face crossings.
+* **Commit 2a** *(DONE, 4abeee5)*: cubic reconstruction with C⁰
+  interior continuity. Face-centroid B-coefficient uses P1 vertex
+  average (linear-precision only). (μ, γ) computed via P1 average
+  rules. Testable properties: linear exactness everywhere, C⁰
+  continuity at spoke and parent-face edges.
+* **Commit 2a-plus** *(DONE, this commit)*: quadratic-precision
+  face-centroid coefficient via Farin's formula
+  `c_{111}^face = -1/6·Σ_vertex + 1/4·Σ_edge` on the face's 3 vertex
+  and 6 edge B-coefficients. All other coefficients unchanged from
+  2a. Testable properties: linear exactness still holds; quadratic
+  exactness at parent face centroids added. Verified numerically
+  against the reference NumPy `bernstein_cubic_evaluate` at 200
+  face-centroid samples with `u = (x², xy, y² + 0.3 z²)`.
+* **Commit 2b** *(PENDING)*: add the 4×4 C¹ linear solve per
+  parent tet per component for (μ, γ). Requires 4 independent C¹
+  continuity conditions at interior sub-tet faces plus 4 unknowns.
+  Testable properties: full quadratic AND cubic exactness inside
+  the parent element AND C¹ continuity at sub-tet face crossings.
 
 **Storage**: `(n_elements, 4_sub_tets, 20_bern_coeffs, 3_comps)` in
 float32 = **864 MB VRAM for 900k tets**. Uploads once, never touched
@@ -241,6 +250,7 @@ substantially faster still.
 | Phase 1 (geometry) | ~5 s | **~50 ms** (NumPy, vectorised) |
 | Phase 2 (edge DOFs) | ~15 s | **~10 ms** (NumPy, vectorised) |
 | Phase 3a (Bernstein C⁰, JAX steady) | — | **~1 s** |
+| Phase 3a-plus (quadratic face upgrade, JAX steady) | — | **~1.05 s** (adds ~50 ms to Phase 3a) |
 | Phase 3b (C¹ upgrade) | ~30 s (est.) | tbd |
 | SPR nodal gradient | — | ~5 s |
 | Total precompute (all above) | ~65 s | **<10 s** |

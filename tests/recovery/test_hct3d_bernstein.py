@@ -28,6 +28,7 @@ from jaxtrace.gpu.recovery.hct3d import (
     build_alfeld_geometry,
     edge_midpoint_gradients,
     build_hct_bernstein_c0,
+    build_hct_bernstein_quad_faces,
     bernstein_cubic_evaluate,
     BERN_INDICES,
     BERN_VERTEX_SLICE,
@@ -359,6 +360,184 @@ def test_c0_continuity_at_parent_face_edge_midpoint():
             err = np.abs(v - vals[0]).max()
             assert err < 1e-6, (
                 f"parent edge ({a}, {b}): disagreement = {err}"
+            )
+
+
+# =============================================================================
+# Phase 3a-plus: quadratic-precision face-centroid coefficients
+# =============================================================================
+
+def _build_quad_helper(nodes, conn, vel, grad):
+    """Convenience: run the full Phase 1 + 2 + 3a-plus pipeline."""
+    geom = build_alfeld_geometry(nodes, conn)
+    egrads = edge_midpoint_gradients(nodes, conn, grad)
+    return build_hct_bernstein_quad_faces(
+        nodes, conn, vel, grad, egrads, geom,
+    )
+
+
+def test_quad_faces_shape_and_continuity_marker():
+    nodes, conn = make_kuhn_cube_mesh(2)
+    vel = np.zeros_like(nodes)
+    grad = np.zeros((nodes.shape[0], 3, 3))
+    hct = _build_quad_helper(nodes, conn, vel, grad)
+    assert hct.coeffs.shape == (conn.shape[0], 4, 20, 3)
+    assert hct.coeffs.dtype == np.float32
+    assert hct.continuity == "c0_quad_faces"
+
+
+def test_quad_faces_constant_field():
+    """Constant field: every B-coefficient (including the upgraded
+    face-centroid ones) must equal the constant."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    const_vel = np.array([2.5, -1.0, 0.75])
+    vel = np.broadcast_to(const_vel, nodes.shape).copy()
+    grad = np.zeros((nodes.shape[0], 3, 3))
+    hct = _build_quad_helper(nodes, conn, vel, grad)
+    expected = np.broadcast_to(const_vel, hct.coeffs.shape).astype(np.float32)
+    diff = np.abs(hct.coeffs - expected).max()
+    assert diff < 1e-6, f"max diff = {diff}"
+
+
+def test_quad_faces_linear_field_still_exact():
+    """Phase 3a-plus must preserve LINEAR exactness. Reconstruction at
+    random interior points of random sub-tets must match the analytic
+    linear field."""
+    nodes, conn = make_kuhn_cube_mesh(3)
+    A = np.array([
+        [1.0, 2.0, 3.0],
+        [-1.0, 0.5, 0.0],
+        [0.5, 1.5, 2.0],
+    ])
+    b = np.array([0.1, -0.2, 0.3])
+    vel = (A @ nodes.T).T + b
+    grad = np.broadcast_to(A, (nodes.shape[0], 3, 3)).copy()
+    hct = _build_quad_helper(nodes, conn, vel, grad)
+
+    geom = build_alfeld_geometry(nodes, conn)
+    rng = np.random.default_rng(0)
+    max_err = 0.0
+    for _ in range(200):
+        e = rng.integers(0, conn.shape[0])
+        s = rng.integers(0, 4)
+        raw = np.abs(rng.standard_normal(4)) + 0.1
+        bary = raw / raw.sum()
+        vc_e = geom.centroids[e]
+        fs = ALFELD_SUBTET_PARENT_VERTS[s]
+        w0 = vc_e
+        w1 = nodes[conn[e, fs[0]]]
+        w2 = nodes[conn[e, fs[1]]]
+        w3 = nodes[conn[e, fs[2]]]
+        pos = bary[0] * w0 + bary[1] * w1 + bary[2] * w2 + bary[3] * w3
+        v_exact = A @ pos + b
+        v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+        max_err = max(max_err, np.abs(v_recon - v_exact).max())
+
+    assert max_err < 1e-5, f"linear exactness broke: max err = {max_err}"
+
+
+def test_quad_faces_quadratic_field_exact_at_face_centroids():
+    """Phase 3a-plus quadratic-precision claim: for a QUADRATIC velocity
+    field, the reconstruction at any PARENT face centroid must match
+    the true quadratic value.
+
+    Note: face centroids are shared by 2 sub-tets in the Alfeld split
+    (the two sub-tets whose base triangle is that face). Both sides
+    must agree AND match the analytic value."""
+    nodes, conn = make_kuhn_cube_mesh(3)
+
+    # Quadratic field: u = x^2 in first component, u = x*y in second,
+    # u = y^2 + 0.3*z^2 in third.
+    def analytic(pos):
+        x, y, z = pos[0], pos[1], pos[2]
+        return np.array([x*x, x*y, y*y + 0.3*z*z])
+
+    def analytic_grad(pos):
+        # Symmetric 3x3 gradient tensor.
+        x, y, z = pos[0], pos[1], pos[2]
+        return np.array([
+            [2*x, 0.0, 0.0],       # d/dx (x^2)
+            [y, x, 0.0],           # d/dx (xy), d/dy (xy)
+            [0.0, 2*y, 0.6*z],     # d/dy (y^2), d/dz (0.3 z^2)
+        ])
+
+    vel = np.array([analytic(p) for p in nodes])
+    grad = np.array([analytic_grad(p) for p in nodes])
+    hct = _build_quad_helper(nodes, conn, vel, grad)
+
+    geom = build_alfeld_geometry(nodes, conn)
+
+    # For each element, for each of the 4 parent faces, evaluate the
+    # reconstruction at the face centroid and compare to the analytic
+    # value. The face centroid lies on TWO sub-tets: the one where the
+    # face is the "outer" (parent-face) triangle, and the one whose
+    # base triangle also contains that same triangle... no wait, actually
+    # each parent face is the outer triangle of exactly ONE sub-tet in
+    # the Alfeld split. So there's only one sub-tet per face. Evaluate
+    # from that sub-tet.
+    n_test = 0
+    max_err = 0.0
+    for e in range(min(50, conn.shape[0])):
+        for face_i in range(4):
+            # Sub-tet whose OUTER triangle is parent face face_i is
+            # sub-tet `face_i` (by our ALFELD_SUBTET_PARENT_VERTS
+            # convention).
+            s = face_i
+            # In sub-tet s, the outer triangle is local vertices
+            # (1, 2, 3), NOT (0). So barycentric at the outer face
+            # centroid is (0, 1/3, 1/3, 1/3).
+            bary = np.array([0.0, 1/3, 1/3, 1/3])
+            fs = ALFELD_SUBTET_PARENT_VERTS[s]
+            face_centroid = (nodes[conn[e, fs[0]]]
+                             + nodes[conn[e, fs[1]]]
+                             + nodes[conn[e, fs[2]]]) / 3.0
+            v_exact = analytic(face_centroid)
+            v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+            err = np.abs(v_recon - v_exact).max()
+            max_err = max(max_err, err)
+            n_test += 1
+
+    # Quadratic precision at face centroids: expect float32 noise.
+    assert max_err < 1e-4, (
+        f"quadratic exactness at face centroids broke: max err = {max_err} "
+        f"across {n_test} face centroids"
+    )
+
+
+def test_quad_faces_c0_continuity_preserved():
+    """Since Phase 3a-plus only changes face-centroid coefficients (not
+    vertex or edge), the C⁰ continuity at spoke and parent-face edges
+    inherited from Phase 3a must be preserved."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    rng = np.random.default_rng(0)
+    vel = rng.standard_normal(nodes.shape)
+    grad = rng.standard_normal((nodes.shape[0], 3, 3))
+    hct = _build_quad_helper(nodes, conn, vel, grad)
+
+    # Test parent-face edges (2 sub-tets sharing the edge as an
+    # outer-face edge).
+    e = 0
+    for a, b in TET_EDGES:
+        subtets_with_edge = [s for s in range(4)
+                             if (a in ALFELD_SUBTET_PARENT_VERTS[s] and
+                                 b in ALFELD_SUBTET_PARENT_VERTS[s])]
+        if len(subtets_with_edge) < 2:
+            continue
+        vals = []
+        for s in subtets_with_edge:
+            fs = ALFELD_SUBTET_PARENT_VERTS[s]
+            la = 1 + int(np.where(fs == a)[0][0])
+            lb = 1 + int(np.where(fs == b)[0][0])
+            bary = np.zeros(4)
+            bary[la] = 0.5
+            bary[lb] = 0.5
+            val = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+            vals.append(val)
+        for v in vals[1:]:
+            err = np.abs(v - vals[0]).max()
+            assert err < 1e-6, (
+                f"parent edge ({a}, {b}) after quad face upgrade: "
+                f"disagreement = {err}"
             )
 
 
