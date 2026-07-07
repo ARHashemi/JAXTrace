@@ -29,6 +29,7 @@ from jaxtrace.gpu.recovery.hct3d import (
     edge_midpoint_gradients,
     build_hct_bernstein_c0,
     build_hct_bernstein_quad_faces,
+    build_hct_bernstein_c1_taylor,
     bernstein_cubic_evaluate,
     BERN_INDICES,
     BERN_VERTEX_SLICE,
@@ -539,6 +540,224 @@ def test_quad_faces_c0_continuity_preserved():
                 f"parent edge ({a}, {b}) after quad face upgrade: "
                 f"disagreement = {err}"
             )
+
+
+# =============================================================================
+# Phase 3b: C¹ Taylor-fit at the parent centroid
+# =============================================================================
+
+def _build_c1_helper(nodes, conn, vel, grad):
+    """Convenience: run the full Phase 1 + 2 + 3b (Taylor-fit) pipeline."""
+    geom = build_alfeld_geometry(nodes, conn)
+    egrads = edge_midpoint_gradients(nodes, conn, grad)
+    return build_hct_bernstein_c1_taylor(
+        nodes, conn, vel, grad, egrads, geom,
+    )
+
+
+def test_c1_taylor_shape_and_continuity_marker():
+    nodes, conn = make_kuhn_cube_mesh(2)
+    vel = np.zeros_like(nodes)
+    grad = np.zeros((nodes.shape[0], 3, 3))
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+    assert hct.coeffs.shape == (conn.shape[0], 4, 20, 3)
+    assert hct.coeffs.dtype == np.float32
+    assert hct.continuity == "c1_taylor"
+
+
+def test_c1_taylor_constant_field():
+    """Constant field: every B-coefficient must equal the constant."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    const_vel = np.array([2.5, -1.0, 0.75])
+    vel = np.broadcast_to(const_vel, nodes.shape).copy()
+    grad = np.zeros((nodes.shape[0], 3, 3))
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+    expected = np.broadcast_to(const_vel, hct.coeffs.shape).astype(np.float32)
+    diff = np.abs(hct.coeffs - expected).max()
+    assert diff < 1e-6, f"max diff = {diff}"
+
+
+def test_c1_taylor_linear_field_exact_at_random_points():
+    """Phase 3b must preserve LINEAR exactness. For a linear field, the
+    Taylor-fit LS is exact (H = 0 is the exact solution), so the
+    Bernstein cubic reconstruction is bit-exact."""
+    nodes, conn = make_kuhn_cube_mesh(3)
+    A = np.array([
+        [1.0, 2.0, 3.0],
+        [-1.0, 0.5, 0.0],
+        [0.5, 1.5, 2.0],
+    ])
+    b = np.array([0.1, -0.2, 0.3])
+    vel = (A @ nodes.T).T + b
+    grad = np.broadcast_to(A, (nodes.shape[0], 3, 3)).copy()
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+
+    geom = build_alfeld_geometry(nodes, conn)
+    rng = np.random.default_rng(0)
+    max_err = 0.0
+    for _ in range(200):
+        e = rng.integers(0, conn.shape[0])
+        s = rng.integers(0, 4)
+        raw = np.abs(rng.standard_normal(4)) + 0.1
+        bary = raw / raw.sum()
+        vc_e = geom.centroids[e]
+        fs = ALFELD_SUBTET_PARENT_VERTS[s]
+        pos = (bary[0] * vc_e
+               + bary[1] * nodes[conn[e, fs[0]]]
+               + bary[2] * nodes[conn[e, fs[1]]]
+               + bary[3] * nodes[conn[e, fs[2]]])
+        v_exact = A @ pos + b
+        v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+        max_err = max(max_err, np.abs(v_recon - v_exact).max())
+
+    assert max_err < 1e-5, f"linear exactness broke: max err = {max_err}"
+
+
+def test_c1_taylor_quadratic_field_exact_everywhere():
+    """Phase 3b's headline claim. For a QUADRATIC field the Taylor-fit
+    LS produces the exact (μ, γ, H) at every parent centroid; combined
+    with the Phase 3a-plus face-centroid formula, the Bernstein cubic
+    reconstruction is exact AT THE PARENT CENTROID and at PARENT FACE
+    CENTROIDS. Not yet exact for cubics or at interior sub-tet points.
+
+    We test at three specific location classes:
+      1. Parent centroid vc — reconstruction should give u(vc).
+      2. Spoke-edge midpoint — reconstruction should give u(midpoint).
+      3. Parent face centroid — reconstruction should give u(fc)."""
+    nodes, conn = make_kuhn_cube_mesh(3)
+
+    # Quadratic field with cross-terms to exercise the full Hessian.
+    def analytic(pos):
+        x, y, z = pos[0], pos[1], pos[2]
+        return np.array([x*x + y*z, x*y - 0.5*z*z, y*y + 0.3*x*z])
+
+    def analytic_grad(pos):
+        x, y, z = pos[0], pos[1], pos[2]
+        return np.array([
+            [2*x, z, y],       # d/d(x,y,z) of x²+yz
+            [y, x, -z],        # d/d(x,y,z) of xy - 0.5 z²
+            [0.3*z, 2*y, 0.3*x],  # d/d(x,y,z) of y² + 0.3 xz
+        ])
+
+    vel = np.array([analytic(p) for p in nodes])
+    grad = np.array([analytic_grad(p) for p in nodes])
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+    geom = build_alfeld_geometry(nodes, conn)
+
+    # Test 1: at parent centroids
+    max_err_vc = 0.0
+    for e in range(min(50, conn.shape[0])):
+        vc_e = geom.centroids[e]
+        v_exact = analytic(vc_e)
+        # At vc, bary = (1, 0, 0, 0) in any sub-tet.
+        bary = np.array([1.0, 0.0, 0.0, 0.0])
+        for s in range(4):
+            v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+            max_err_vc = max(max_err_vc, np.abs(v_recon - v_exact).max())
+    print(f"    at parent centroids: max err = {max_err_vc:.3e}")
+    assert max_err_vc < 1e-4, (
+        f"quadratic exactness at vc broke: {max_err_vc:.3e}"
+    )
+
+    # Test 2: at spoke-edge midpoints (vc-to-p_i, midpoint = 0.5*vc + 0.5*p_i)
+    max_err_spoke = 0.0
+    for e in range(min(50, conn.shape[0])):
+        vc_e = geom.centroids[e]
+        for s in range(4):
+            fs = ALFELD_SUBTET_PARENT_VERTS[s]
+            for local_i in range(3):  # 3 spoke edges per sub-tet
+                p_i = nodes[conn[e, fs[local_i]]]
+                mid = 0.5 * (vc_e + p_i)
+                v_exact = analytic(mid)
+                # Barycentric of mid in sub-tet: w0=vc, w1/w2/w3=p_j.
+                bary = np.zeros(4)
+                bary[0] = 0.5
+                bary[1 + local_i] = 0.5
+                v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+                max_err_spoke = max(max_err_spoke,
+                                    np.abs(v_recon - v_exact).max())
+    print(f"    at spoke edge midpoints: max err = {max_err_spoke:.3e}")
+    assert max_err_spoke < 1e-4, (
+        f"quadratic exactness at spoke-edge midpoints broke: "
+        f"{max_err_spoke:.3e}"
+    )
+
+    # Test 3: at parent face centroids (inherited from Phase 3a-plus)
+    max_err_fc = 0.0
+    for e in range(min(50, conn.shape[0])):
+        for face_i in range(4):
+            s = face_i
+            fs = ALFELD_SUBTET_PARENT_VERTS[s]
+            fc = (nodes[conn[e, fs[0]]]
+                  + nodes[conn[e, fs[1]]]
+                  + nodes[conn[e, fs[2]]]) / 3.0
+            v_exact = analytic(fc)
+            bary = np.array([0.0, 1/3, 1/3, 1/3])
+            v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+            max_err_fc = max(max_err_fc, np.abs(v_recon - v_exact).max())
+    print(f"    at parent face centroids: max err = {max_err_fc:.3e}")
+    assert max_err_fc < 1e-4, (
+        f"quadratic exactness at face centroids broke: {max_err_fc:.3e}"
+    )
+
+
+def test_c1_taylor_c0_continuity_at_shared_vc():
+    """μ = u(vc) is shared across all 4 sub-tets, so evaluation at
+    any point on a spoke edge from vc must agree across sub-tets that
+    share that spoke edge."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    rng = np.random.default_rng(0)
+    vel = rng.standard_normal(nodes.shape)
+    grad = rng.standard_normal((nodes.shape[0], 3, 3))
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+
+    e = 0
+    for parent_vertex in range(4):
+        subtets_with_pv = [s for s in range(4)
+                           if parent_vertex in ALFELD_SUBTET_PARENT_VERTS[s]]
+        vals = []
+        for s in subtets_with_pv:
+            fs = ALFELD_SUBTET_PARENT_VERTS[s]
+            local = 1 + int(np.where(fs == parent_vertex)[0][0])
+            bary = np.zeros(4)
+            bary[0] = 0.5
+            bary[local] = 0.5
+            val = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+            vals.append(val)
+        for v in vals[1:]:
+            err = np.abs(v - vals[0]).max()
+            assert err < 1e-6, (
+                f"c1_taylor spoke edge to parent_vertex {parent_vertex}: "
+                f"disagreement between sub-tets = {err}"
+            )
+
+
+def test_c1_taylor_reproduces_parent_vertex_values():
+    """At each parent vertex, the reconstruction from any sub-tet
+    containing that vertex must give the exact nodal velocity."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    rng = np.random.default_rng(0)
+    vel = rng.standard_normal(nodes.shape)
+    grad = rng.standard_normal((nodes.shape[0], 3, 3))
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+
+    for e in range(min(20, conn.shape[0])):
+        for parent_vertex in range(4):
+            subtets_with_pv = [s for s in range(4)
+                               if parent_vertex in ALFELD_SUBTET_PARENT_VERTS[s]]
+            for s in subtets_with_pv:
+                fs = ALFELD_SUBTET_PARENT_VERTS[s]
+                local = 1 + int(np.where(fs == parent_vertex)[0][0])
+                # bary = e_local
+                bary = np.zeros(4)
+                bary[local] = 1.0
+                val = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+                expected = vel[conn[e, parent_vertex]]
+                err = np.abs(val - expected).max()
+                assert err < 1e-6, (
+                    f"elem {e} sub-tet {s} parent vertex {parent_vertex}: "
+                    f"err = {err}"
+                )
 
 
 if __name__ == "__main__":

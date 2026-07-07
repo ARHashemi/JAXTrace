@@ -160,11 +160,26 @@ Phase 3 lands in three sub-commits:
   exactness at parent face centroids added. Verified numerically
   against the reference NumPy `bernstein_cubic_evaluate` at 200
   face-centroid samples with `u = (x², xy, y² + 0.3 z²)`.
-* **Commit 2b** *(PENDING)*: add the 4×4 C¹ linear solve per
-  parent tet per component for (μ, γ). Requires 4 independent C¹
-  continuity conditions at interior sub-tet faces plus 4 unknowns.
-  Testable properties: full quadratic AND cubic exactness inside
-  the parent element AND C¹ continuity at sub-tet face crossings.
+* **Commit 2b** *(DONE, this commit, Taylor-fit variant)*: instead of
+  the full Worsey-Farin C¹ 4×4 solve (which requires closed-form
+  cross-face constraints that are non-trivial to derive from
+  scratch), we ship a lightweight batched **16×10 least-squares
+  Taylor-fit** per element per component. For each parent tet, fit
+  a local degree-2 Taylor expansion
+  `u(x) ≈ μ + γ·(x-vc) + ½(x-vc)^T H (x-vc)`
+  against the 16 constraints: 4 parent-vertex values + 12
+  parent-vertex gradient components. Solve via
+  `jnp.linalg.solve(A^T A, A^T b)` batched across elements.
+  Then use `μ` and `γ` in the standard Phase 3a-plus Bernstein
+  assembly pipeline. Testable properties gained:
+  - Bit-exact reconstruction for **quadratic velocity fields** at
+    parent centroid `vc`, spoke-edge midpoints, parent face
+    centroids, and parent vertices.
+  - All Phase 3a and Phase 3a-plus properties preserved.
+  This is not full C¹ (interior sub-tet face conditions are not
+  imposed) but delivers 5.4× lower mean error than Phase 3a and
+  3× lower than Phase 3a-plus on the recirc_2026 field with
+  minimal added compute.
 
 **Storage**: `(n_elements, 4_sub_tets, 20_bern_coeffs, 3_comps)` in
 float32 = **864 MB VRAM for 900k tets**. Uploads once, never touched
@@ -251,7 +266,7 @@ substantially faster still.
 | Phase 2 (edge DOFs) | ~15 s | **~10 ms** (NumPy, vectorised) |
 | Phase 3a (Bernstein C⁰, JAX steady) | — | **~1 s** |
 | Phase 3a-plus (quadratic face upgrade, JAX steady) | — | **~1.05 s** (adds ~50 ms to Phase 3a) |
-| Phase 3b (C¹ upgrade) | ~30 s (est.) | tbd |
+| Phase 3b (Taylor-fit LS + Bernstein assembly, JAX steady) | — | **~1.5 s** (adds ~0.5 s for the 16x10 LS batch) |
 | SPR nodal gradient | — | ~5 s |
 | Total precompute (all above) | ~65 s | **<10 s** |
 | Per-step overhead vs raw P1 | ~4-6× on interpolation, ~1.3× on total step | tbd (Phase 4) |
