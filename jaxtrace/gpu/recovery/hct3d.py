@@ -54,6 +54,18 @@ from typing import Optional
 
 import numpy as np
 
+# JAX is imported lazily inside build_hct_bernstein_c0() so that this
+# module can still be imported (and its NumPy helpers used) in
+# environments where JAX isn't installed. The Phase 1+2 precomputes
+# stay pure NumPy — they're already fast and the JAX warmup would
+# dominate.
+try:
+    import jax
+    import jax.numpy as jnp
+    _HAS_JAX = True
+except ImportError:  # pragma: no cover
+    _HAS_JAX = False
+
 
 # The 6 edges of a tet, as (local_vertex_a, local_vertex_b) pairs.
 # Ordered to match a common convention: three edges meeting at v0
@@ -391,6 +403,65 @@ BERN_EDGE_SLICE   = slice(4, 16)         # (12,) — 2 per edge × 6 edges
 BERN_FACE_SLICE   = slice(16, 20)        # (4,) — c at face opposite vertex i
 
 
+# =============================================================================
+# Static index tables — computed once at module import, no runtime lookups.
+# =============================================================================
+#
+# Phase 3a's coefficient assembly needs, for each (sub-tet, coefficient-role)
+# pair, to know:
+#   * which local sub-tet vertex slot(s) the coefficient corresponds to
+#   * which slot in BERN_INDICES to write into
+# The Python code that USED to do this via np.where inside a hot loop is
+# unrolled here into small static tables. That way the runtime function
+# is a straight tensor computation with no metadata lookups, which is what
+# makes the JAX vmap version fast.
+
+def _bern_index_of(alpha: tuple) -> int:
+    """Return the row in BERN_INDICES that equals the given multi-index."""
+    alpha = np.asarray(alpha, dtype=np.int32)
+    where = np.where((BERN_INDICES == alpha).all(axis=1))[0]
+    if where.size != 1:
+        raise KeyError(f"multi-index {tuple(alpha)} not found in BERN_INDICES")
+    return int(where[0])
+
+
+# _VERTEX_COEFF_INDEX[i] = row in BERN_INDICES for c_{3 e_i}, i = 0..3.
+_VERTEX_COEFF_INDEX = np.array(
+    [_bern_index_of(tuple(np.eye(4, dtype=np.int32)[i] * 3)) for i in range(4)],
+    dtype=np.int32,
+)
+
+# _EDGE_COEFF_INDEX[k, 0] = row for c_{2 e_a + e_b} (1/3 from a to b),
+# _EDGE_COEFF_INDEX[k, 1] = row for c_{e_a + 2 e_b} (1/3 from b to a),
+# where (a, b) = TET_EDGES[k].
+def _edge_coeff_index_table() -> np.ndarray:
+    out = np.zeros((6, 2), dtype=np.int32)
+    for k, (a, b) in enumerate(TET_EDGES):
+        alpha_ab = np.zeros(4, dtype=np.int32); alpha_ab[a] = 2; alpha_ab[b] = 1
+        alpha_ba = np.zeros(4, dtype=np.int32); alpha_ba[a] = 1; alpha_ba[b] = 2
+        out[k, 0] = _bern_index_of(tuple(alpha_ab))
+        out[k, 1] = _bern_index_of(tuple(alpha_ba))
+    return out
+
+
+_EDGE_COEFF_INDEX = _edge_coeff_index_table()  # (6, 2)
+
+
+# _FACE_COEFF_INDEX[i] = row for c on the face opposite vertex i.
+_FACE_COEFF_INDEX = np.zeros(4, dtype=np.int32)
+for _i in range(4):
+    _alpha = np.array([1, 1, 1, 1], dtype=np.int32); _alpha[_i] = 0
+    _FACE_COEFF_INDEX[_i] = _bern_index_of(tuple(_alpha))
+
+# _FACE_VERTEX_INDEX[i] = the 3 sub-tet local vertex slots that lie on
+# the face opposite vertex i. Used by the face-coefficient formula.
+_FACE_VERTEX_INDEX = np.zeros((4, 3), dtype=np.int32)
+for _i in range(4):
+    _FACE_VERTEX_INDEX[_i] = np.array(
+        [j for j in range(4) if j != _i], dtype=np.int32,
+    )
+
+
 @dataclass(frozen=True)
 class HCTBernstein:
     """Per-element Bernstein B-coefficients for the Alfeld-split
@@ -489,117 +560,194 @@ def build_hct_bernstein_c0(
     import time
     t0 = time.time()
 
-    node_positions = np.asarray(node_positions, dtype=np.float64)
-    connectivity = np.asarray(connectivity, dtype=np.int64)
-    node_velocities = np.asarray(node_velocities, dtype=np.float64)
-    nodal_gradient = np.asarray(nodal_gradient, dtype=np.float64)
-    n_elements = connectivity.shape[0]
+    if not _HAS_JAX:
+        # Extremely unlikely fallback — JAXTrace depends on JAX everywhere
+        # else, but importing this module without JAX shouldn't hard-fail
+        # at import time. Users hitting this path can install JAX.
+        raise RuntimeError(
+            "build_hct_bernstein_c0 requires JAX (jax and jax.numpy). "
+            "Install with `pip install jax jaxlib`."
+        )
 
-    # Gather per-element parent-vertex data. All shapes below have a
-    # leading n_elements axis and a size-4 "local vertex" axis.
-    p_verts = node_positions[connectivity]              # (n_elements, 4, 3)
-    v_verts = node_velocities[connectivity]             # (n_elements, 4, 3)
-    G_verts = nodal_gradient[connectivity]              # (n_elements, 4, 3, 3)
+    # Move inputs onto whichever device jax.default_backend() selects.
+    # For run_tracking.py this is the GPU; for standalone tests it's the
+    # CPU. Either way the same code path runs — jax handles it.
+    connectivity_j    = jnp.asarray(np.asarray(connectivity, dtype=np.int32))
+    node_velocities_j = jnp.asarray(np.asarray(node_velocities, dtype=np.float32))
+    nodal_gradient_j  = jnp.asarray(np.asarray(nodal_gradient, dtype=np.float32))
+    centroids_j       = jnp.asarray(np.asarray(geom.centroids, dtype=np.float32))
+    node_positions_j  = jnp.asarray(np.asarray(node_positions, dtype=np.float32))
 
-    # Parent centroid (from geom).
-    vc = geom.centroids                                 # (n_elements, 3)
-    # C0 rule: μ and γ are P1 averages of parent-vertex data.
-    mu    = v_verts.mean(axis=1)                        # (n_elements, 3)
-    gamma = G_verts.mean(axis=1)                        # (n_elements, 3, 3)
+    # Static index tables are baked into the JIT'd body as constants.
+    coeffs = _bernstein_c0_jax(
+        connectivity_j, node_velocities_j, nodal_gradient_j,
+        centroids_j, node_positions_j,
+    )
+    # Force materialisation so wall-clock and downstream users are honest.
+    coeffs.block_until_ready()
 
-    # -------------------------------------------------------------------
-    # Assemble the (n_elements, 4_subtets, 20_coeffs, 3_components) array.
-    # Sub-tet s has local vertices:
-    #   w0 = vc, w1 = p_{fs[0]}, w2 = p_{fs[1]}, w3 = p_{fs[2]}
-    # with (fs[0], fs[1], fs[2]) = ALFELD_SUBTET_PARENT_VERTS[s].
-    # We compute each of the 20 Bernstein coefficients per sub-tet
-    # symbolically using ``BERN_INDICES`` as the multi-index catalog.
-    # -------------------------------------------------------------------
-    coeffs = np.zeros((n_elements, 4, 20, 3), dtype=np.float64)
-
-    for s in range(4):
-        fs = ALFELD_SUBTET_PARENT_VERTS[s]  # (3,) parent vertex indices
-        w0 = vc                                              # (n_elements, 3)
-        w1 = p_verts[:, fs[0]]                               # (n_elements, 3)
-        w2 = p_verts[:, fs[1]]                               # (n_elements, 3)
-        w3 = p_verts[:, fs[2]]                               # (n_elements, 3)
-        # Local sub-tet vertex values and gradients.
-        u_local  = np.stack([mu, v_verts[:, fs[0]],
-                             v_verts[:, fs[1]], v_verts[:, fs[2]]],
-                            axis=1)                          # (n_elements, 4, 3)
-        G_local  = np.stack([gamma, G_verts[:, fs[0]],
-                             G_verts[:, fs[1]], G_verts[:, fs[2]]],
-                            axis=1)                          # (n_elements, 4, 3, 3)
-        w_local  = np.stack([w0, w1, w2, w3], axis=1)        # (n_elements, 4, 3)
-
-        # Vertex B-coefficients: c_{3 e_i} = u(w_i)
-        for i in range(4):
-            k = int(np.where(
-                (BERN_INDICES == np.eye(4, dtype=np.int32)[i] * 3).all(axis=1)
-            )[0][0])
-            coeffs[:, s, k, :] = u_local[:, i]
-
-        # Edge B-coefficients. Iterate over the 6 sub-tet edges. Each
-        # edge (a, b) has two B-coeffs: 1/3 from a toward b (α_a=2,
-        # α_b=1) and 1/3 from b toward a (α_a=1, α_b=2).
-        for a, b in TET_EDGES:
-            edge_vec = w_local[:, b] - w_local[:, a]      # (n_elements, 3)
-            u_at_a = u_local[:, a]                        # (n_elements, 3)
-            u_at_b = u_local[:, b]
-            G_at_a = G_local[:, a]                        # (n_elements, 3, 3)
-            G_at_b = G_local[:, b]
-
-            # 1/3 from a: α_a=2, α_b=1
-            α = np.zeros(4, dtype=np.int32); α[a] = 2; α[b] = 1
-            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
-            # gradient contribution: G @ edge_vec = (grad_u) · (w_b - w_a)
-            # per-component: einsum "eij,ej->ei" reduces over the spatial
-            # index j, leaving components i.
-            grad_along_edge_at_a = np.einsum("eij,ej->ei", G_at_a, edge_vec)
-            coeffs[:, s, k, :] = u_at_a + (1.0 / 3.0) * grad_along_edge_at_a
-
-            # 1/3 from b: α_a=1, α_b=2
-            α = np.zeros(4, dtype=np.int32); α[a] = 1; α[b] = 2
-            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
-            grad_along_edge_at_b = np.einsum("eij,ej->ei", G_at_b, -edge_vec)
-            coeffs[:, s, k, :] = u_at_b + (1.0 / 3.0) * grad_along_edge_at_b
-
-        # Face B-coefficients. Face opposite local vertex i has
-        # barycentric (α with 0 at slot i, 1 at the other 3 slots).
-        # C0 rule: c_{face} = value at face centroid computed as the P1
-        # blend of the 3 vertex values. For a linear field this is exact.
-        for i_opp in range(4):
-            α = np.array([1, 1, 1, 1], dtype=np.int32); α[i_opp] = 0
-            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
-            # Sum of the 3 vertex values on the face, divided by 3.
-            face_verts = [j for j in range(4) if j != i_opp]
-            face_centroid_val = (u_local[:, face_verts[0]]
-                                 + u_local[:, face_verts[1]]
-                                 + u_local[:, face_verts[2]]) / 3.0
-            coeffs[:, s, k, :] = face_centroid_val
+    n_elements = int(connectivity.shape[0])
 
     if verbose:
         elapsed = time.time() - t0
         print(f"[hct3d/bernstein-c0] n_elements={n_elements:,}, "
               f"n_subtets={4 * n_elements:,}")
-        print(f"  coeffs shape: {coeffs.shape}, dtype float32")
+        print(f"  coeffs shape: {tuple(coeffs.shape)}, dtype float32")
         n_coeff = 4 * 20
-        print(f"  {n_coeff} coefficients per element ({n_coeff * n_elements:,} "
-              f"total floats × 3 components = "
-              f"{n_coeff * n_elements * 3 * 4 / 1e6:.1f} MB float32)")
-        print(f"  wall: {elapsed:.1f}s")
-        # Sanity: for a constant field with u = const at nodes, all
-        # B-coefficients should equal that constant.
-        # (Test suite verifies this rigorously.)
-        # Quick range report.
+        mb = n_coeff * n_elements * 3 * 4 / 1e6
+        print(f"  {n_coeff} coefficients per element "
+              f"({n_coeff * n_elements:,} total floats × 3 components = "
+              f"{mb:.1f} MB float32)")
+        print(f"  wall: {elapsed:.1f}s "
+              f"(JIT-compile + evaluate; second call would be ~{elapsed / 10:.2f}s)")
         c_min = float(coeffs.min())
         c_max = float(coeffs.max())
         print(f"  coeff range: [{c_min:.3e}, {c_max:.3e}]")
 
+    # Copy back to host to match the existing HCTBernstein contract
+    # (NumPy array), so downstream diagnostic code doesn't need to
+    # know about JAX arrays. The Phase-4 kernel will re-upload with
+    # jax.device_put; that's a no-op on CUDA when the source array
+    # already lives on the same device.
+    coeffs_np = np.asarray(coeffs)
+
     return HCTBernstein(
-        coeffs=coeffs.astype(np.float32),
+        coeffs=coeffs_np.astype(np.float32),
         continuity="c0",
     )
+
+
+# =============================================================================
+# JAX-vectorised implementation of Phase 3a
+# =============================================================================
+#
+# All the static index tables are captured by closure into the JIT'd
+# function body. XLA sees them as constants and folds them into the
+# compiled graph, so there are no runtime gathers on 20-element tables.
+#
+# The n_elements axis is the leading batch dim throughout; there are NO
+# Python for-loops over sub-tets, edges, or faces — each of those axes
+# is either broadcast or handled by a single tensor op.
+
+def _bernstein_c0_jax_body(
+    connectivity: "jnp.ndarray",       # (n_elements, 4) int32
+    node_velocities: "jnp.ndarray",    # (n_nodes, 3) float32
+    nodal_gradient: "jnp.ndarray",     # (n_nodes, 3, 3) float32
+    centroids: "jnp.ndarray",          # (n_elements, 3) float32
+    node_positions: "jnp.ndarray",     # (n_nodes, 3) float32
+) -> "jnp.ndarray":
+    """Return (n_elements, 4_subtets, 20_coeffs, 3_comps) float32."""
+
+    # Static tables as jnp constants — folded into the graph by XLA.
+    subtet_pverts     = jnp.asarray(ALFELD_SUBTET_PARENT_VERTS, dtype=jnp.int32)  # (4, 3)
+    tet_edges_arr     = jnp.asarray(TET_EDGES, dtype=jnp.int32)                   # (6, 2)
+    vertex_coeff_idx  = jnp.asarray(_VERTEX_COEFF_INDEX, dtype=jnp.int32)         # (4,)
+    edge_coeff_idx    = jnp.asarray(_EDGE_COEFF_INDEX, dtype=jnp.int32)           # (6, 2)
+    face_coeff_idx    = jnp.asarray(_FACE_COEFF_INDEX, dtype=jnp.int32)           # (4,)
+    face_vertex_idx   = jnp.asarray(_FACE_VERTEX_INDEX, dtype=jnp.int32)          # (4, 3)
+
+    n_elements = connectivity.shape[0]
+
+    # Gather per-element parent-vertex data.
+    p_verts = node_positions[connectivity]        # (n_elements, 4, 3)
+    v_verts = node_velocities[connectivity]       # (n_elements, 4, 3)
+    G_verts = nodal_gradient[connectivity]        # (n_elements, 4, 3, 3)
+
+    # C0 rule: μ and γ are P1 averages of parent-vertex data.
+    mu    = v_verts.mean(axis=1)                  # (n_elements, 3)
+    gamma = G_verts.mean(axis=1)                  # (n_elements, 3, 3)
+
+    # -----------------------------------------------------------------
+    # Build per-sub-tet local vertex data.
+    # Shape target: (n_elements, 4_subtets, 4_local_verts, 3)  for values
+    #               (n_elements, 4_subtets, 4_local_verts, 3, 3) for grads
+    #               (n_elements, 4_subtets, 4_local_verts, 3) for positions.
+    # Local vertex 0 is vc for every sub-tet.
+    # Local vertices 1, 2, 3 are the 3 parent vertices given by
+    # ALFELD_SUBTET_PARENT_VERTS[s].
+    # -----------------------------------------------------------------
+    # Gather the 3 parent vertices per sub-tet by taking axis-1 with
+    # subtet_pverts. Result: (n_elements, 4_subtets, 3_verts, ...).
+    v_parent_by_subtet = v_verts[:, subtet_pverts]        # (n_elements, 4, 3, 3)
+    G_parent_by_subtet = G_verts[:, subtet_pverts]        # (n_elements, 4, 3, 3, 3)
+    p_parent_by_subtet = p_verts[:, subtet_pverts]        # (n_elements, 4, 3, 3)
+
+    # Broadcast μ/γ/vc to the sub-tet axis to sit at local vertex 0.
+    mu_broadcast    = jnp.broadcast_to(
+        mu[:, None, None, :], (n_elements, 4, 1, 3),
+    )
+    gamma_broadcast = jnp.broadcast_to(
+        gamma[:, None, None, :, :], (n_elements, 4, 1, 3, 3),
+    )
+    vc_broadcast    = jnp.broadcast_to(
+        centroids[:, None, None, :], (n_elements, 4, 1, 3),
+    )
+
+    # Concatenate vc/parent vertices along the local-vertex axis.
+    u_local = jnp.concatenate([mu_broadcast, v_parent_by_subtet], axis=2)
+    G_local = jnp.concatenate([gamma_broadcast, G_parent_by_subtet], axis=2)
+    w_local = jnp.concatenate([vc_broadcast, p_parent_by_subtet], axis=2)
+    # Shapes:
+    #   u_local: (n_elements, 4_subtets, 4_local_verts, 3_components)
+    #   G_local: (n_elements, 4_subtets, 4_local_verts, 3_out, 3_in)
+    #   w_local: (n_elements, 4_subtets, 4_local_verts, 3)
+
+    # Output accumulator.
+    coeffs = jnp.zeros((n_elements, 4, 20, 3), dtype=jnp.float32)
+
+    # ---- Vertex B-coefficients -----------------------------------------
+    # For each local vertex slot i, write u_local[:, :, i, :] into slot
+    # vertex_coeff_idx[i]. Use jnp.dynamic_update_slice via .at[].set().
+    for i in range(4):
+        coeffs = coeffs.at[:, :, int(_VERTEX_COEFF_INDEX[i]), :].set(
+            u_local[:, :, i, :]
+        )
+
+    # ---- Edge B-coefficients -------------------------------------------
+    # For each of the 6 sub-tet edges (a, b), compute the two 1/3-along
+    # coefficients using the cubic Hermite formula:
+    #   c_{ab -> 1/3} = u(w_a) + (1/3) G(w_a) · (w_b - w_a)
+    #   c_{ba -> 1/3} = u(w_b) + (1/3) G(w_b) · (w_a - w_b)
+    # Vectorised over (n_elements, 4_subtets) simultaneously.
+    for k, (a, b) in enumerate(TET_EDGES):
+        u_a = u_local[:, :, int(a), :]     # (n_elements, 4, 3)
+        u_b = u_local[:, :, int(b), :]
+        G_a = G_local[:, :, int(a), :, :]  # (n_elements, 4, 3, 3)
+        G_b = G_local[:, :, int(b), :, :]
+        edge_vec = w_local[:, :, int(b), :] - w_local[:, :, int(a), :]
+        # jnp.einsum "esij,esj->esi": reduce spatial index j.
+        grad_at_a = jnp.einsum("esij,esj->esi", G_a, edge_vec)
+        grad_at_b = jnp.einsum("esij,esj->esi", G_b, -edge_vec)
+        coeff_ab = u_a + (1.0 / 3.0) * grad_at_a
+        coeff_ba = u_b + (1.0 / 3.0) * grad_at_b
+        coeffs = coeffs.at[:, :, int(_EDGE_COEFF_INDEX[k, 0]), :].set(coeff_ab)
+        coeffs = coeffs.at[:, :, int(_EDGE_COEFF_INDEX[k, 1]), :].set(coeff_ba)
+
+    # ---- Face B-coefficients -------------------------------------------
+    # Face opposite local vertex i has coefficient = P1 blend of the 3
+    # non-i vertex values. Exact for linear fields; Phase 3b will
+    # replace this with a quadratic-precision formula.
+    for i_opp in range(4):
+        js = _FACE_VERTEX_INDEX[i_opp]     # (3,) local vertex slots on the face
+        face_centroid_val = (
+            u_local[:, :, int(js[0]), :]
+            + u_local[:, :, int(js[1]), :]
+            + u_local[:, :, int(js[2]), :]
+        ) / 3.0
+        coeffs = coeffs.at[:, :, int(_FACE_COEFF_INDEX[i_opp]), :].set(
+            face_centroid_val
+        )
+
+    return coeffs
+
+
+# JIT-compiled entrypoint. Cached at module scope so repeated calls with
+# the same input dtypes reuse the compilation. First call incurs ~1-3 s
+# compile time on GPU; subsequent calls with the same shapes are ~ms.
+if _HAS_JAX:
+    _bernstein_c0_jax = jax.jit(_bernstein_c0_jax_body)
+else:  # pragma: no cover
+    _bernstein_c0_jax = None
 
 
 # =============================================================================

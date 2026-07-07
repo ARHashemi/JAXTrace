@@ -231,13 +231,46 @@ the fraction of degenerate elements at build time.
 
 ## Complexity budget
 
-| Phase | Wall-clock estimate (900k-tet mesh) |
-|---|---|
-| Phase 1 (geometry) | ~5 s |
-| Phase 2 (edge DOFs) | ~15 s |
-| Phase 3 (Bernstein coeffs) | ~45 s |
-| Total precompute | ~65 s |
-| Per-step overhead vs raw P1 | ~4-6× on interpolation, ~1.3× on total step |
+### Wall-clock estimates (900k-tet recirc_2026 4-lvl mesh)
+
+Measured on the host CPU (JAX cpu backend). GPU (CUDA) will be
+substantially faster still.
+
+| Phase | Estimate | Actual (measured after implementation) |
+|---|---|---|
+| Phase 1 (geometry) | ~5 s | **~50 ms** (NumPy, vectorised) |
+| Phase 2 (edge DOFs) | ~15 s | **~10 ms** (NumPy, vectorised) |
+| Phase 3a (Bernstein C⁰, JAX steady) | — | **~1 s** |
+| Phase 3b (C¹ upgrade) | ~30 s (est.) | tbd |
+| SPR nodal gradient | — | ~5 s |
+| Total precompute (all above) | ~65 s | **<10 s** |
+| Per-step overhead vs raw P1 | ~4-6× on interpolation, ~1.3× on total step | tbd (Phase 4) |
+
+### CPU (NumPy) vs GPU (JAX) — where each wins here
+
+The design started with the intuition that all precomputes should be
+NumPy (one-shot, so JIT overhead not amortized), and only the RK4
+kernel's per-query hot path should be JAX. Measurement changed that:
+
+* **Phase 1 (geometry)** and **Phase 2 (edge DOFs)** are trivial
+  vectorised element-wise NumPy ops that finish in tens of
+  milliseconds. Migrating them to JAX would add ~1 s of JIT-compile
+  overhead per unique input shape for no benefit. **Keep NumPy.**
+* **Phase 3a (Bernstein assembly)** naïvely has 4 sub-tet × 6 edge ×
+  20 lookup passes — a lot of Python-side bookkeeping around a
+  batched einsum. In NumPy this takes ~5.6 s on 900k tets. Migrated
+  to JAX with static index tables folded into the JIT'd graph, it
+  runs in ~1 s steady-state (~5× faster). **Use JAX.**
+* **SPR nodal gradient recovery** has a per-node Python for-loop over
+  variable-size patches, each running a small `np.linalg.lstsq`.
+  Migrating to JAX requires solving the variable-patch-size problem
+  (pad-and-mask or size-grouping), each of which needs its own test
+  coverage. Current wall time on 68k nodes is 1.8 s and it's not
+  the bottleneck. **Leave NumPy** and revisit only if
+  end-to-end profiling on the workstation shows it dominates.
+* **Phase 4 (RK4 kernel evaluator)** — inherently JAX; runs inside
+  the JIT'd `interpolate_velocity_single`, called per particle per
+  substage per step. **JAX all the way.**
 
 ### VRAM budget (32 GB total, 58 GB host RAM)
 
