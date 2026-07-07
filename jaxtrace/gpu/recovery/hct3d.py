@@ -1,18 +1,21 @@
 """
-HCT-3D reconstruction — Phase 1 + Phase 2.
+HCT-3D reconstruction — Phases 1, 2, 3a.
 
 Roadmap: docs/hct3d_implementation_plan.md.
 
-This module implements the geometry precompute (Phase 1) and the
-per-edge gradient DOF computation (Phase 2) for the Alfeld-split
-piecewise-cubic Hermite reconstruction on tetrahedral meshes.
+This module implements:
 
-Nothing in this module is wired into run_tracking.py yet. Phase 3
-(Bernstein coefficient solve via Worsey-Farin closed-form) and
-Phase 4+5 (JAX kernel evaluator + validation gates) will land in
-subsequent commits. Until then, ``jaxtrace.gpu.recovery.gradient_recovery``
-continues to provide ``centroid_taylor`` and ``vertex_taylor`` as the
-only user-selectable reconstruction methods.
+* Phase 1 — Alfeld-split geometry precompute
+* Phase 2 — per-edge gradient DOF computation
+* Phase 3a — Bernstein B-coefficient assembly with C⁰ interior
+             continuity (Commit 2a of the phased plan)
+
+Nothing in this module is wired into run_tracking.py yet. Phase 3b
+(C¹ upgrade via 4×4 macro-element linear solve) and Phase 4+5 (JAX
+kernel evaluator + validation gates) will land in subsequent commits.
+Until then, ``jaxtrace.gpu.recovery.gradient_recovery`` continues to
+provide ``centroid_taylor`` and ``vertex_taylor`` as the only
+user-selectable reconstruction methods.
 
 What this module gives you today
 --------------------------------
@@ -28,8 +31,20 @@ What this module gives you today
         gradient tensor at every parent-tet edge midpoint. Returned as
         a (n_elements, 6, 3, 3) array (6 edges per tet).
 
-Both functions are pure NumPy, run on CPU, and are vectorised over
-elements. Wall-clock estimate: ~30 ms per 100k elements.
+    build_hct_bernstein_c0(node_positions, connectivity, node_velocities,
+                           nodal_gradient, edge_grads, geom)
+        Phase 3a. Assemble the 20 Bernstein B-coefficients per sub-tet
+        per component, with C⁰ (not C¹) interior continuity: the
+        centroid value μ = u(vc) is taken as the mean of the 4 parent
+        vertex values, and the centroid gradient γ = ∇u(vc) is taken
+        as the mean of the 4 parent vertex gradients. Exact for
+        linear velocity fields; approximate but continuous inside the
+        parent element for higher-order fields. Returns an
+        ``HCTBernstein`` dataclass with a (n_elements, 4, 20, 3) float32
+        coefficient array.
+
+All routines are pure NumPy, run on CPU, and are vectorised over
+elements.
 """
 
 from __future__ import annotations
@@ -308,3 +323,328 @@ def edge_midpoint_gradients(
         print(f"  wall: {time.time() - t0:.1f}s")
 
     return edge_grads.astype(np.float32)
+
+
+# =============================================================================
+# Phase 3a — Bernstein B-coefficient assembly with C⁰ interior continuity
+# =============================================================================
+#
+# Notation
+# --------
+# For a cubic Bézier on a tet with local vertices (w0, w1, w2, w3), we
+# use multi-indices α = (α0, α1, α2, α3) with |α|=3 to enumerate the
+# 20 B-coefficients c_α. The physical location of control point c_α is
+#     x_α = (α0 w0 + α1 w1 + α2 w2 + α3 w3) / 3.
+# In our sub-tets w0 = vc (parent centroid) and (w1, w2, w3) are three
+# parent vertices in the order given by ALFELD_SUBTET_PARENT_VERTS.
+#
+# The 20 multi-indices are enumerated in a canonical order below,
+# grouped as:
+#   * 4 vertex indices   (positions AT the sub-tet vertices w_i)
+#   * 12 edge indices    (2 per edge × 6 edges of the sub-tet)
+#   * 4 face indices     (1 per face; barycentric = 1/3 on 3 verts,
+#                         0 on the opposite vertex)
+#
+# The 20-index catalog is stored as ``BERN_INDICES`` (shape (20, 4)).
+
+def _enumerate_bernstein_multi_indices() -> np.ndarray:
+    """Return the (20, 4) array of multi-indices α with |α|=3 in the
+    canonical order used throughout this module.
+
+    Order: 4 vertex, then 12 edge (2 per edge in TET_EDGES order),
+    then 4 face (opposite each vertex in order).
+    """
+    out = []
+    # Vertex indices
+    for i in range(4):
+        α = [0, 0, 0, 0]
+        α[i] = 3
+        out.append(α)
+    # Edge indices: for each (a, b) in TET_EDGES, add (2 e_a + e_b),
+    # then (e_a + 2 e_b).
+    for a, b in TET_EDGES:
+        α = [0, 0, 0, 0]
+        α[a] = 2
+        α[b] = 1
+        out.append(list(α))
+        α = [0, 0, 0, 0]
+        α[a] = 1
+        α[b] = 2
+        out.append(list(α))
+    # Face indices: opposite vertex i has three 1s on the other 3 slots.
+    for i in range(4):
+        α = [1, 1, 1, 1]
+        α[i] = 0
+        out.append(list(α))
+    arr = np.array(out, dtype=np.int32)
+    assert arr.shape == (20, 4)
+    assert (arr.sum(axis=1) == 3).all(), "multi-indices must sum to 3"
+    return arr
+
+
+# (20, 4) — the canonical multi-index catalog.
+BERN_INDICES = _enumerate_bernstein_multi_indices()
+
+# Slice-index groups into BERN_INDICES for lookup convenience.
+BERN_VERTEX_SLICE = slice(0, 4)          # (4,) — c_{3 e_i} at w_i
+BERN_EDGE_SLICE   = slice(4, 16)         # (12,) — 2 per edge × 6 edges
+BERN_FACE_SLICE   = slice(16, 20)        # (4,) — c at face opposite vertex i
+
+
+@dataclass(frozen=True)
+class HCTBernstein:
+    """Per-element Bernstein B-coefficients for the Alfeld-split
+    cubic reconstruction.
+
+    Attributes
+    ----------
+    coeffs : (n_elements, 4, 20, 3) float32
+        coeffs[e, s, k, c] = B-coefficient with local index k
+        (see ``BERN_INDICES``) of velocity component c on sub-tet s
+        of element e.
+    continuity : str
+        The continuity level enforced across sub-tet interior faces.
+        'c0' for the Phase 3a (Commit 2a) implementation;
+        'c1' for the Phase 3b upgrade (not yet available).
+    """
+    coeffs: np.ndarray
+    continuity: str
+
+
+def _bezier_edge_coeff(u_P, grad_u_P, edge_vec):
+    """1D cubic Hermite along-edge formula.
+
+    For a Bézier edge from P to Q with tangent (Q - P), the B-coefficient
+    at position P + (1/3)(Q - P) is
+        c_1/3 = u(P) + (1/3) * grad(u(P)) · (Q - P)
+    (Farin 2002, Prop 17.1). Returns the scalar c_1/3 (per component
+    handled by the caller via broadcasting).
+    """
+    return u_P + (1.0 / 3.0) * (grad_u_P @ edge_vec)
+
+
+def build_hct_bernstein_c0(
+    node_positions: np.ndarray,
+    connectivity: np.ndarray,
+    node_velocities: np.ndarray,
+    nodal_gradient: np.ndarray,
+    edge_grads: np.ndarray,
+    geom: "AlfeldGeometry",
+    verbose: bool = False,
+) -> HCTBernstein:
+    """Assemble 20 Bernstein B-coefficients per sub-tet per component,
+    with C⁰ interior continuity between sub-tets.
+
+    This is Phase 3a of the HCT-3D construction. It fixes the parent-
+    centroid value μ and gradient γ to the P1-average of the 4 parent
+    vertex values and gradients respectively, then closes each sub-tet's
+    20-coefficient cubic Bézier from those DOFs.
+
+    Compared to the full Worsey-Farin C¹ construction (Phase 3b):
+
+    * Vertex B-coefficients match parent vertex values exactly, and
+      c_{3000} at vc is μ (shared across all 4 sub-tets, so C⁰ at vc).
+    * Edge B-coefficients on parent edges use the cubic Hermite formula
+      with vertex value and vertex gradient. Since parent edges are
+      shared by two sub-tets — one where the edge is a "base-triangle"
+      edge of the outer face and one where it's not — the two sub-tets
+      compute IDENTICAL B-coefficients on the shared edge, giving C⁰
+      continuity there.
+    * Edge B-coefficients on spoke edges (from vc to a parent vertex)
+      use the cubic Hermite formula with (μ, γ) at the vc end and
+      (vertex value, vertex gradient) at the parent-vertex end. Two
+      sub-tets share each spoke edge as an interior edge, and both
+      compute the same (μ, γ) so continuity is preserved.
+    * Face B-coefficients c_{111}^face use u(face_centroid) evaluated as
+      the P1 blend of the 3 face-vertex values. Exact for linear fields.
+
+    C¹ continuity across sub-tet interior faces is NOT enforced. That
+    upgrade lands in Phase 3b (Commit 2b) via a 4×4 linear solve per
+    parent tet per component.
+
+    Args
+    ----
+    node_positions : (n_nodes, 3) float
+    connectivity   : (n_elements, 4) int32
+    node_velocities: (n_nodes, 3) float
+        The nodal velocity field feeding the reconstruction.
+    nodal_gradient : (n_nodes, 3, 3) float
+        Recovered nodal gradient tensor from Phase 4 of
+        gradient_recovery.py.
+    edge_grads     : (n_elements, 6, 3, 3) float
+        Edge-midpoint gradient tensor from Phase 2
+        (edge_midpoint_gradients). Currently unused by the C⁰ variant;
+        kept in the signature so Phase 3b can drop in without a
+        signature break.
+    geom : AlfeldGeometry
+        From Phase 1 (build_alfeld_geometry).
+    verbose : bool
+        Print summary statistics and wall-clock.
+
+    Returns
+    -------
+    HCTBernstein
+    """
+    del edge_grads  # unused by the C0 variant; reserved for Phase 3b.
+    import time
+    t0 = time.time()
+
+    node_positions = np.asarray(node_positions, dtype=np.float64)
+    connectivity = np.asarray(connectivity, dtype=np.int64)
+    node_velocities = np.asarray(node_velocities, dtype=np.float64)
+    nodal_gradient = np.asarray(nodal_gradient, dtype=np.float64)
+    n_elements = connectivity.shape[0]
+
+    # Gather per-element parent-vertex data. All shapes below have a
+    # leading n_elements axis and a size-4 "local vertex" axis.
+    p_verts = node_positions[connectivity]              # (n_elements, 4, 3)
+    v_verts = node_velocities[connectivity]             # (n_elements, 4, 3)
+    G_verts = nodal_gradient[connectivity]              # (n_elements, 4, 3, 3)
+
+    # Parent centroid (from geom).
+    vc = geom.centroids                                 # (n_elements, 3)
+    # C0 rule: μ and γ are P1 averages of parent-vertex data.
+    mu    = v_verts.mean(axis=1)                        # (n_elements, 3)
+    gamma = G_verts.mean(axis=1)                        # (n_elements, 3, 3)
+
+    # -------------------------------------------------------------------
+    # Assemble the (n_elements, 4_subtets, 20_coeffs, 3_components) array.
+    # Sub-tet s has local vertices:
+    #   w0 = vc, w1 = p_{fs[0]}, w2 = p_{fs[1]}, w3 = p_{fs[2]}
+    # with (fs[0], fs[1], fs[2]) = ALFELD_SUBTET_PARENT_VERTS[s].
+    # We compute each of the 20 Bernstein coefficients per sub-tet
+    # symbolically using ``BERN_INDICES`` as the multi-index catalog.
+    # -------------------------------------------------------------------
+    coeffs = np.zeros((n_elements, 4, 20, 3), dtype=np.float64)
+
+    for s in range(4):
+        fs = ALFELD_SUBTET_PARENT_VERTS[s]  # (3,) parent vertex indices
+        w0 = vc                                              # (n_elements, 3)
+        w1 = p_verts[:, fs[0]]                               # (n_elements, 3)
+        w2 = p_verts[:, fs[1]]                               # (n_elements, 3)
+        w3 = p_verts[:, fs[2]]                               # (n_elements, 3)
+        # Local sub-tet vertex values and gradients.
+        u_local  = np.stack([mu, v_verts[:, fs[0]],
+                             v_verts[:, fs[1]], v_verts[:, fs[2]]],
+                            axis=1)                          # (n_elements, 4, 3)
+        G_local  = np.stack([gamma, G_verts[:, fs[0]],
+                             G_verts[:, fs[1]], G_verts[:, fs[2]]],
+                            axis=1)                          # (n_elements, 4, 3, 3)
+        w_local  = np.stack([w0, w1, w2, w3], axis=1)        # (n_elements, 4, 3)
+
+        # Vertex B-coefficients: c_{3 e_i} = u(w_i)
+        for i in range(4):
+            k = int(np.where(
+                (BERN_INDICES == np.eye(4, dtype=np.int32)[i] * 3).all(axis=1)
+            )[0][0])
+            coeffs[:, s, k, :] = u_local[:, i]
+
+        # Edge B-coefficients. Iterate over the 6 sub-tet edges. Each
+        # edge (a, b) has two B-coeffs: 1/3 from a toward b (α_a=2,
+        # α_b=1) and 1/3 from b toward a (α_a=1, α_b=2).
+        for a, b in TET_EDGES:
+            edge_vec = w_local[:, b] - w_local[:, a]      # (n_elements, 3)
+            u_at_a = u_local[:, a]                        # (n_elements, 3)
+            u_at_b = u_local[:, b]
+            G_at_a = G_local[:, a]                        # (n_elements, 3, 3)
+            G_at_b = G_local[:, b]
+
+            # 1/3 from a: α_a=2, α_b=1
+            α = np.zeros(4, dtype=np.int32); α[a] = 2; α[b] = 1
+            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
+            # gradient contribution: G @ edge_vec = (grad_u) · (w_b - w_a)
+            # per-component: einsum "eij,ej->ei" reduces over the spatial
+            # index j, leaving components i.
+            grad_along_edge_at_a = np.einsum("eij,ej->ei", G_at_a, edge_vec)
+            coeffs[:, s, k, :] = u_at_a + (1.0 / 3.0) * grad_along_edge_at_a
+
+            # 1/3 from b: α_a=1, α_b=2
+            α = np.zeros(4, dtype=np.int32); α[a] = 1; α[b] = 2
+            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
+            grad_along_edge_at_b = np.einsum("eij,ej->ei", G_at_b, -edge_vec)
+            coeffs[:, s, k, :] = u_at_b + (1.0 / 3.0) * grad_along_edge_at_b
+
+        # Face B-coefficients. Face opposite local vertex i has
+        # barycentric (α with 0 at slot i, 1 at the other 3 slots).
+        # C0 rule: c_{face} = value at face centroid computed as the P1
+        # blend of the 3 vertex values. For a linear field this is exact.
+        for i_opp in range(4):
+            α = np.array([1, 1, 1, 1], dtype=np.int32); α[i_opp] = 0
+            k = int(np.where((BERN_INDICES == α).all(axis=1))[0][0])
+            # Sum of the 3 vertex values on the face, divided by 3.
+            face_verts = [j for j in range(4) if j != i_opp]
+            face_centroid_val = (u_local[:, face_verts[0]]
+                                 + u_local[:, face_verts[1]]
+                                 + u_local[:, face_verts[2]]) / 3.0
+            coeffs[:, s, k, :] = face_centroid_val
+
+    if verbose:
+        elapsed = time.time() - t0
+        print(f"[hct3d/bernstein-c0] n_elements={n_elements:,}, "
+              f"n_subtets={4 * n_elements:,}")
+        print(f"  coeffs shape: {coeffs.shape}, dtype float32")
+        n_coeff = 4 * 20
+        print(f"  {n_coeff} coefficients per element ({n_coeff * n_elements:,} "
+              f"total floats × 3 components = "
+              f"{n_coeff * n_elements * 3 * 4 / 1e6:.1f} MB float32)")
+        print(f"  wall: {elapsed:.1f}s")
+        # Sanity: for a constant field with u = const at nodes, all
+        # B-coefficients should equal that constant.
+        # (Test suite verifies this rigorously.)
+        # Quick range report.
+        c_min = float(coeffs.min())
+        c_max = float(coeffs.max())
+        print(f"  coeff range: [{c_min:.3e}, {c_max:.3e}]")
+
+    return HCTBernstein(
+        coeffs=coeffs.astype(np.float32),
+        continuity="c0",
+    )
+
+
+# =============================================================================
+# Utility: evaluate a Bernstein cubic at a point (helper for tests/kernel)
+# =============================================================================
+
+def bernstein_cubic_evaluate(coeffs_one_subtet: np.ndarray,
+                             barycentric: np.ndarray) -> np.ndarray:
+    """Evaluate a cubic Bernstein polynomial at a point given the 20
+    B-coefficients and 4 barycentric coordinates.
+
+    Args
+    ----
+    coeffs_one_subtet : (20, 3) float
+        B-coefficients for one sub-tet, one row per BERN_INDICES entry,
+        one column per velocity component.
+    barycentric : (4,) float
+        Barycentric coordinates in the sub-tet (must sum to 1).
+
+    Returns
+    -------
+    (3,) float — the velocity vector evaluated at the point.
+
+    Notes
+    -----
+    Pure NumPy, no JAX. Used by the unit-test suite and by any Python-
+    side diagnostic that wants a reference implementation. The JAX-JIT'd
+    kernel (Phase 4) uses a different implementation optimised for
+    XLA-HLO compile size and speed.
+    """
+    from math import factorial
+    coeffs_one_subtet = np.asarray(coeffs_one_subtet, dtype=np.float64)
+    barycentric = np.asarray(barycentric, dtype=np.float64)
+    assert coeffs_one_subtet.shape == (20, 3), coeffs_one_subtet.shape
+    assert barycentric.shape == (4,), barycentric.shape
+    # Bernstein basis value B^3_α(b) = (3! / α!) * b^α
+    fact3 = 6.0
+    val = np.zeros(3, dtype=np.float64)
+    for k in range(20):
+        α = BERN_INDICES[k]
+        multi = fact3 / (factorial(α[0]) * factorial(α[1])
+                         * factorial(α[2]) * factorial(α[3]))
+        b_power = (barycentric[0] ** α[0]
+                   * barycentric[1] ** α[1]
+                   * barycentric[2] ** α[2]
+                   * barycentric[3] ** α[3])
+        val += coeffs_one_subtet[k] * (multi * b_power)
+    return val

@@ -105,34 +105,57 @@ The 22 DOFs are the ones our pipeline naturally exposes:
 
 ### Phase 3 — Solve for Bernstein coefficients
 
-Standard approach: express each sub-tet's cubic in Bernstein form on
-its 4 vertices. The 20 Bernstein control points per sub-tet lie on a
-regular grid inside the sub-tet:
+Standard approach: express each sub-tet's cubic in Bernstein-Bézier
+form on its 4 vertices. A cubic on a tet has 20 B-coefficients per
+component: 4 vertex + 12 edge (2 per edge × 6 edges) + 4 face
+centroid + 0 interior.
 
-* 4 vertex control points
-* 6 edge control points (2 per edge)
-* 4 face control points (1 per face)
-* 6 interior control points (from a graded grid)
+Structure of the solve on the Alfeld-split macro-element (per parent
+tet, per velocity component):
 
-The Bernstein coefficients are determined by:
+1. **Parent-vertex B-coefficients (`c_{3e_i}`)**: come directly from
+   the loaded nodal velocity component. 4 knowns.
+2. **Centroid vertex B-coefficient (`c_{3000}` at vc)**: the value
+   `u(vc)` at the parent centroid. 1 unknown (call it `μ`).
+3. **Parent-edge B-coefficients** (2 per edge × 6 parent edges = 12):
+   from the 1D cubic Hermite along-edge formula using vertex value
+   and vertex gradient at the endpoint. Known.
+4. **Spoke-edge B-coefficients** (2 per edge × 4 spoke edges from vc
+   = 8, but 4 of them ARE the endpoint vc so they equal `μ`; the
+   other 4 involve `∇u(vc) =: γ`, 3 unknowns).
+5. **Parent-face centroid B-coefficients** (`c_{0111}` on the outer
+   triangle of each sub-tet, 4 of them): from Farin's
+   quadratic-precision formula in terms of parent-vertex and
+   parent-edge B-coefficients. Known.
+6. **Interior-face centroid B-coefficients** (`c_{0111}` on each
+   vc-containing triangle, 6 shared across the 4 sub-tets): from
+   Farin's formula in terms of the spoke-edge and parent-vertex/
+   parent-edge B-coefficients plus the edge-midpoint gradient DOF
+   from Phase 2.
+7. **C¹ continuity across the 4 interior sub-tet faces**: 4
+   equations per component linking the outer and interior face
+   B-coefficients. Together with the 4 unknowns (μ, γx, γy, γz)
+   this closes the system.
 
-1. **Vertex control points** = vertex values directly.
-2. **Edge control points** = vertex value + (1/3) × edge-tangential
-   gradient at the endpoint. Standard cubic Hermite edge formula.
-3. **Face control points** = determined by the interior face's cubic
-   spline continuity condition. This is the C¹-normal-derivative
-   constraint at the parent-face centroids and along parent edges.
-4. **Interior control points** = C¹ continuity across the 4 shared
-   interior sub-tet faces.
+Following Farin (2002, §17.3) the whole system reduces to a **4×4
+linear solve per parent tet per component**. Precompute all knowns
+first, then solve for (μ, γ) once per component. Wall-clock
+estimate: ~50 μs per element in NumPy. For a 900k-tet mesh, ~45 s.
+Fine for a one-shot precompute.
 
-For each parent tet this is a **small linear system** (~30x30 per
-component) that can be pre-factorised. In practice the Worsey-Farin
-paper gives closed-form expressions for all 80 Bernstein coefficients
-in terms of the 22 DOFs; we implement those formulas rather than a
-generic constrained-LS solve.
+**Development sequencing.** Because the full C¹-with-macro-element
+construction has enough moving parts to be a bug-collection risk,
+Phase 3 lands in two sub-commits:
 
-Wall-clock estimate: ~50 μs per element in NumPy. For a 900k-tet
-mesh, ~45 s. Fine for a one-shot precompute.
+* **Commit 2a**: cubic reconstruction with C⁰ interior continuity
+  (i.e. compute (μ, γ) using an averaging rule instead of the C¹
+  linear solve). Sub-tets have their B-coefficients but trajectories
+  crossing sub-tet interior faces may see a slope kink. Still exact
+  at parent vertices and exact for linear velocity fields.
+  Testable: linear, quadratic exactness inside sub-tets.
+* **Commit 2b**: add the 4×4 C¹ linear solve for (μ, γ). Testable:
+  full linear, quadratic AND cubic exactness inside the parent
+  element AND C¹ continuity at sub-tet face crossings.
 
 **Storage**: `(n_elements, 4_sub_tets, 20_bern_coeffs, 3_comps)` in
 float32 = **864 MB VRAM for 900k tets**. Uploads once, never touched
