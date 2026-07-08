@@ -760,6 +760,109 @@ def test_c1_taylor_reproduces_parent_vertex_values():
                 )
 
 
+# =============================================================================
+# Phase 6: degenerate-element fallback
+# =============================================================================
+
+def test_c1_taylor_degenerate_element_fallback_shape():
+    """A mesh with one intentionally-degenerate element (near-collinear
+    vertices) should not produce NaN or Inf coefficients. The LS gate
+    should catch it and fall back to Phase 3a's P1-average (μ, γ) on
+    that element, leaving the rest of the mesh unaffected."""
+    # Build a small healthy Kuhn mesh, then append one near-degenerate
+    # tet whose 4 vertices are nearly coplanar.
+    nodes, conn = make_kuhn_cube_mesh(2)
+    n_healthy_nodes = nodes.shape[0]
+    # Four nearly-coplanar vertices for the degenerate tet.
+    extra = np.array([
+        [2.0, 0.0, 0.0],
+        [2.0, 1.0, 1e-9],       # near-coplanar
+        [2.0, 0.0, 1.0],
+        [2.0, 1.0, 1.0 + 1e-9],
+    ])
+    nodes = np.vstack([nodes, extra])
+    conn_extra = np.array(
+        [[n_healthy_nodes, n_healthy_nodes + 1,
+          n_healthy_nodes + 2, n_healthy_nodes + 3]],
+        dtype=conn.dtype,
+    )
+    conn = np.vstack([conn, conn_extra])
+
+    rng = np.random.default_rng(0)
+    vel = rng.standard_normal(nodes.shape)
+    grad = rng.standard_normal((nodes.shape[0], 3, 3))
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+
+    # All coefficients must be finite. If the fallback didn't fire,
+    # the degenerate element would have NaNs from the singular LS solve.
+    assert np.isfinite(hct.coeffs).all(), (
+        "some HCT coefficients are non-finite; degenerate-element "
+        "fallback failed to catch a near-singular LS system"
+    )
+    # All coefficients must be bounded — no absurd values leaking.
+    assert np.abs(hct.coeffs).max() < 1e5, (
+        f"HCT coeff magnitude spike: max = {np.abs(hct.coeffs).max()}"
+    )
+
+
+def test_c1_taylor_still_exact_on_linear_when_one_element_degenerate():
+    """Adding a degenerate element must not corrupt the reconstruction
+    on the healthy elements. Linear-field exactness on healthy elements
+    should be preserved."""
+    nodes, conn = make_kuhn_cube_mesh(2)
+    n_healthy_conn = conn.shape[0]
+    # Append a near-degenerate tet at a location that won't be tested.
+    extra = np.array([
+        [2.0, 0.0, 0.0],
+        [2.0, 1.0, 1e-9],
+        [2.0, 0.0, 1.0],
+        [2.0, 1.0, 1.0 + 1e-9],
+    ])
+    n_healthy_nodes = nodes.shape[0]
+    nodes = np.vstack([nodes, extra])
+    conn_extra = np.array(
+        [[n_healthy_nodes, n_healthy_nodes + 1,
+          n_healthy_nodes + 2, n_healthy_nodes + 3]],
+        dtype=conn.dtype,
+    )
+    conn = np.vstack([conn, conn_extra])
+
+    # Linear field (needs to be defined at the extra nodes too so the
+    # LS's fallback path has sensible input).
+    A = np.array([
+        [1.0, 2.0, 3.0],
+        [-1.0, 0.5, 0.0],
+        [0.5, 1.5, 2.0],
+    ])
+    b = np.array([0.1, -0.2, 0.3])
+    vel = (A @ nodes.T).T + b
+    grad = np.broadcast_to(A, (nodes.shape[0], 3, 3)).copy()
+    hct = _build_c1_helper(nodes, conn, vel, grad)
+
+    # Test at 100 random interior points of the HEALTHY elements only.
+    geom = build_alfeld_geometry(nodes, conn)
+    rng = np.random.default_rng(0)
+    max_err = 0.0
+    for _ in range(100):
+        e = rng.integers(0, n_healthy_conn)   # healthy elements only
+        s = rng.integers(0, 4)
+        raw = np.abs(rng.standard_normal(4)) + 0.1
+        bary = raw / raw.sum()
+        vc_e = geom.centroids[e]
+        fs = ALFELD_SUBTET_PARENT_VERTS[s]
+        pos = (bary[0] * vc_e
+               + bary[1] * nodes[conn[e, fs[0]]]
+               + bary[2] * nodes[conn[e, fs[1]]]
+               + bary[3] * nodes[conn[e, fs[2]]])
+        v_exact = A @ pos + b
+        v_recon = bernstein_cubic_evaluate(hct.coeffs[e, s], bary)
+        max_err = max(max_err, np.abs(v_recon - v_exact).max())
+    assert max_err < 1e-5, (
+        f"linear exactness broken on healthy elements by degenerate "
+        f"neighbour: max_err = {max_err}"
+    )
+
+
 if __name__ == "__main__":
     fns = [(name, fn) for name, fn in globals().items()
            if name.startswith("test_") and callable(fn)]

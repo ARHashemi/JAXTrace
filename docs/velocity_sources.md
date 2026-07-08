@@ -320,31 +320,48 @@ the RK4 loop. The full derivation is in
 `jaxtrace/gpu/recovery/gradient_recovery.py`. Two CLI knobs:
 
 ```
---gradient-recovery {0,1}                                 (default 1)
---recovery-method {centroid_taylor,vertex_taylor,taylor}  (default centroid_taylor
-                                                           until 2026-07-02,
-                                                           vertex_taylor after)
+--gradient-recovery {0,1}                              (default 1)
+--recovery-method {centroid_taylor, vertex_taylor,
+                   hct_cubic_c0, hct_cubic_quad_faces,
+                   hct_cubic, taylor}                  (default centroid_taylor)
 ```
 
-Two Step-5 evaluators are supported today. Both are exact for linear
+Five Step-5 evaluators are supported today. All are exact for linear
 velocity fields and reduce to raw P1 when SPR produces no gradient
-correction:
+correction. Listed in increasing accuracy order:
 
 * **centroid_taylor** (legacy alias `taylor`) uses a per-element
   `v(p) = v_c + G_c @ (p - x_c)` with the recovered gradient frozen
   at the element centroid. One 3×3 matvec per query.
-* **vertex_taylor** (recommended default) uses
+* **vertex_taylor** uses
   `v(p) = Σ_a N_a(p) · (v_a + G_a @ (p - x_a))` where N_a are P1
   barycentric weights. Exact at nodes. On the recirc_2026 §A field
-  it beats `centroid_taylor` by ~3× mean-abs error at random
-  interior samples and beats raw P1 by ~2.7×.
+  it beats `centroid_taylor` by ~3× mean-abs error and raw P1 by
+  ~2.7×.
+* **hct_cubic_c0** — piecewise cubic Bernstein reconstruction on the
+  Alfeld sub-tet split with P1-averaged (μ, γ) at parent centroid.
+  Phase 3a of the HCT-3D pipeline. Kept for A/B testing.
+* **hct_cubic_quad_faces** — Phase 3a-plus. Same as `hct_cubic_c0`
+  but with Farin's quadratic-precision face-centroid formula.
+  Quadratic-exact at parent face centroids.
+* **hct_cubic** (recommended for smooth fields with high curvature) —
+  Phase 3b. Fits a local degree-2 Taylor expansion around each
+  parent centroid via a batched 16×10 LS solve; the (μ, γ) at vc
+  come from that fit. Bit-exact for quadratic fields at parent
+  vertices, parent centroid, spoke-edge midpoints, and parent face
+  centroids. On the recirc_2026 §A field it beats `centroid_taylor`
+  by **~5.4× mean error** and **~9× max error** at random interior
+  samples. Degenerate elements (near-singular LS system)
+  automatically fall back to Phase 3a rules.
 
-The pipeline runs on the CPU with NumPy in seconds for meshes up to
-~10^6 tets; the per-step RK4 cost is essentially unchanged.
+See `docs/hct3d_implementation_plan.md` for the full HCT-3D
+construction, per-variant test coverage, and per-phase wall-clock
+budgets.
 
-A future patch will add `hct_cubic` — a Hsieh-Clough-Tocher
-tetrahedral macro-element cubic Hermite reconstruction — implementing
-the full accuracy target of the pipeline doc.
+Precompute pipeline runs on the CPU with NumPy for Steps 1-4 (SPR)
+and JIT'd JAX for Steps 5 (Bernstein assembly, ~1-2 s on 900k tets).
+The per-step RK4 tracking cost is essentially unchanged across all
+five methods.
 
 Analytic-source runs bypass gradient recovery entirely — there is no
 mesh field to recover gradients of. The flag is silently ignored on
@@ -378,4 +395,12 @@ Locations of the validation harnesses:
 | ab3ba32 | `generate_test_mesh.py`: add adaptive Kuhn refinement. |
 | a919e6e | `run_tracking.py`: `--velocity-source rom` for FSW-ROM velocity reconstruction. |
 | 54b6f55 | Gradient recovery: SPR nodal gradient + centroid_taylor Step 5, `--gradient-recovery {0,1}`. |
-| (this)  | Gradient recovery: vertex_taylor Step 5 evaluator (per-vertex Taylor blended with P1); ~3× accuracy vs centroid_taylor on smooth curved fields. |
+| 96bac64 | vertex_taylor Step 5 evaluator (per-vertex Taylor blended with P1); ~3× accuracy vs centroid_taylor on smooth curved fields. |
+| 7478a93 | HCT-3D design roadmap (`docs/hct3d_implementation_plan.md`). |
+| babf2eb | HCT-3D Phase 1+2: Alfeld-split geometry and edge-midpoint gradient DOFs. |
+| 4abeee5 | HCT-3D Phase 3a: Bernstein B-coefficient assembly with C⁰ continuity. |
+| 8bc5d04 | HCT-3D Phase 3a JAX migration for 5× speedup on large meshes. |
+| e932955 | HCT-3D Phase 3a-plus: Farin quadratic-precision face-centroid coefficients. |
+| 9dcd469 | HCT-3D Phase 3b Taylor-fit (μ, γ); ~5.4× mean-error / ~9× max-error over centroid_taylor. |
+| a9547ac | HCT-3D Phase 4: JAX kernel evaluator + `--recovery-method hct_cubic` end-to-end wiring. |
+| (this)  | HCT-3D Phase 5+6: degenerate-element fallback, storage reporting, case-folder + docs polish. |

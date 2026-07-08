@@ -911,8 +911,11 @@ def build_hct_bernstein_quad_faces(
     n_elements = int(connectivity.shape[0])
     if verbose:
         elapsed = time.time() - t0
+        mb = coeffs_upgraded.nbytes / 1e6
         print(f"[hct3d/bernstein-quad-faces] n_elements={n_elements:,}, "
               f"wall={elapsed:.2f}s (includes Phase 3a build)")
+        print(f"  coeffs shape: {tuple(coeffs_upgraded.shape)}, "
+              f"size={mb:.1f} MB float32")
 
     return HCTBernstein(
         coeffs=coeffs_np.astype(np.float32),
@@ -1158,19 +1161,45 @@ def _build_taylor_lstsq_body(
     AT_b = jnp.einsum("eij,eic->ejc", A, b)         # (n_elements, 10, 3)
     X = jnp.linalg.solve(AT_A, AT_b)                # (n_elements, 10, 3)
 
-    # Extract μ, γ, H from the solution.
-    mu = X[:, 0, :]                                  # (n_elements, 3)
-    gamma_x = X[:, 1, :]                             # (n_elements, 3)
+    # Degenerate-element gate. For pathological parent tets (near-flat,
+    # near-colinear neighbours) the normal-equations matrix A^T A can be
+    # nearly singular. jnp.linalg.solve does not raise on singular inputs
+    # — it returns NaN or huge values that would silently corrupt the
+    # Bernstein coefficients on those elements and propagate into the
+    # tracked trajectories. Detect them by
+    #   * NaN or Inf in the solution (LS actually failed), OR
+    #   * Any component of the solution above a "wild value" threshold
+    #     of 1e6 (a safe overestimate — real Taylor coefficients on any
+    #     reasonably-scaled mesh sit well below this).
+    # When either condition triggers, fall back to the Phase 3a P1-
+    # average rule for (μ, γ). This is a conservative fallback: it
+    # sacrifices quadratic exactness ON THAT ELEMENT but preserves
+    # linear exactness and continuity, and prevents the LS blowup from
+    # contaminating trajectories.
+    is_finite = jnp.isfinite(X).all(axis=(1, 2))               # (n_elements,)
+    max_abs = jnp.abs(X).max(axis=(1, 2))                      # (n_elements,)
+    is_bounded = max_abs < jnp.asarray(1e6, dtype=X.dtype)
+    is_ok = is_finite & is_bounded                              # (n_elements,)
+
+    # Fallback (μ, γ) from Phase 3a: P1 average of vertex data.
+    mu_fallback    = v_verts.mean(axis=1)                      # (n_elements, 3)
+    gamma_fallback = G_verts.mean(axis=1)                      # (n_elements, 3, 3)
+
+    # Extract μ, γ from the LS solution.
+    mu_ls = X[:, 0, :]                                          # (n_elements, 3)
+    gamma_x = X[:, 1, :]
     gamma_y = X[:, 2, :]
     gamma_z = X[:, 3, :]
     # gamma[e, comp, spatial] = ∂u_comp/∂x_spatial at vc.
-    gamma = jnp.stack([gamma_x, gamma_y, gamma_z], axis=-1)
-    # gamma has shape (n_elements, 3_comp, 3_spatial). But the rest of
-    # hct3d.py uses gradient tensor shape (n_elements, 3_out, 3_in) with
-    # the convention grad[i, j] = ∂u_i/∂x_j. So (comp, spatial) is
-    # already (i, j) — correct.
+    gamma_ls = jnp.stack([gamma_x, gamma_y, gamma_z], axis=-1)  # (n_elements, 3, 3)
 
-    return mu, gamma
+    # Per-element selection: OK -> LS, degenerate -> P1 fallback.
+    mu    = jnp.where(is_ok[:, None], mu_ls, mu_fallback)
+    gamma = jnp.where(is_ok[:, None, None], gamma_ls, gamma_fallback)
+
+    # Also return a per-element "used LS" boolean for diagnostics
+    # (fraction of degenerate elements is printed by build_hct_bernstein_c1_taylor).
+    return mu, gamma, is_ok
 
 
 if _HAS_JAX:
@@ -1307,8 +1336,10 @@ def build_hct_bernstein_c1_taylor(
     centroids_j       = jnp.asarray(np.asarray(geom.centroids, dtype=np.float32))
     node_positions_j  = jnp.asarray(np.asarray(node_positions, dtype=np.float32))
 
-    # Solve for (μ, γ) via batched Taylor-fit LS.
-    mu_j, gamma_j = _build_taylor_lstsq(
+    # Solve for (μ, γ) via batched Taylor-fit LS. Returns a per-element
+    # is_ok bool; degenerate elements have (μ, γ) already replaced with
+    # the Phase 3a P1-average fallback inside the JIT'd body.
+    mu_j, gamma_j, is_ok_j = _build_taylor_lstsq(
         connectivity_j, node_velocities_j, nodal_gradient_j,
         centroids_j, node_positions_j,
     )
@@ -1323,14 +1354,26 @@ def build_hct_bernstein_c1_taylor(
     coeffs.block_until_ready()
 
     n_elements = int(connectivity.shape[0])
+    n_degenerate = int(n_elements - int(is_ok_j.sum()))
 
     if verbose:
         elapsed = time.time() - t0
         print(f"[hct3d/bernstein-c1-taylor] n_elements={n_elements:,}, "
               f"wall={elapsed:.2f}s (LS + Bernstein assembly, JIT-compiled)")
+        mb = coeffs.nbytes / 1e6
+        print(f"  coeffs shape: {tuple(coeffs.shape)}, "
+              f"size={mb:.1f} MB float32")
         c_min = float(coeffs.min())
         c_max = float(coeffs.max())
         print(f"  coeff range: [{c_min:.3e}, {c_max:.3e}]")
+        if n_degenerate == 0:
+            print(f"  degenerate elements: 0 (all Taylor-fit LS solves "
+                  f"produced finite, bounded (μ, γ))")
+        else:
+            print(f"  degenerate elements: {n_degenerate:,}/"
+                  f"{n_elements:,} "
+                  f"({100 * n_degenerate / n_elements:.2f}%) "
+                  f"— fell back to P1-average (μ, γ) on these")
 
     coeffs_np = np.asarray(coeffs)
 
