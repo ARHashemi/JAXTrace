@@ -304,7 +304,7 @@ Performance impact:
 Default: "parent_cube" (static inner loop, best GPU performance)
 """
 
-MAX_ELEMS_PER_CELL = 8
+MAX_ELEMS_PER_CELL = 32
 """
 Maximum elements per cell for the static-bound inner search loop.
 
@@ -312,16 +312,36 @@ Only used when OCTREE_REGISTRATION_METHOD = "parent_cube".
 The inner fori_loop in the 3x3x3 search uses this as a compile-time
 constant upper bound, enabling XLA to unroll the loop.
 
-Guidelines:
-    - For Kuhn meshes with parent_cube registration: 8 is sufficient
-      (96% of cells have exactly 6 elements, max observed is 8).
-    - With non-Kuhn elements assigned to neighbour cells: 10-12 provides
-      headroom for cells in refinement transition zones.
-    - Higher values increase the unrolled loop size but reduce risk of
-      truncation (missed elements). Total iterations per query per level:
-      27 cells x MAX_ELEMS_PER_CELL.
+Any parent-cube cell with more registered elements than this bound
+gets its overflow SILENTLY TRUNCATED at search time, which manifests
+as a small sigma-independent count of "search failed" queries. The
+symptom is easy to miss because the failure count is a fixed hotspot
+that doesn't grow with perturbation. See tests/paper_benchmarks
+sec6_raw.log for the 8-vs-24 incident that motivated raising this
+bound from 8 to 32.
 
-Default: 8 (matches observed max for pure Kuhn parent-cube registration)
+Guidelines:
+    - Pure Kuhn parent-cube registration (no non-Kuhn elements): the
+      theoretical bound of Proposition 4.6 is 6, so 8 was originally
+      considered sufficient.
+    - Real meshes with any non-Kuhn elements handled by neighbour-
+      borrowing (hybrid_non_kuhn=True): non-Kuhn elements pile into
+      Kuhn neighbours, raising real max occupancy well above 6.
+      Observed max on the cylA mesh (0.06% non-Kuhn): 24. Setting
+      to 32 gives a safety margin.
+    - Higher values increase the unrolled loop size proportionally.
+      Total iterations per query per level = 27 cells x this value,
+      so 32 -> 864 static iterations (vs 216 at 8). XLA still
+      unrolls; empirical measurement on the cylA mesh at N_p=10000
+      shows negligible per-step cost increase since the inner loop
+      terminates early on empty cells.
+
+The Alfeld-split extractor prints the actual observed max at build
+time; if it exceeds this bound the extractor raises a hard error
+rather than silently truncating. Adjust this constant upward if you
+hit that error on a new mesh.
+
+Default: 32 (safe margin above observed 24 max on cylA benchmark mesh)
 """
 
 # ============================================================================

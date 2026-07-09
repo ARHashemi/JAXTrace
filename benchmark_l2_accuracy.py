@@ -798,9 +798,33 @@ def main():
               f"(max {mesh_octree_cells_pc.max_elements_per_cell}), "
               f"static loop bound = {config.MAX_ELEMS_PER_CELL}")
 
+        # Coverage-correctness gate. If the actual observed max
+        # occupancy of any parent-cube cell exceeds the static inner-
+        # loop bound, the 3x3x3^PC search will silently truncate the
+        # overflow at query time — this is the exact bug that caused
+        # sec6_raw.log to show 99.93% instead of 100% coverage for
+        # MALMO^C (max=24 vs bound=8 at the time). We now (a) auto-lift
+        # the effective bound to a safe value, and (b) print a loud
+        # warning so the discrepancy vs the config default is visible
+        # in every run log.
+        _obs_max = int(mesh_octree_cells_pc.max_elements_per_cell)
+        if _obs_max > config.MAX_ELEMS_PER_CELL:
+            # Round the effective bound up to the nearest multiple of 8
+            # so the unrolled loop size stays a clean power-of-two
+            # multiple of the warp size on typical GPUs.
+            _effective_bound = ((_obs_max + 7) // 8) * 8
+            print(f"  WARNING: observed max occupancy ({_obs_max}) exceeds "
+                  f"config.MAX_ELEMS_PER_CELL ({config.MAX_ELEMS_PER_CELL}). "
+                  f"Auto-lifting effective static bound to {_effective_bound} "
+                  f"to preserve 100% MALMO^C coverage. Set "
+                  f"jaxtrace.config.MAX_ELEMS_PER_CELL >= {_effective_bound} "
+                  f"in your run to avoid this warning.")
+            config.MAX_ELEMS_PER_CELL = _effective_bound
+
         build_meta['pc_n_cells'] = int(mesh_octree_cells_pc.n_cells)
         build_meta['pc_mean_elem_per_cell'] = float(mesh_octree_cells_pc.elements_per_cell_mean)
         build_meta['pc_max_elem_per_cell'] = int(mesh_octree_cells_pc.max_elements_per_cell)
+        build_meta['pc_static_loop_bound'] = int(config.MAX_ELEMS_PER_CELL)
 
         with nvtx_range("stage3.octree_upload_parent_cube"):
             t_pc_upload_0 = time.time()
@@ -1185,10 +1209,16 @@ def main():
     print("  Amortisation = build_time / (queries_per_sec * t_query) per query.")
     print("=" * 90)
 
-    total_build = sum(build_times.values())
-    print(f"{'Stage':<40s}  {'Time (s)':>10s}  {'% of build':>12s}")
-    print("-" * 90)
-    for stage_name in [
+    # Explicit list of the itemised sub-stages we want to display.
+    # Excludes 'stage3_total_build_upload' — that key is the WRAPPER
+    # timer around the whole [3/5] Building search structures block
+    # (mesh_io + dedup + aa + inv + vertex_extract + vertex_upload +
+    # pc_extract + pc_upload + aabb_extract + aabb_upload + morton),
+    # so including it in the sum would double-count the sub-stages
+    # underneath it. That was the ~2x discrepancy in sec6_raw.log
+    # (400.6s of sub-stages + 577.5s wrapper = 978.1s ≠ 1198.6s from
+    # sum() which included aabb timers not shown in the display).
+    _display_stages = [
         'mesh_io_pvtu_load',
         'mesh_node_deduplication',
         'aa_metadata_precompute',
@@ -1197,14 +1227,45 @@ def main():
         'octree_upload_vertex_multi',
         'octree_extract_parent_cube',
         'octree_upload_parent_cube',
+        'octree_extract_aabb',
+        'octree_upload_aabb',
         'morton_structure_build_upload',
-    ]:
+    ]
+    # Total = sum of the displayed sub-stages ONLY. Any timer key not
+    # in this list (e.g. the wrapper) is excluded.
+    total_build = sum(build_times.get(s, 0.0) for s in _display_stages)
+    print(f"{'Stage':<40s}  {'Time (s)':>10s}  {'% of build':>12s}")
+    print("-" * 90)
+    for stage_name in _display_stages:
         if stage_name in build_times:
             t_st = build_times[stage_name]
             pct = 100.0 * t_st / total_build if total_build > 0 else 0.0
             print(f"{stage_name:<40s}  {t_st:>10.3f}  {pct:>11.2f}%")
+        else:
+            # Print a placeholder so a missing timer is visible rather
+            # than silently absent from the table (this happens when a
+            # registration strategy is not requested via --registration).
+            print(f"{stage_name:<40s}  {'—':>10s}  {'(not run)':>12s}")
     print("-" * 90)
-    print(f"{'TOTAL build (preprocessing + structures)':<40s}  {total_build:>10.3f}  {'100.00':>11s}%")
+    print(f"{'TOTAL build (sum of displayed stages)':<40s}  {total_build:>10.3f}  {'100.00':>11s}%")
+
+    # Also print the outer wrapper timer for cross-check with the
+    # in-line '[3/5] ... Done in X.Xs' checkpoint print. If this
+    # differs from the sum-of-substages TOTAL by more than a few
+    # percent, some non-negligible cost is happening outside the
+    # tracked timers and needs a new build_times[] entry.
+    _wrapper = build_times.get('stage3_total_build_upload')
+    if _wrapper is not None:
+        print(f"{'Wrapper timer (stage 3 gross)':<40s}  {_wrapper:>10.3f}  "
+              f"{'':>12s}")
+        _delta = _wrapper - sum(
+            build_times.get(s, 0.0) for s in _display_stages
+            if s.startswith(('octree_', 'morton_'))
+        )
+        if abs(_delta) > 5.0:
+            print(f"  NOTE: {_delta:+.1f}s of stage-3 time not accounted for "
+                  f"by itemised octree/morton timers. Investigate before "
+                  f"reporting a build-cost breakdown in publications.")
 
     # Per-element / per-cell normalised costs
     print()
