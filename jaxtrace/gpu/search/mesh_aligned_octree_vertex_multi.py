@@ -64,6 +64,7 @@ class OctreeCellDataVertexMulti(NamedTuple):
     n_elements: int
     cells_per_element_mean: float         # Should be ~4.0
     elements_per_cell_mean: float         # Should be ~23-24
+    max_elements_per_cell: int            # Peak per-cell occupancy
 
 
 def build_node_to_elements(connectivity: np.ndarray) -> dict:
@@ -453,4 +454,5 @@ def extract_octree_cells_vertex_multi(
         n_elements=n_elements,
         cells_per_element_mean=float(cells_per_element_mean),
         elements_per_cell_mean=float(elements_per_cell_mean),
+        max_elements_per_cell=int(elements_per_cell.max()) if elements_per_cell.size else 0,
     )

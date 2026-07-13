@@ -257,6 +257,16 @@ def parse_args():
                         help="VTU export frequency (every N steps)")
     parser.add_argument("--log-interval", type=int, default=10,
                         help="Print progress every N steps")
+    parser.add_argument("--hit-stats-log", action="store_true", default=False,
+                        help="Enable per-log-step L0/L1/L2/miss hit-level "
+                             "diagnostic.  At every --log-interval step, "
+                             "classify all surviving particles by which "
+                             "search level would find them right now and "
+                             "append a row to hit_stats.csv in the output "
+                             "folder.  Adds ~one extra L0+L1+L2 batch call "
+                             "per log tick (negligible against the RK4 "
+                             "budget).  Mesh path only.  Used for Sec.7 "
+                             "diagnostic in the paper.")
 
     # --- Seeding ---
     parser.add_argument("--seed-source", type=str, default="femuss",
@@ -2077,7 +2087,7 @@ def main():
     # ==================================================================
     t_stage = time.time()
     print(f"\n[6/7] Building RK4...")
-    rk4_step = create_rk4_comparison(
+    _rk4_build = create_rk4_comparison(
         mesh_gpu_connectivity=mesh_gpu.connectivity,
         mesh_gpu_node_positions=mesh_gpu.node_positions,
         mesh_gpu_element_neighbors=mesh_gpu.element_neighbors,
@@ -2107,7 +2117,16 @@ def main():
         element_gradient_gpu=element_gradient_gpu,
         node_gradient_gpu=node_gradient_gpu,
         hct_bernstein_gpu=hct_bernstein_gpu,
+        return_search_closures=args.hit_stats_log,
     )
+    # create_rk4_comparison returns just rk4_step by default; when
+    # --hit-stats-log is set, it returns (rk4_step, closures) so we can
+    # run a periodic L0/L1/L2 probe on the surviving particles.
+    if args.hit_stats_log:
+        rk4_step, _hit_probe_closures = _rk4_build
+    else:
+        rk4_step = _rk4_build
+        _hit_probe_closures = None
 
     # Per-step inlet drift helper. Drifts only particles whose
     # pending_entry bit is set. The bit is one-shot: cleared by
@@ -2374,6 +2393,22 @@ def main():
     stats_csv = open(stats_csv_path, 'w')
     stats_csv.write("step,n_active,n_lost,new_lost\n")
 
+    # Hit-stats CSV (only when --hit-stats-log is set).  Rows are
+    # written every LOG_INTERVAL steps; each row classifies the CURRENT
+    # surviving particles by which search level would find them if a
+    # cold lookup were issued right now.  This is a snapshot of tracking
+    # state cache locality, not a per-substep tally.
+    hit_stats_csv = None
+    hit_stats_csv_path = None
+    if args.hit_stats_log and _hit_probe_closures is not None:
+        hit_stats_csv_path = output_subdir / "hit_stats.csv"
+        hit_stats_csv = open(hit_stats_csv_path, 'w')
+        hit_stats_csv.write(
+            "step,n_active,l0_hits,l1_hits,l2_hits,miss,"
+            "l0_share,l1_share,l2_share,miss_share\n"
+        )
+        print(f"  Hit-stats log: {hit_stats_csv_path}")
+
     # Particle exporter — VTKHDF (default; single transient archive) or
     # legacy VTU+.pvd path (one file per step).
     EXPORT_ELEMENT_IDS = args.export_element_ids
@@ -2416,6 +2451,11 @@ def main():
                 density_runner.close()
         except Exception as e:
             print(f"  Density runner shutdown error: {e}")
+        try:
+            if hit_stats_csv is not None:
+                hit_stats_csv.close()
+        except Exception as e:
+            print(f"  Hit-stats CSV shutdown error: {e}")
         # Re-raise so the interpreter exits with the conventional 128+signum.
         _signal.signal(signum, _signal.SIG_DFL)
         import os as _os
@@ -2663,6 +2703,52 @@ def main():
                 n_lost = n_particles - n_active
                 new_lost = n_lost - prev_lost
                 stats_csv.write(f"{step},{n_active},{n_lost},{new_lost}\n")
+
+                # ------------------------------------------------------
+                # Hit-level probe (paper Sec.7 diagnostic).
+                # Runs one extra RK4 step over the alive particles using
+                # a sibling kernel that records which search level (L0
+                # cached / L1 face-neighbour / L2 MALMO octree / miss)
+                # finds each particle at each of the five sub-step
+                # searches (k1, k2, k3, k4, final assignment).  Counts
+                # are aggregated over N_active * 5 events per log tick.
+                # This gives the SUBSTEP hit distribution, not the
+                # end-of-step cache-locality snapshot: it accurately
+                # counts the L2 fallbacks that fire when particles
+                # cross element boundaries mid-substep — the whole
+                # point of Section 7 measuring MALMO L2 payoff.
+                # ------------------------------------------------------
+                if hit_stats_csv is not None and n_active > 0:
+                    _active_mask = element_ids_gpu >= 0
+                    _pos_active = positions_gpu[_active_mask]
+                    _hint_active = element_ids_gpu[_active_mask]
+                    _l0_j, _l1_j, _l2_j, _miss_j = _hit_probe_closures.hit_probe_step(
+                        _pos_active, _hint_active,
+                        jnp.asarray(DT, dtype=config.FLOAT_DTYPE_JNP),
+                        velocity_sequence_gpu,
+                        jnp.int32(step - 1),
+                    )
+                    _l0_i = int(_l0_j)
+                    _l1_i = int(_l1_j)
+                    _l2_i = int(_l2_j)
+                    _miss_i = int(_miss_j)
+                    _tot = _l0_i + _l1_i + _l2_i + _miss_i
+                    if _tot < 1:
+                        _tot = 1
+                    hit_stats_csv.write(
+                        f"{step},{n_active},"
+                        f"{_l0_i},{_l1_i},{_l2_i},{_miss_i},"
+                        f"{100.0*_l0_i/_tot:.4f},"
+                        f"{100.0*_l1_i/_tot:.4f},"
+                        f"{100.0*_l2_i/_tot:.4f},"
+                        f"{100.0*_miss_i/_tot:.4f}\n"
+                    )
+                    hit_stats_csv.flush()
+                    print(f"    hit-stats: L0={100.0*_l0_i/_tot:.2f}%  "
+                          f"L1={100.0*_l1_i/_tot:.2f}%  "
+                          f"L2={100.0*_l2_i/_tot:.2f}%  "
+                          f"miss={100.0*_miss_i/_tot:.2f}%  "
+                          f"(events={_tot:,} = {n_active:,} particles × 5 substeps)")
                 elapsed = time.time() - t_start
                 sps = step / elapsed if elapsed > 0 else 0
                 eta = (N_STEPS - step) / sps if sps > 0 else 0
@@ -2714,6 +2800,9 @@ def main():
     t_elapsed = time.time() - t_start
     stage_times['7_tracking'] = t_elapsed
     stats_csv.close()
+    if hit_stats_csv is not None:
+        hit_stats_csv.close()
+        print(f"  Hit-stats CSV: {hit_stats_csv_path}")
     if exporter is not None:
         exporter.stop()
         if args.export_format == "vtkhdf":

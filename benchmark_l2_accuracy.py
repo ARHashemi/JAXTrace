@@ -761,7 +761,8 @@ def main():
             build_times['octree_extract_vertex_multi'] = time.time() - t_v_extract_0
 
         print(f"  Vertex-multi octree: {mesh_octree_cells_multi.n_cells:,} cells, "
-              f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell, "
+              f"{mesh_octree_cells_multi.elements_per_cell_mean:.1f} elem/cell "
+              f"(max {mesh_octree_cells_multi.max_elements_per_cell}), "
               f"{mesh_octree_cells_multi.cells_per_element_mean:.1f} cells/elem")
 
         cells_per_elem = np.diff(mesh_octree_cells_multi.element_to_cells_offsets)
@@ -770,6 +771,7 @@ def main():
         build_meta['vertex_n_cells'] = int(mesh_octree_cells_multi.n_cells)
         build_meta['vertex_mean_elem_per_cell'] = float(mesh_octree_cells_multi.elements_per_cell_mean)
         build_meta['vertex_mean_cells_per_elem'] = float(mesh_octree_cells_multi.cells_per_element_mean)
+        build_meta['vertex_max_elem_per_cell'] = int(mesh_octree_cells_multi.max_elements_per_cell)
         build_meta['vertex_n_unregistered'] = n_unregistered
         print(f"  Registered elements: {n_registered:,} / {n_elements:,} "
               f"({100*n_registered/n_elements:.2f}%)")
@@ -1273,7 +1275,8 @@ def main():
           f"{build_meta.get('n_nodes', 0):,} nodes")
     if 'vertex_n_cells' in build_meta:
         print(f"  Vertex-multi octree:  {build_meta['vertex_n_cells']:,} cells, "
-              f"{build_meta['vertex_mean_elem_per_cell']:.1f} elem/cell, "
+              f"{build_meta['vertex_mean_elem_per_cell']:.1f} elem/cell "
+              f"(max {build_meta.get('vertex_max_elem_per_cell', 0)}), "
               f"{build_meta['vertex_mean_cells_per_elem']:.2f} cells/elem")
     if 'pc_n_cells' in build_meta:
         print(f"  Parent-cube octree:   {build_meta['pc_n_cells']:,} cells, "

@@ -716,6 +716,13 @@ def create_rk4_comparison(
     # hct_bern_multi_coeffs_gpu (20,) float32 constants. When present,
     # takes precedence over vertex_taylor and centroid_taylor.
     hct_bernstein_gpu=None,
+    # When True, also return a small namespace with the per-level search
+    # closures (search_l0_single, search_l1_single, search_l2_single) so
+    # an outer driver can classify surviving particles by which level
+    # would find them RIGHT NOW.  Used by run_tracking.py's optional
+    # --hit-stats-log path (paper Section 7 diagnostic).  Kernel behaviour
+    # is unchanged when this is False (default).
+    return_search_closures: bool = False,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -1437,6 +1444,113 @@ def create_rk4_comparison(
                 positions_gpu, element_ids_gpu
             )
             return positions_final, element_ids_final
+
+    if return_search_closures:
+        # Build a hit-stats sibling RK4 step for the periodic paper-Sec.7
+        # diagnostic in run_tracking.py.  The main rk4_step above stays
+        # unchanged (zero perf regression); this sibling runs on the same
+        # particles at each LOG_INTERVAL tick and emits per-substep hit
+        # counts (L0/L1/L2/miss aggregated over N particles × 5 sub-step
+        # searches).
+        #
+        # Implementation mirrors rk4_fully_fused_timedep_with_stats:
+        # a hit-level-aware search closure returns (elem_id, hit_level)
+        # in {0,1,2,-1}, threaded through 5 provider-sample-equivalent
+        # calls (k1..k4 + final assignment).  The velocity path is not
+        # traced here — we only need element IDs to classify.
+        def _search_with_level(pos, cached_elem_id):
+            elem_l0 = search_l0_single(pos, cached_elem_id)
+            found_l0 = elem_l0 >= 0
+            if enable_l1:
+                elem_l1_raw = search_l1_single(pos, cached_elem_id)
+                elem_l1 = jnp.where(found_l0, elem_l0, elem_l1_raw)
+                found_l1 = elem_l1 >= 0
+                elem_l2 = search_l2_single(pos, cached_elem_id)
+                elem_final = jnp.where(found_l1, elem_l1, elem_l2)
+                found_l2 = elem_l2 >= 0
+                hit_level = jnp.where(
+                    found_l0, jnp.int8(0),
+                    jnp.where(found_l1, jnp.int8(1),
+                              jnp.where(found_l2, jnp.int8(2), jnp.int8(-1))),
+                )
+            else:
+                elem_l2 = search_l2_single(pos, cached_elem_id)
+                elem_final = jnp.where(found_l0, elem_l0, elem_l2)
+                found_l2 = elem_l2 >= 0
+                hit_level = jnp.where(
+                    found_l0, jnp.int8(0),
+                    jnp.where(found_l2, jnp.int8(2), jnp.int8(-1)),
+                )
+            return elem_final, hit_level
+
+        # Batched (N, 3) / (N,) -> (N,) elem_ids, (N, 5) hit levels — one
+        # per RK4 sub-step.  Bring in the same k-stage geometry as the
+        # main kernel so we count exactly the searches the tracking loop
+        # would issue.  No velocity interpolation, no boundary walls,
+        # no level-set masking — just the search calls, which is what
+        # the hit-rate table is about.
+        def _hit_probe_single(pos, elem_id, dt, velocity_field, t_phys):
+            del t_phys  # unused; mesh path
+            # k1
+            elem_k1, lvl_k1 = _search_with_level(pos, elem_id)
+            vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+            pos_k1 = pos + 0.5 * dt * vel_k1
+            if use_bbox_clamp:
+                pos_k1 = clamp_to_bbox(pos_k1)
+            # k2
+            elem_k2, lvl_k2 = _search_with_level(pos_k1, elem_k1)
+            vel_k2 = interpolate_velocity_single(pos_k1, elem_k2, velocity_field)
+            if use_last_valid_vel:
+                vel_k2 = jnp.where(elem_k2 >= 0, vel_k2, vel_k1)
+            pos_k2 = pos + 0.5 * dt * vel_k2
+            if use_bbox_clamp:
+                pos_k2 = clamp_to_bbox(pos_k2)
+            # k3
+            elem_k3, lvl_k3 = _search_with_level(pos_k2, elem_k2)
+            vel_k3 = interpolate_velocity_single(pos_k2, elem_k3, velocity_field)
+            if use_last_valid_vel:
+                vel_k3 = jnp.where(elem_k3 >= 0, vel_k3, vel_k2)
+            pos_k3 = pos + dt * vel_k3
+            if use_bbox_clamp:
+                pos_k3 = clamp_to_bbox(pos_k3)
+            # k4
+            elem_k4, lvl_k4 = _search_with_level(pos_k3, elem_k3)
+            vel_k4 = interpolate_velocity_single(pos_k3, elem_k4, velocity_field)
+            if use_last_valid_vel:
+                vel_k4 = jnp.where(elem_k4 >= 0, vel_k4, vel_k3)
+            pos_final = pos + (dt / 6.0) * (vel_k1 + 2.0*vel_k2 + 2.0*vel_k3 + vel_k4)
+            # final host lookup (this is the assignment used for the
+            # next step's L0 hint, so it counts).
+            _, lvl_final = _search_with_level(pos_final, elem_k4)
+            return jnp.stack([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final])
+
+        @jax.jit
+        def hit_probe_step(positions_gpu, element_ids_gpu, dt,
+                           velocity_fields_gpu, time_idx):
+            """Vmap the substep-hit tally over all particles."""
+            n_timesteps = velocity_fields_gpu.shape[0]
+            vel_idx = time_idx % n_timesteps
+            velocity_field = velocity_fields_gpu[vel_idx]
+            t_phys = (
+                time_idx.astype(dt.dtype) if hasattr(time_idx, 'dtype')
+                else jnp.asarray(time_idx, dtype=dt.dtype)
+            ) * dt
+            all_levels = jax.vmap(
+                lambda p, e: _hit_probe_single(p, e, dt, velocity_field, t_phys)
+            )(positions_gpu, element_ids_gpu)
+            # Flatten to (N * 5,) for cheap counting.
+            flat = all_levels.reshape(-1)
+            l0_hits = jnp.sum(flat == 0).astype(jnp.int32)
+            l1_hits = jnp.sum(flat == 1).astype(jnp.int32)
+            l2_hits = jnp.sum(flat == 2).astype(jnp.int32)
+            misses  = jnp.sum(flat == -1).astype(jnp.int32)
+            return l0_hits, l1_hits, l2_hits, misses
+
+        from types import SimpleNamespace
+        search_closures = SimpleNamespace(
+            hit_probe_step=hit_probe_step,
+        )
+        return rk4_step, search_closures
 
     return rk4_step
 
