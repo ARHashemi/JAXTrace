@@ -135,7 +135,13 @@ txt = "".join(lines)
 
 txt = sub_var(txt, 'INPUT',                    recon_input,                    is_string=True)
 txt = sub_var(txt, 'AUTO_DETECT_CASE',         '0')
-txt = sub_var(txt, 'MESH_SUBDIR',              'post',                         is_string=True)
+# MESH_SUBDIR should stay EMPTY: run_tracking.py already appends /post to
+# an INPUT that ends in .gid (see run_tracking.py:854).  A non-empty
+# MESH_SUBDIR would produce <INPUT>/post/<MESH_SUBDIR>/... which for
+# MESH_SUBDIR="post" gives the classic double-post bug
+#   /scratch/.../cylindrical_004.gid/post/post/cylindrical_0.pvtu
+# Inherit whatever the source run_jaxtrace.sh had (typically "" for cases
+# whose PVTUs sit directly under post/, matching the recon layout).
 # Do NOT touch MESH_PATTERN; the recon PVTU keeps the same case-prefix pattern.
 txt = sub_var(txt, 'VEL_START',                '0')
 txt = sub_var(txt, 'VEL_END',                  '0')
