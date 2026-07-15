@@ -31,10 +31,31 @@ import numpy as np
 def _load_last_positions_vtkhdf(vtkhdf_path: Path):
     """Read the LAST timestep of a JAXTrace VTKHDF particle archive.
 
+    Actual archive layout (inspected on a real particles.vtkhdf):
+
+        /VTKHDF/
+            @Type   = 'PolyData'
+            @Version
+            NumberOfPoints  : (n_steps,) int64  -- point count per step
+            Points          : (sum_counts, 3) float32  -- flat concat
+            PointData/
+                Escaped         : (sum_counts,) uint8
+                Group           : (sum_counts,) uint8
+                ParticleID      : (sum_counts,) int32
+                Temperature     : (sum_counts,) float32
+                MaxTemperature  : (sum_counts,) float32
+                (ElementID      : optional; only if --export-element-ids was set)
+            Steps/
+                @NSteps
+                PointOffsets            : (n_steps,) int64  -- start index in Points
+                PointDataOffsets/<name> : (n_steps,) int64  -- start index for that array
+                ...
+
     Returns
     -------
     positions : (n_particles, 3) float32
-    element_ids : (n_particles,) int32   (may be all -1 if not exported)
+    element_ids : (n_particles,) int32   (all -1 if not exported)
+    escaped : (n_particles,) uint8       (all 0 if not exported)
     """
     try:
         import h5py
@@ -44,32 +65,35 @@ def _load_last_positions_vtkhdf(vtkhdf_path: Path):
         ) from exc
 
     with h5py.File(str(vtkhdf_path), "r") as f:
-        # JAXTrace's VTKHDFExportThread lays out groups as
-        #    /VTKHDF/PolyData
-        #    /VTKHDF/Steps
-        # with per-step arrays under /VTKHDF/Points and per-step
-        # PointData.  Find the number of steps and pick the last.
         vtkhdf = f["VTKHDF"]
-        n_steps = int(vtkhdf["Steps"]["NumberOfPoints"].shape[0])
-        # Offsets tell us where each step's data begins in the flat arrays.
-        # We just take the last step's slice.
+        n_pts_per_step = vtkhdf["NumberOfPoints"][:]
         pts_offsets = vtkhdf["Steps"]["PointOffsets"][:]
-        n_pts = vtkhdf["Steps"]["NumberOfPoints"][:]
         last_start = int(pts_offsets[-1])
-        last_count = int(n_pts[-1])
-        pts = vtkhdf["Points"][last_start:last_start + last_count]
-        positions = np.asarray(pts, dtype=np.float32)
-        # Optional PointData['ElementID'] if the run had
-        # --export-element-ids.
-        eid = None
-        if "PointData" in vtkhdf and "ElementID" in vtkhdf["PointData"]:
-            eid_all = vtkhdf["PointData"]["ElementID"][
-                last_start:last_start + last_count
-            ]
-            eid = np.asarray(eid_all, dtype=np.int32)
-        else:
-            eid = np.zeros(last_count, dtype=np.int32)
-    return positions, eid
+        last_count = int(n_pts_per_step[-1])
+        positions = np.asarray(
+            vtkhdf["Points"][last_start:last_start + last_count],
+            dtype=np.float32,
+        )
+
+        eid = np.full(last_count, -1, dtype=np.int32)
+        if ("PointData" in vtkhdf and "ElementID" in vtkhdf["PointData"]):
+            eid_offsets = vtkhdf["Steps"]["PointDataOffsets"]["ElementID"][:]
+            eid_start = int(eid_offsets[-1])
+            eid = np.asarray(
+                vtkhdf["PointData"]["ElementID"][eid_start:eid_start + last_count],
+                dtype=np.int32,
+            )
+
+        escaped = np.zeros(last_count, dtype=np.uint8)
+        if ("PointData" in vtkhdf and "Escaped" in vtkhdf["PointData"]):
+            esc_offsets = vtkhdf["Steps"]["PointDataOffsets"]["Escaped"][:]
+            esc_start = int(esc_offsets[-1])
+            escaped = np.asarray(
+                vtkhdf["PointData"]["Escaped"][esc_start:esc_start + last_count],
+                dtype=np.uint8,
+            )
+
+    return positions, eid, escaped
 
 
 def _write_vtu(out_path: Path, positions: np.ndarray, arrays: dict) -> None:
@@ -125,50 +149,78 @@ def main() -> int:
         return 3
 
     print(f"[compare] FOM: {args.fom_vtkhdf}")
-    fom_pos, fom_eid = _load_last_positions_vtkhdf(args.fom_vtkhdf)
+    fom_pos, fom_eid, fom_escaped = _load_last_positions_vtkhdf(args.fom_vtkhdf)
     print(f"[compare] ROM: {args.rom_vtkhdf}")
-    rom_pos, rom_eid = _load_last_positions_vtkhdf(args.rom_vtkhdf)
+    rom_pos, rom_eid, rom_escaped = _load_last_positions_vtkhdf(args.rom_vtkhdf)
 
     if fom_pos.shape[0] != rom_pos.shape[0]:
         print(f"[compare] WARNING: particle counts differ: "
               f"FOM={fom_pos.shape[0]:,}, ROM={rom_pos.shape[0]:,}. "
               f"Comparing the min({fom_pos.shape[0]}, {rom_pos.shape[0]}) "
               f"leading particles.  This suggests the two runs did not "
-              f"seed identically — check FEMUSS_START and any inlet "
-              f"cropping.", file=sys.stderr)
+              f"seed identically — check the seeding config (SEED_SOURCE, "
+              f"SEED_FRACTION, SEED_GRID, FEMUSS_START, inlet cropping).",
+              file=sys.stderr)
         n = min(fom_pos.shape[0], rom_pos.shape[0])
-        fom_pos = fom_pos[:n]
-        rom_pos = rom_pos[:n]
+        fom_pos = fom_pos[:n]; rom_pos = rom_pos[:n]
+        fom_eid = fom_eid[:n]; rom_eid = rom_eid[:n]
+        fom_escaped = fom_escaped[:n]; rom_escaped = rom_escaped[:n]
 
+    n_total = fom_pos.shape[0]
     disp = rom_pos - fom_pos
     disp_mag = np.linalg.norm(disp, axis=1)
     fom_span = float(np.linalg.norm(fom_pos.max(axis=0) - fom_pos.min(axis=0)))
 
+    # Escape-flag agreement
+    fom_alive = (fom_escaped == 0)
+    rom_alive = (rom_escaped == 0)
+    both_alive   = fom_alive & rom_alive
+    both_escaped = (~fom_alive) & (~rom_alive)
+    only_fom_esc = (~fom_alive) & rom_alive
+    only_rom_esc = fom_alive & (~rom_alive)
+
     print()
-    print(f"[compare] particles          : {fom_pos.shape[0]:,}")
+    print(f"[compare] particles          : {n_total:,}")
     print(f"[compare] FOM bbox           : [{fom_pos.min(0)}] -> [{fom_pos.max(0)}]")
     print(f"[compare] FOM diagonal       : {fom_span:.4e}")
     print()
-    print(f"[compare] displacement (ROM - FOM):")
-    print(f"          mean               : {float(disp_mag.mean()):.4e}")
-    print(f"          median             : {float(np.median(disp_mag)):.4e}")
-    print(f"          rms                : {float(np.sqrt((disp_mag**2).mean())):.4e}")
-    print(f"          p95                : {float(np.percentile(disp_mag, 95)):.4e}")
-    print(f"          p99                : {float(np.percentile(disp_mag, 99)):.4e}")
-    print(f"          max                : {float(disp_mag.max()):.4e}")
-    print(f"          rms / FOM diagonal : {100 * float(np.sqrt((disp_mag**2).mean())) / max(fom_span, 1e-30):.3f}%")
+    print(f"[compare] escape-flag agreement:")
+    print(f"          both alive             : {int(both_alive.sum()):>10,}  ({100*both_alive.mean():5.2f}%)")
+    print(f"          both escaped           : {int(both_escaped.sum()):>10,}  ({100*both_escaped.mean():5.2f}%)")
+    print(f"          only FOM escaped       : {int(only_fom_esc.sum()):>10,}  ({100*only_fom_esc.mean():5.2f}%)")
+    print(f"          only ROM escaped       : {int(only_rom_esc.sum()):>10,}  ({100*only_rom_esc.mean():5.2f}%)")
 
-    # Per-component
-    for j, comp in enumerate("xyz"):
-        print(f"          rms_{comp}              : {float(np.sqrt((disp[:, j]**2).mean())):.4e}")
+    def _disp_stats(mask, label):
+        if not mask.any():
+            print(f"[compare] displacement ({label}): no particles in subset")
+            return
+        dm = disp_mag[mask]
+        d  = disp[mask]
+        print(f"[compare] displacement ({label}, N={int(mask.sum()):,}):")
+        print(f"          mean               : {float(dm.mean()):.4e}")
+        print(f"          median             : {float(np.median(dm)):.4e}")
+        print(f"          rms                : {float(np.sqrt((dm**2).mean())):.4e}")
+        print(f"          p95                : {float(np.percentile(dm, 95)):.4e}")
+        print(f"          p99                : {float(np.percentile(dm, 99)):.4e}")
+        print(f"          max                : {float(dm.max()):.4e}")
+        print(f"          rms / FOM diagonal : {100 * float(np.sqrt((dm**2).mean())) / max(fom_span, 1e-30):.3f}%")
+        for j, comp in enumerate("xyz"):
+            print(f"          rms_{comp}              : {float(np.sqrt((d[:, j]**2).mean())):.4e}")
+
+    print()
+    _disp_stats(np.ones(n_total, dtype=bool), "all particles")
+    print()
+    _disp_stats(both_alive, "both-alive subset (fair comparison)")
 
     # Optional VTU dump
     if args.out_vtu:
         arrays = {
             "displacement_vec": disp,
             "displacement_mag": disp_mag,
-            "fom_element_id": fom_eid,
-            "rom_element_id": rom_eid,
+            "fom_element_id":   fom_eid,
+            "rom_element_id":   rom_eid,
+            "fom_escaped":      fom_escaped.astype(np.float32),
+            "rom_escaped":      rom_escaped.astype(np.float32),
         }
         _write_vtu(args.out_vtu, fom_pos, arrays)
         print(f"\n[compare] wrote {args.out_vtu}")
