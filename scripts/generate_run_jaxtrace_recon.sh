@@ -77,7 +77,15 @@ _generate_for_case() {
     #   MESH_PATTERN="…"                   -> keep as-is (already correct for this case)
     #   VEL_START=<digits>                  -> VEL_START=0
     #   VEL_END=<digits>                    -> VEL_END=0
-    #   OUTPUT_CASE_SUBFOLDER=…            -> OUTPUT_CASE_SUBFOLDER=post_pt_rom_<formula>
+    #   OUTPUT_CASE_SUBFOLDER=…            -> OUTPUT_CASE_SUBFOLDER=post_pt/rom_<formula>
+    #                                        (nests inside the case's existing
+    #                                        post_pt/ so FOM and ROM tracking
+    #                                        outputs sit as siblings there,
+    #                                        e.g. .../post_pt/run_grid-frac.../
+    #                                        vs .../post_pt/rom_centered/run_
+    #                                        grid-frac.../).  mkdir -p handles
+    #                                        the nested path with no changes
+    #                                        needed in the runner.
     #   AUTO_DETECT_CASE=1                 -> AUTO_DETECT_CASE=0    (safer for a script that references the recon INPUT explicitly)
     #   RUN_TAG="…"                        -> RUN_TAG=""
     # Also drop any HIT_STATS_LOG that was already 0 and force =1 so we
@@ -145,7 +153,7 @@ txt = sub_var(txt, 'AUTO_DETECT_CASE',         '0')
 # Do NOT touch MESH_PATTERN; the recon PVTU keeps the same case-prefix pattern.
 txt = sub_var(txt, 'VEL_START',                '0')
 txt = sub_var(txt, 'VEL_END',                  '0')
-txt = sub_var(txt, 'OUTPUT_CASE_SUBFOLDER',    f'post_pt_rom_{rom_formula}',   is_string=True)
+txt = sub_var(txt, 'OUTPUT_CASE_SUBFOLDER',    f'post_pt/rom_{rom_formula}',   is_string=True)
 txt = sub_var(txt, 'RUN_TAG',                  '',                              is_string=True)
 txt = sub_var(txt, 'HIT_STATS_LOG',            '1')
 # The union hook should NOT auto-run against ROM-recon outputs (different

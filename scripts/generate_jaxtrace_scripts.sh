@@ -75,9 +75,12 @@
 #   ./generate_jaxtrace_scripts.sh --jaxtrace-repo=/path        # explicit JAXTrace dir
 #   ./generate_jaxtrace_scripts.sh \
 #       --cohort-prefix=/scratch/shared/ROM/FOM                 # runtime-native cohort path
-#   ./generate_jaxtrace_scripts.sh --max-steps=2000             # equalise travel distance
+#   ./generate_jaxtrace_scripts.sh --max-steps=2000             # equalise travel distance (per-case scaling)
+#   ./generate_jaxtrace_scripts.sh --max-steps=2000 --uniform-steps  # SAME N_STEPS on every case
 #   ./generate_jaxtrace_scripts.sh --max-steps=2000 \
 #       --fixed-dt=2.5e-03                                      # force same DT for all cases
+#   ./generate_jaxtrace_scripts.sh --max-steps=2000 --uniform-steps \
+#       --fixed-dt=3.75e-3                                      # UNIFORM (DT, N_STEPS) on every case
 #   ./generate_jaxtrace_scripts.sh --enable-union               # run union after tracking
 #   ./generate_jaxtrace_scripts.sh --csv                        # write case_parameters.csv
 #   ./generate_jaxtrace_scripts.sh --csv=summary.csv            # write to a specific file
@@ -127,6 +130,14 @@ COHORT_PREFIX=""
 # D_max = v_max * dt_max * MAX_STEPS is the reference travel distance.
 # Empty = disabled (use the template's N_STEPS / DT verbatim).
 MAX_STEPS=""
+# When both --max-steps and --uniform-steps are set, skip the physical-
+# distance scaling and stamp the same MAX_STEPS on EVERY case.  Useful
+# when the run is meant to compare cases at identical (N_STEPS, DT)
+# rather than at identical travelled distance — for example when
+# validating a shared surrogate against every case's FOM at the same
+# tracker configuration.  Empty / 0 = disabled (scaling behaviour
+# unchanged).
+UNIFORM_STEPS=""
 # Force a single DT for every case, overriding each case's own
 # TIME_STEP_SIZE. When set, the per-case .dat is still read so we can
 # print a per-case WARNING when the user-supplied value disagrees with
@@ -156,6 +167,7 @@ for arg in "$@"; do
         --jaxtrace-repo=*)   JAXTRACE_REPO="${arg#*=}" ;;
         --cohort-prefix=*)   COHORT_PREFIX="${arg#*=}" ;;
         --max-steps=*)       MAX_STEPS="${arg#*=}" ;;
+        --uniform-steps)     UNIFORM_STEPS=1 ;;
         --fixed-dt=*)        FIXED_DT="${arg#*=}" ;;
         --enable-union)      ENABLE_UNION=1 ;;
         --csv)               CSV_OUTPUT="case_parameters.csv" ;;
@@ -217,9 +229,16 @@ echo "Cohort:    $COHORT_PREFIX"
 echo "Force:     $FORCE"
 echo "Skip:      ${SKIP_LIST:-<none>}"
 if [ -n "$MAX_STEPS" ]; then
-    echo "Max steps: $MAX_STEPS  (applied to the case with the largest INLET_VELOCITY)"
+    if [ "$UNIFORM_STEPS" = "1" ]; then
+        echo "Max steps: $MAX_STEPS  (UNIFORM: same N_STEPS stamped on every case)"
+    else
+        echo "Max steps: $MAX_STEPS  (applied to the case with the largest INLET_VELOCITY; slower cases scaled up)"
+    fi
 else
     echo "Max steps: <unchanged from template>"
+    if [ "$UNIFORM_STEPS" = "1" ]; then
+        echo "WARN:      --uniform-steps has no effect without --max-steps=N"
+    fi
 fi
 if [ -n "$FIXED_DT" ]; then
     echo "Fixed DT:  $FIXED_DT  (forced for every case; file dt only used for warnings)"
@@ -349,7 +368,7 @@ D_MAX=""
 V_MAX=""
 DT_AT_VMAX=""
 NAME_VMAX=""
-if [ -n "$MAX_STEPS" ]; then
+if [ -n "$MAX_STEPS" ] && [ "$UNIFORM_STEPS" != "1" ]; then
     shopt -s nullglob
     for _case_dir in $CASE_GLOB; do
         _name=$(basename "$_case_dir")
@@ -517,21 +536,30 @@ for case_dir in $CASE_GLOB; do
     # the value that will actually be stamped (either case's or fixed).
     n_steps=""
     if [ -n "$MAX_STEPS" ]; then
-        n_steps=$(awk -v d="$D_MAX" -v v="$inlet_v" -v dt="$dt" \
-            'BEGIN{
-                step = v*dt
-                if (step <= 0) { print ""; exit }
-                n = d / step
-                # ceil
-                ni = int(n)
-                if (n > ni) ni = ni + 1
-                if (ni < 1) ni = 1
-                print ni
-            }')
-        if [ -z "$n_steps" ]; then
-            echo "  $name: FAILED — v*dt is non-positive, cannot scale N_STEPS"
-            n_failed=$((n_failed + 1))
-            continue
+        if [ "$UNIFORM_STEPS" = "1" ]; then
+            # Uniform mode: stamp MAX_STEPS verbatim, ignore per-case
+            # velocity and D_max.  Physical simulation time is then
+            # N_STEPS*dt (which is uniform across cases when combined
+            # with --fixed-dt), so every case tracks for the same
+            # wall-clock and same "wall-clock per RK4 step".
+            n_steps="$MAX_STEPS"
+        else
+            n_steps=$(awk -v d="$D_MAX" -v v="$inlet_v" -v dt="$dt" \
+                'BEGIN{
+                    step = v*dt
+                    if (step <= 0) { print ""; exit }
+                    n = d / step
+                    # ceil
+                    ni = int(n)
+                    if (n > ni) ni = ni + 1
+                    if (ni < 1) ni = 1
+                    print ni
+                }')
+            if [ -z "$n_steps" ]; then
+                echo "  $name: FAILED — v*dt is non-positive, cannot scale N_STEPS"
+                n_failed=$((n_failed + 1))
+                continue
+            fi
         fi
     fi
 
