@@ -11,6 +11,18 @@ and the fix that brought them back to a usable range.
 Current status is captured per section as either **DONE**, **IN
 PROGRESS**, or **TODO**.
 
+The roadmap was critically reviewed against the POD-ROM /
+Lagrangian-coupling literature in
+[`rom_pt_roadmap_Review.md`](rom_pt_roadmap_Review.md).  Enhancements
+from that review are folded into §§ 2, 3, 4, 5 (spatially-resolved
+acceptance criteria, Lagrangian consistency-error framing, FSW-
+specific concern about POD low-pass filtering damping mixing
+structures) and gathered into a shared conventions section (§ 7).
+The literature pointers cited in the review are Xiong et al.
+*Ind. Eng. Chem. Res.* 2023 (POD-ROM Eulerian-vs-Lagrangian
+predictability asymmetry) and Vennell et al.'s OceanTracker work
+(regular-grid throughput evidence).
+
 ## 0. Where we are today
 
 **DONE**
@@ -80,25 +92,27 @@ FOM-vs-ROM comparison table that anchors every downstream decision.
 
 ## 1. Update the reconstruction findings doc
 
-**IN PROGRESS** — the errata block is in place at the top of
-[`rom_reconstruction_findings.md`](rom_reconstruction_findings.md); the
-buggy-loader writeup is preserved below it verbatim for provenance.  A
-follow-up rewrite of the "clean" writeup will replace the original
-section once we finish the FOM-vs-ROM PT comparison (Section 2 below),
-so the doc ends up as a single coherent story: (i) reconstruction
-convention, (ii) 20-case reconstruction residual under the fixed
-loader, (iii) tracking-side impact of that residual.
+**DONE** — [`rom_reconstruction_findings.md`](rom_reconstruction_findings.md)
+was rewritten as a single-source narrative in commit `c426cf6`.  The
+old errata-plus-preserved-original layout is gone; the loader-bug
+provenance now sits in §6 of the same doc, so a fresh reader gets a
+clean sequential story: convention → 20-case table (4.04 % ± 1.08 %) →
+time sweep (residual smallest at ts ≈ 16 – 21, drifts up by 1 – 2 pp
+by ts = 119) → spatial breakdown (2 – 8 % inside the pin; the
+40 – 80 % "outer-domain" numbers are a low-signal artefact of both
+FOM and residual being near zero there) → historical loader bug →
+recommendations.
 
-Anchors for the rewrite:
+Also materialised three permanent analysis scripts under
+`tests/rom/`:
 
-- The 20-case reconstruction table now averages 4.04 % rel_rms
-  (mean-only 30.9 %) — full table already in the errata.
-- The "spatial breakdown" section is invalid under the fixed loader
-  and should be recomputed with the corrected reconstruction on the
-  worst case (`case 000`, rel_rms 6.40 %).
-- The Section-7 discussion of colleague's spec vs our code stays: the
-  colleague description is correct and matches the FEMUSS
-  `SLEPcExternalFilter + SnapshotsMean` path exactly.
+- `rom_20case_sweep.py`
+- `rom_time_sweep.py`
+- `rom_spatial_residual.py`
+
+Each reads only `/scratch/shared/ROM/FOM/`, needs no JAX / GPU, and
+regenerates the exact numbers cited in the findings doc's
+Reproducibility section.
 
 ## 2. FOM-vs-ROM particle-tracking comparison
 
@@ -125,9 +139,41 @@ Deliverables (per case, aggregated across the cohort):
   `compare_rom_vs_fom_tracking.py --out-vtu`).
 
 Cohort-level cross-plot: reconstruction rel_rms (from Section 1) vs
-PT rel displacement (this section) across all 20 cases.  This is the
-answer to "does a 4 % reconstruction error translate to a 4 % PT
-error, or worse, or better?".
+PT rel displacement (this section) across all 20 cases.
+
+**Prior expectation** — worth stating explicitly rather than treating
+this as a purely empirical unknown.  The POD-ROM feasibility
+literature (Xiong et al., *IECR* 2023, and related work; see the
+review in `rom_pt_roadmap_Review.md`) documents an **asymmetry**
+between Eulerian and Lagrangian ROM predictability: even when the
+Eulerian velocity field reconstructs with low RMS error, the
+corresponding Lagrangian trajectory error can amplify substantially,
+because Lagrangian quantities are path integrals of the field and
+small local errors compound along the trajectory.  The amplification
+is strongest near **chaotic / separatrix regions** of the flow
+— which in FSW means the shear layer that separates pin-driven
+rotation from bulk drift.  So the expected outcome of this experiment
+is NOT "4 % reconstruction → 4 % PT", but a "consistency error"
+factor > 1 that concentrates spatially near the pin shear layer.
+
+Concretely this means the cohort-level cross-plot alone is not
+enough — we also need a **spatial breakdown of the PT displacement**
+mirroring the `r`-bin breakdown from
+`rom_reconstruction_findings.md` § 5:
+
+- near-pin bin (`r ≤ 0.010 m`) — where the reconstruction already
+  carries most of its residual and where FSW's mixing physics lives,
+- outer-domain bin (`r > 0.010 m`) — mostly a low-signal region.
+
+Report **per-bin PT rel displacement** at the reporting step, then
+form a per-bin cross-plot against the reconstruction's per-bin
+residual.  If the near-pin PT displacement is markedly worse than the
+near-pin reconstruction residual (say > 2 × amplification), we've
+empirically reproduced the consistency-error result and downstream
+plans (Sections 3 – 5) need spatially-resolved acceptance criteria.
+This is already implementable — the compare tool's `--out-vtu` gives
+per-particle displacement fields and the seeding is deterministic, so
+binning particles by initial radial position is a one-liner post-hoc.
 
 Command sequence on the workstation:
 
@@ -172,6 +218,32 @@ Two questions to answer:
 - **On ROM**: does HCT-3D compensate for reconstruction residual, or
   does it *smooth over* it and hide the ROM's actual error signature?
 
+**Reporting** — the "compensate vs mask" question is a *spatial*
+question, not an aggregate one.  A masking recovery can produce the
+same cohort-level RMS displacement as a genuinely-compensating one
+while placing the error in completely different regions
+(compensating: uniformly reduced; masking: near-pin still wrong,
+far-field over-corrected).  We already have the spatial tooling
+required — `compare_rom_vs_fom_tracking.py --out-vtu` writes a
+per-particle displacement VTU, and the `r`-binning from
+`rom_reconstruction_findings.md` § 5 applies unchanged.
+
+Concretely, for each of the four cells of the 2 × 2 table:
+
+1. Global RMS displacement (as originally proposed).
+2. Per-`r`-bin RMS displacement (near-pin + outer-domain) at the
+   reporting step.
+3. The spatial VTU, opened in ParaView, coloured by displacement
+   magnitude.  Visual coherence of the residual pattern is the
+   distinguishing signal — a compensating recovery gives a diffuse
+   residual, a masking one gives a residual concentrated at the pin
+   shear layer.
+
+The cost of adding (2) and (3) is zero — the tool already produces
+them. What changes is that acceptance in this ablation must include
+the near-pin per-bin RMS being consistent with the compensating
+hypothesis, not just the aggregate number.
+
 ## 4. "Why do ROM trajectories look neater?" investigation
 
 **TODO** — first-pass observation from the pre-fix runs: ROM
@@ -181,14 +253,27 @@ FOM ones.  Two candidate explanations:
 - **The ROM basis is a smooth low-pass**: the 3 POD modes capture
   large-scale flow structure but miss high-frequency features present
   in the FOM velocity.  Tracking on the smoothed field then produces
-  smoother trajectories — which is a legitimate feature of ROMs, not
-  a bug.  Verifiable by inspecting the residual field
+  smoother trajectories.  Verifiable by inspecting the residual field
   `v_ROM − v_FOM` (already exportable via the recon spatial VTU) and
   showing it is dominated by fine-scale structure.
 - **Coincidental**: the "neater" impression was tied to the buggy
   loader's under-shot reconstruction (dominant coefficients cancelled
   toward the mean).  Verifiable by re-running the visual comparison
   now that the loader is fixed.
+
+**Framing caveat** — the previous version of this section called the
+smoothing outcome "a legitimate feature of ROMs, not a bug".  That's
+neutral phrasing that does not survive the FSW-specific context.  A
+POD basis that damps high-wavenumber content damps *exactly* the
+small-scale shear layers and vortical structures that drive
+Lagrangian stretching / folding, i.e. the mechanism of stirring and
+material mixing.  For an application whose scientific target is
+mixing patterns (which FSW is), an L² -acceptable smoothed velocity
+that has lost small-scale structure is not a benign trade-off — it
+can invalidate the ROM for its intended downstream use.  This is a
+general observation about POD-Lagrangian coupling (Xiong et al.
+2023; the coherent-structures literature); see the review in
+`rom_pt_roadmap_Review.md`.
 
 Diagnostic to run once the FOM-vs-ROM PT sweep is done:
 
@@ -202,6 +287,30 @@ Diagnostic to run once the FOM-vs-ROM PT sweep is done:
 4. Cross-check with FOM+HCT-3D-off: if the raw-P1 FOM trajectories
    also look neater than mesh-P1 FOM, then HCT-3D itself is
    introducing some of the aesthetic difference.
+5. **Mixing-relevant Lagrangian diagnostic** — a spectral diagnostic
+   on the velocity field alone does not tell us how *tracking* is
+   affected.  Add one lightweight Lagrangian diagnostic that uses
+   the existing PT outputs and does not require a new solve:
+
+   - **Residence-time distribution** in an annular probe centred on
+     the pin.  Bin particles by initial radial position, count how
+     many are still inside the annulus at each timestep, plot the
+     resulting curve for FOM PT vs ROM PT.  Systematic ROM-side
+     over-retention (particles taking too long to leave the pin
+     region) is the classic under-mixing signature of a low-pass
+     velocity.
+   - Optionally, **pairwise separation** of nearby seeded particles
+     as a function of time.  Two particles seeded a few tets apart
+     under a chaotic advective flow separate exponentially; the
+     rate is a proxy for the top FTLE eigenvalue.  Comparing this
+     rate FOM vs ROM tells us directly whether the ROM has damped
+     the chaotic advection that drives FSW mixing.  Both can be
+     computed as post-hoc numpy scripts from the exported
+     particles.vtkhdf, no new solver code needed.
+
+Result of this section decides whether the ROM is fit for FSW's
+scientific target, independently of whether it hits an aggregate PT
+displacement threshold.
 
 ## 5. Uniform-grid projection experiment
 
@@ -248,10 +357,50 @@ Steps:
    `benchmark_l2_accuracy`-analogue timing loop.  Report queries/s and
    PIT-tests-equivalent per particle per RK4 substep.
 
-Acceptance criterion (proposed): the uniform-grid path is
-"good enough" if the RMS FOM-vs-uniform-grid PT displacement is
-within, say, 1.5× the FOM-vs-mesh-ROM displacement.  If it is, ship
-it as the fast path.  If it isn't, go to Section 6.
+**Prior expectation and diagnostic design** — Vennell et al.'s
+OceanTracker work (see `rom_pt_roadmap_Review.md`) already
+demonstrates 200 – 500× speedups from replacing unstructured-grid
+element search with regular-grid indexing, so the throughput half of
+this experiment is well-precedented and the interesting question is
+purely about accuracy.  The accuracy risk profile is asymmetric:
+grid-projection error is spatially **concentrated near the pin**
+where the tet mesh is finest relative to a 2 mm Cartesian cell, and
+that same region is where the reconstruction residual is already
+largest and where FSW's mixing physics lives.  ROM error, by
+contrast, is smooth and globally distributed.  A single scalar RMS
+criterion averaged over the whole domain can pass while
+catastrophically failing near the pin — the exact regime where the
+Section 6 fallback exists to help.
+
+Acceptance is therefore **spatially resolved**, using the same `r`
+bins as `rom_reconstruction_findings.md` § 5:
+
+- **Near-pin (`r ≤ 0.010 m`)** — RMS FOM-vs-uniform-grid PT
+  displacement must be within 1.5× the FOM-vs-mesh-ROM displacement
+  in the same bin.  Failure here is a red flag for FSW use even if
+  the aggregate number passes.
+- **Outer-domain (`r > 0.010 m`)** — the same 1.5× ratio applied to
+  the outer-bin RMS.  Failure here is less critical (the region
+  matters less physically) but should still be tracked.
+- **Aggregate** — the 1.5× ratio on the whole cohort.  This is the
+  originally proposed criterion; kept as a sanity number, not the
+  primary decision gate.
+
+The two per-bin criteria are the primary decision gates.  If both
+pass, ship the uniform-grid path.  If only the aggregate passes but
+the near-pin bin fails by more than a small margin, go to Section 6
+even though the "1.5× overall" reads clean — the aggregate is
+misleading in this regime.  If the near-pin bin fails badly (say >
+3×), we also learn how much refinement is needed there, which is
+useful input for sizing the block-wise fallback.
+
+Also mirror the mixing diagnostics from Section 4 on the uniform-grid
+path: residence-time distribution and pairwise separation, compared
+FOM-mesh vs ROM-mesh vs ROM-uniform-grid.  If the uniform-grid path
+matches ROM-mesh on displacement but breaks the residence-time
+comparison, we've quantified exactly the risk the coarse-grid
+projection was supposed to have — a signal that Section 6 is needed
+even more strongly than the displacement criterion suggests.
 
 ## 6. Block-wise refined grid (fallback)
 
@@ -285,7 +434,62 @@ for tetrahedral meshes; we can lift the same block layout and just
 replace the leaf-side "list of tets" with a leaf-side "8 corner
 values" for the uniform-grid case.
 
-## 7. Related to-fix items pulled out of the pending work
+## 7. Diagnostic conventions shared across sections
+
+Sections 2, 3, 4, and 5 all rely on the same three spatial /
+mixing-relevant diagnostics.  Gathering the conventions in one place
+so they stay consistent as the experiments run:
+
+**Spatial binning** — use the same radial bins as the reconstruction
+spatial breakdown
+(`rom_reconstruction_findings.md` § 5,
+`tests/rom/rom_spatial_residual.py`):
+
+- **near-pin bin**: nodes / particles with `r ≤ 0.010 m` (initial
+  position for particles).  This is where the tet mesh is finest,
+  the FOM velocity is largest, the reconstruction residual is
+  largest, and FSW's mixing physics happens.
+- **outer-domain bin**: `r > 0.010 m`.  Low-signal region for both
+  FOM and residual.
+
+For any acceptance criterion or comparison table involving
+displacement, **report per-bin RMS separately in addition to the
+aggregate**.  The aggregate alone can be misleading when the two
+bins have very different signal magnitudes (as they do in
+cylindrical).
+
+**Spatial VTU dump** — `compare_rom_vs_fom_tracking.py --out-vtu`
+produces a per-particle displacement field, coloured for ParaView.
+Any acceptance in this roadmap should be accompanied by a visual
+inspection of this VTU — the "compensating vs masking" question in
+§ 3 and the "coarse-grid failure mode" question in § 5 are both
+spatial questions that scalar summaries can't answer.
+
+**Mixing-relevant Lagrangian diagnostics** — computed post-hoc from
+the exported `particles.vtkhdf`, no new solver code required.  Two
+recipes to run at least on the Section 2 sweep and re-run in § 4
+(smoothing investigation) and § 5 (uniform-grid comparison):
+
+1. **Residence time in an annular probe** — pick an annulus centred
+   on the pin (e.g. `0.005 ≤ r ≤ 0.010`, full z range), bin
+   particles by initial radial position, count how many are still
+   inside at each timestep.  Compare the FOM and ROM curves.
+   Systematic ROM-side over-retention (slower escape from the
+   annulus) is the signature of an under-mixing velocity — the
+   direct scientific concern the smoothing hypothesis raises.
+2. **Pairwise separation** — pick a few hundred particle pairs
+   seeded within a few tets of each other at t = 0.  Track
+   `‖p_i(t) − p_j(t)‖` and plot the geometric-mean separation vs
+   time in log scale.  A straight line with positive slope is
+   exponential (chaotic) separation; the slope is a proxy for the
+   top FTLE eigenvalue.  Compare FOM vs ROM slopes.  A markedly
+   flatter ROM slope means the ROM has damped the mechanism that
+   drives mixing, even if the trajectory RMS looks acceptable.
+
+Both diagnostics are post-hoc numpy on the vtkhdf archives — plan on
+~50 lines of Python for the two of them, no solver changes.
+
+## 8. Related to-fix items pulled out of the pending work
 
 - The static-velocity assumption (single reconstructed field per case)
   is a design choice for the current experiment.  When we move to a
@@ -293,39 +497,57 @@ values" for the uniform-grid case.
   driver needs a `--n-times` flag and the tracking path needs a
   `VEL_START/VEL_END` range that iterates the ROM outputs.  Out of
   scope for this roadmap.
-- `docs/rom_reconstruction_findings.md` "Original writeup" section
-  should be rewritten (not just prefixed with an errata block) once
-  the Section 2 numbers are in.  Then delete the "original writeup"
-  from the same document so it becomes the single source of truth.
 - We currently do the FOM tracking with HCT-3D on for the ROM
   comparison.  A separate FOM-with-raw-P1 baseline is part of the
   ablation in Section 3; do not confuse the two.
+- The Section-2 cross-plot's *prior* (Lagrangian consistency error
+  compounds beyond Eulerian reconstruction error) is a citable
+  finding from Xiong et al.'s POD feasibility work.  If the Section 2
+  numbers reproduce this pattern (near-pin PT rel displacement
+  > 2× the reconstruction rel_rms in the same bin), we should say so
+  explicitly in the writeup and cite the prior; it makes the
+  experimental result stronger and more publishable than treating it
+  as a novel discovery.
+- The review that triggered this enhancement pass
+  (`rom_pt_roadmap_Review.md`) also flagged the "smoothing is
+  neutral" framing as tone-deaf for FSW; § 4 now carries an explicit
+  "not neutral for FSW" caveat.  Preserve that framing in any later
+  writeup — the low-pass-hides-mixing failure mode is exactly what
+  the discipline expects a shallow POD basis to do.
 
 ## Timeline
 
 The dependency chain is:
 
 ```
-       [0. DONE: fix loader, deploy tooling]
-                        │
-                        ▼
-       [2. FOM+ROM PT sweep, 20 cases]  ────────────► [1. rewrite findings doc]
-                        │                                       │
-              ┌─────────┴──────────┐                             │
-              ▼                    ▼                             ▼
-       [3. HCT-3D ablation]  [4. smoothing check]        (single-source doc)
-              │                    │
-              └─────────┬──────────┘
-                        ▼
-       [5. uniform-grid experiment]
-                        │
-                        ▼
-       [6. if not good enough → block-wise adaptive grid]
-                        │
-                        ▼
-                 (fast + accurate ROM PT)
+      [0. DONE: fix loader, deploy tooling]
+                       │
+                       ▼
+      [1. DONE: single-source findings doc (c426cf6)]
+                       │
+                       ▼
+      [2. FOM+ROM PT sweep, 20 cases]  (per-r-bin, not just aggregate)
+                       │
+             ┌─────────┴──────────┐
+             ▼                    ▼
+      [3. HCT-3D ablation]  [4. smoothing check + mixing diagnostics]
+      (spatial VTU)         (residence time, pairwise separation)
+             │                    │
+             └─────────┬──────────┘
+                       ▼
+      [5. uniform-grid experiment]  (per-r-bin acceptance)
+                       │
+                       ▼
+      [6. if not good enough → block-wise adaptive grid]
+                       │
+                       ▼
+              (fast + accurate ROM PT)
+
+      [7. shared spatial + mixing diagnostics used by 2, 3, 4, 5]
 ```
 
 Section 2 gates everything downstream.  Sections 3 and 4 can run in
 parallel with each other once 2 is done.  Section 5 depends on both.
 Section 6 is contingent on 5 not meeting the acceptance criterion.
+Section 7 is a shared conventions reference used by 2 – 5, not a
+sequential step.
