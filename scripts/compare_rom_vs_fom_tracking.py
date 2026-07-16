@@ -153,34 +153,74 @@ def _load_last_positions_vtkhdf(vtkhdf_path: Path):
     return _load_positions_vtkhdf(vtkhdf_path, n_steps - 1)
 
 
-def _write_vtu(out_path: Path, positions: np.ndarray, arrays: dict) -> None:
-    """Write a Points-only VTU with the given per-particle arrays."""
+def _write_particles(out_path: Path, positions: np.ndarray,
+                     arrays: dict) -> None:
+    """Write a Points-only particle dataset with the given per-particle
+    arrays.  Format is chosen from the output suffix:
+
+        *.vtp   -> vtkXMLPolyDataWriter    (PolyData root)
+        *.vtu   -> vtkXMLUnstructuredGridWriter (UnstructuredGrid root)
+
+    Previously this always used the PolyData writer regardless of
+    extension, which produced files with a PolyData root but a .vtu
+    name.  ParaView refuses to open .vtu files whose root element is
+    not UnstructuredGrid, so those outputs were unreadable (see
+    /scratch/shared/ROM/ROM_recon_centered/cylindrical_00{1,4}.gid/
+    case00{1,4}_rom_vs_fom.vtu for the historical artefacts).
+    """
     import vtk
-    from vtk.util.numpy_support import numpy_to_vtk
+    from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
 
     n = positions.shape[0]
-    pd = vtk.vtkPolyData()
-    p = vtk.vtkPoints()
-    p.SetData(numpy_to_vtk(positions.astype(np.float32), deep=True))
-    pd.SetPoints(p)
+    suffix = out_path.suffix.lower()
 
-    # Add vertex cells so ParaView renders them
-    vc = vtk.vtkCellArray()
-    for i in range(n):
-        vc.InsertNextCell(1)
-        vc.InsertCellPoint(i)
-    pd.SetVerts(vc)
+    # Vertex connectivity: one 1-node cell per particle.  Vectorised
+    # via numpy so it stays O(n) rather than 360k Python calls.
+    verts = np.empty(2 * n, dtype=np.int64)
+    verts[0::2] = 1                                # cell size = 1
+    verts[1::2] = np.arange(n, dtype=np.int64)     # the point id
+    id_arr = numpy_to_vtkIdTypeArray(verts, deep=True)
+    cells = vtk.vtkCellArray()
+    cells.SetCells(n, id_arr)
 
-    for name, arr in arrays.items():
-        va = numpy_to_vtk(np.ascontiguousarray(arr.astype(np.float32)), deep=True)
-        va.SetName(name)
-        pd.GetPointData().AddArray(va)
+    pts = vtk.vtkPoints()
+    pts.SetData(numpy_to_vtk(positions.astype(np.float32), deep=True))
 
-    w = vtk.vtkXMLPolyDataWriter()
-    w.SetFileName(str(out_path))
-    w.SetInputData(pd)
+    if suffix == ".vtu":
+        ug = vtk.vtkUnstructuredGrid()
+        ug.SetPoints(pts)
+        ug.SetCells(vtk.VTK_VERTEX, cells)
+        for name, arr in arrays.items():
+            va = numpy_to_vtk(
+                np.ascontiguousarray(arr.astype(np.float32)), deep=True,
+            )
+            va.SetName(name)
+            ug.GetPointData().AddArray(va)
+        w = vtk.vtkXMLUnstructuredGridWriter()
+        w.SetFileName(str(out_path))
+        w.SetInputData(ug)
+    else:
+        # Default to PolyData for any other suffix (including .vtp).
+        pd = vtk.vtkPolyData()
+        pd.SetPoints(pts)
+        pd.SetVerts(cells)
+        for name, arr in arrays.items():
+            va = numpy_to_vtk(
+                np.ascontiguousarray(arr.astype(np.float32)), deep=True,
+            )
+            va.SetName(name)
+            pd.GetPointData().AddArray(va)
+        w = vtk.vtkXMLPolyDataWriter()
+        w.SetFileName(str(out_path))
+        w.SetInputData(pd)
+
     w.SetDataModeToBinary()
+    w.SetCompressorTypeToZLib()
     w.Write()
+
+
+# Retained under the old name so callers inside this file keep working.
+_write_vtu = _write_particles
 
 
 def _first_step_with_both_alive(fom_path: Path, rom_path: Path,
@@ -238,10 +278,16 @@ def main() -> int:
              "that does, and re-run the comparison there.",
     )
     ap.add_argument("--out-vtu", type=Path, default=None,
-                    help="Optional: write a VTU containing the FOM final "
-                         "positions plus per-particle displacement vector "
-                         "and magnitude (open in ParaView to see where "
-                         "the ROM trajectory diverges most).")
+                    help="Optional: write a Points-only particle dataset "
+                         "containing the FOM final positions plus per-"
+                         "particle displacement vector and magnitude "
+                         "(open in ParaView to see where the ROM "
+                         "trajectory diverges most).  Format follows "
+                         "the extension: .vtp -> vtkPolyData (recommended), "
+                         ".vtu -> vtkUnstructuredGrid.  Both are ParaView-"
+                         "readable; earlier versions of this tool ignored "
+                         "the extension and always emitted PolyData, which "
+                         "made .vtu-named outputs unreadable.")
     args = ap.parse_args()
 
     if not args.fom_vtkhdf.exists():
