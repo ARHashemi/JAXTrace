@@ -159,10 +159,20 @@ def load_basis(
             [g[f"SnapshotsMean {j}"][:] for j in (1, 2, 3)], axis=1,
         )
 
-        # Modes. Find how many are present.
+        # Modes.  The Fortran writer (Mod_som_FswROM.f90:487) emits
+        #     write(nameV,"(A,I0,A,I0)")
+        #         'Basis_CompMode ', idofn, '  ', imode
+        # so the *first* integer in the dataset name is the COMPONENT
+        # (idofn = 1..3 = x/y/z) and the *second* is the MODE (imode =
+        # 1..K).  Iterate mode-outer, component-inner accordingly.
+        # A prior version had the axes swapped, which produced a
+        # Frankenstein "mode" that mixed the x-component of three
+        # different real modes into one row of the returned array; the
+        # resulting reconstruction had ~80% rel_rms error against the
+        # FOM snapshots.  See docs/rom_reconstruction_findings.md.
         mode_indices = []
         for k in range(1, 100):
-            if f"Basis_CompMode {k}  1" in g:
+            if f"Basis_CompMode 1  {k}" in g:
                 mode_indices.append(k)
             else:
                 break
@@ -173,9 +183,9 @@ def load_basis(
         modes = np.empty(
             (len(mode_indices), mean.shape[0], 3), dtype=np.float64,
         )
-        for i, k in enumerate(mode_indices):
-            for j in (1, 2, 3):
-                modes[i, :, j - 1] = g[f"Basis_CompMode {k}  {j}"][:]
+        for i, k in enumerate(mode_indices):        # k = mode index
+            for j in (1, 2, 3):                     # j = component
+                modes[i, :, j - 1] = g[f"Basis_CompMode {j}  {k}"][:]
 
     if verbose:
         print(f"[rom-loader] basis: {basis_path.name}")

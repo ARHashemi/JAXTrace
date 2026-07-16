@@ -1,5 +1,56 @@
 # FSW-ROM velocity reconstruction — findings
 
+> ## 2026-07-16 ERRATA — earlier numbers were wrong due to a loader bug
+>
+> Everything below the "Original writeup" heading was produced with a
+> broken `load_basis`.  The Fortran writer emits basis vectors as
+> `Basis_CompMode <component>  <mode>` (the *first* integer is x/y/z,
+> the *second* is the mode index), documented at
+> `Mod_som_FswROM.f90:486–487`.  Our loader iterated the two integers
+> in the wrong order, producing a Frankenstein "mode k" that mixed the
+> x-component of three different real modes into a single row.
+> Reconstructions with those Frankenstein modes had 3–80 % rel_rms
+> against the FOM, wildly dependent on case; the residual asymmetries
+> we blamed on mass-weighted SVD, basis truncation, and case-specific
+> transients were **all** downstream of this axis swap.
+>
+> The colleague's own loader
+> (`DTFSW/RBFforFSW/rbfrom/loader.py::_extract_basis`) uses the
+> correct regex.  Cross-checking the sources led straight to the fix.
+>
+> **After the fix**, on the same 20 cases at ts = 119:
+>
+> | Metric | Buggy loader | Fixed loader |
+> |:---|---:|---:|
+> | mean `centered` rel_rms | 38.18 % | **4.04 %** |
+> | std | 23.32 % | **1.08 %** |
+> | best case | 04 at 4.06 % | 03 at **2.62 %** |
+> | worst case | 01 at 80.13 % | 00 at **6.40 %** |
+> | mode norms `||φ_k||_2` | `[1.34, 1.34, 0.086]` (junk) | `[1.10, 1.10, 1.09]` (proper orthonormal) |
+>
+> Every claim in the "Original writeup" below about mass-weighted
+> SVD, non-Euclidean-orthonormal modes, or 63 % truncation floor is
+> **retracted**.  The 3-mode POD basis captures the FSW physics well;
+> the FEMUSS reconstruction convention is exactly what our `centered`
+> formula does; and our loader is now correct.
+>
+> Fix: `jaxtrace/rom/velocity_recon.py` axis order in `load_basis`.
+>
+> Recommendation on which formula to use:
+>
+> * `centered` (colleague convention, no sigma scaling) — averages
+>   4.04 % on cylindrical.  This is the correct choice.
+> * `c_over_sig` (previously the "best" empirically) — now the *worst*
+>   under the fixed loader because the axis-swap bug happened to
+>   damp its contribution.  Do not use.
+>
+> The rest of this document is preserved verbatim for provenance.
+> Read below only if you want the diagnostic trail.
+
+---
+
+## Original writeup (2026-07-14, buggy loader, superseded)
+
 **Scope**: cross-check the `--velocity-source rom` path in `run_tracking.py`
 against the FEMUSS FSW-ROM implementation, quantify the residual error
 across all 20 stored cases, identify where the residual is worst in
