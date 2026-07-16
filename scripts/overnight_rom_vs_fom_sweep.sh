@@ -2,10 +2,20 @@
 # =============================================================================
 # overnight_rom_vs_fom_sweep.sh
 #
-# One-shot orchestrator for Roadmap § 2 (FOM-vs-ROM PT sweep) + § 3
-# (HCT-3D ablation).  For each case in $CASES it runs four tracking
-# variants and, once all four are done, four pairwise comparisons and
-# two Lagrangian mixing diagnostics.
+# True one-shot orchestrator for Roadmap § 2 (FOM-vs-ROM PT sweep) +
+# § 3 (HCT-3D ablation).  Four phases:
+#
+#   0. Prep — reconstruct ROM PVTUs for any case in $CASES that doesn't
+#      have one, (re)generate every case's run_jaxtrace.sh from the
+#      shared template with uniform DT / N_STEPS, and (re)generate
+#      run_jaxtrace_recon.sh for every case that now has a PVTU.  All
+#      three prep tools already exist and are already idempotent; the
+#      overnight script just chains them.  Skip with SKIP_PREP=1.
+#   1. Tracker variants — four per case (FOM/ROM × HCT-on/off).
+#   2. Comparisons — four per case (rom-vs-fom at each HCT setting,
+#      and HCT-on-vs-off within each velocity source).
+#   3. Mixing diagnostics — residence-time + pair separation, one per
+#      HCT setting per case.
 #
 # Variants per case (output paths follow the runner's INPUT tree — FOM
 # variants land under FOM_ROOT/<case>.gid/..., ROM variants under
@@ -47,7 +57,8 @@
 #   bash /flash/shared/jax/JAXTrace/scripts/overnight_rom_vs_fom_sweep.sh
 #
 #   CASES="4 1 3" bash overnight_rom_vs_fom_sweep.sh    # subset
-#   FORCE_RERUN=1 ...                                    # ignore sentinels
+#   SKIP_PREP=1 ...                                      # trust the on-disk state, skip reconstruct+generate
+#   FORCE_RERUN=1 ...                                    # ignore tracker sentinels
 #   VARIANTS="fom_hct_on rom_hct_on" ...                 # skip the ablation
 #   SKIP_TRACKING=1 ...                                  # only run compare + mixing
 #   SKIP_COMPARE=1 ...                                   # only tracking
@@ -67,6 +78,8 @@
 #   SKIP_TRACKING      (default: 0)           1 = only run compare + mixing
 #   SKIP_COMPARE       (default: 0)           1 = only tracking
 #   SKIP_MIXING        (default: 0)           1 = skip the Lagrangian mixing step
+#   SKIP_PREP          (default: 0)           1 = skip the prep phase (reconstruct
+#                                             PVTUs + regenerate case runners)
 #   DRY_RUN            (default: 0)           1 = print the plan, do nothing
 #   COMPARE_STEP       (default: 500)         --step passed to compare tool
 #   MIXING_STRIDE      (default: 20)          --stride passed to mixing tool
@@ -86,6 +99,7 @@ FORCE_RERUN="${FORCE_RERUN:-0}"
 SKIP_TRACKING="${SKIP_TRACKING:-0}"
 SKIP_COMPARE="${SKIP_COMPARE:-0}"
 SKIP_MIXING="${SKIP_MIXING:-0}"
+SKIP_PREP="${SKIP_PREP:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 COMPARE_STEP="${COMPARE_STEP:-500}"
 MIXING_STRIDE="${MIXING_STRIDE:-20}"
@@ -107,6 +121,7 @@ log "  FOM_ROOT      : $FOM_ROOT"
 log "  SWEEP_ROOT    : $SWEEP_ROOT"
 log "  JAXTRACE      : $JAXTRACE"
 log "  FORCE_RERUN   : $FORCE_RERUN"
+log "  SKIP_PREP     : $SKIP_PREP"
 log "  SKIP_TRACKING : $SKIP_TRACKING"
 log "  SKIP_COMPARE  : $SKIP_COMPARE"
 log "  SKIP_MIXING   : $SKIP_MIXING"
@@ -114,26 +129,152 @@ log "  DRY_RUN       : $DRY_RUN"
 log "  COMPARE_STEP  : $COMPARE_STEP"
 log "  MIXING_STRIDE : $MIXING_STRIDE"
 
-# ── Static per-case checks ──────────────────────────────────────────────────
-for CASE in $CASES; do
-    CASE_ID=$(printf "%03d" "$CASE")
-    CASE_DIR="$FOM_ROOT/cylindrical_${CASE_ID}.gid"
-    FOM_RUNNER="$CASE_DIR/run_jaxtrace.sh"
-    ROM_RUNNER="$CASE_DIR/run_jaxtrace_recon.sh"
+# ── Prep phase ──────────────────────────────────────────────────────────────
+# Produce every artefact the tracker phase will need, so the overnight
+# script is a true one-shot even on a fresh workstation clone:
+#
+#   1. reconstruct_rom_velocities.sh   builds ROM PVTUs for CASES that
+#                                       don't already have one on disk.
+#   2. generate_jaxtrace_scripts.sh    (re)writes each case's own
+#                                       run_jaxtrace.sh from the shared
+#                                       template with uniform DT / N_STEPS.
+#   3. generate_jaxtrace_recon_scripts.sh  writes run_jaxtrace_recon.sh
+#                                       for every case that now has a
+#                                       ROM PVTU.
+#
+# Steps (1) and (3) are cheap (~30s each per case + a few seconds); (2)
+# is instantaneous (pure sed).  Existing per-case runners are
+# overwritten with --force so the template + generator updates always
+# propagate.  Existing ROM PVTUs are skipped (reconstruct_rom_velocities
+# .sh is idempotent per case unless the source PVTU changes).
+if [ "$SKIP_PREP" != "1" ]; then
+    log
+    log "== [0/3] Prep (reconstruct PVTUs + regenerate case runners) =="
 
-    if [[ "$VARIANTS" == *fom* ]] && [ ! -f "$FOM_RUNNER" ]; then
-        log "ERROR: case $CASE_ID needs $FOM_RUNNER (run generate_jaxtrace_scripts.sh first)"
-        exit 3
+    _RECON_SCRIPT="$FOM_ROOT/reconstruct_rom_velocities.sh"
+    _GEN_FOM_SCRIPT="$JAXTRACE/scripts/generate_jaxtrace_scripts.sh"
+    _GEN_RECON_SCRIPT="$JAXTRACE/scripts/generate_jaxtrace_recon_scripts.sh"
+
+    for _P in "$_RECON_SCRIPT" "$_GEN_FOM_SCRIPT" "$_GEN_RECON_SCRIPT"; do
+        if [ ! -f "$_P" ]; then
+            log "ERROR: prep dependency missing: $_P"
+            log "       set SKIP_PREP=1 to bypass the prep phase and continue"
+            exit 3
+        fi
+    done
+
+    # 1. Reconstruct ROM PVTUs for any case that doesn't have one yet.
+    #    We do this case-by-case so cases with existing PVTUs are skipped
+    #    cleanly (reconstruct_rom_velocities.sh overwrites anything you
+    #    hand it, so we do the existence check here rather than there).
+    if [[ "$VARIANTS" == *rom* ]]; then
+        _RECON_LOG="$SWEEP_ROOT/prep_reconstruct.log"
+        _CASES_TO_RECON=""
+        for CASE in $CASES; do
+            CASE_ID=$(printf "%03d" "$CASE")
+            _PVTU="$ROM_RECON_ROOT/cylindrical_${CASE_ID}.gid/post/cylindrical_0.pvtu"
+            if [ -f "$_PVTU" ]; then
+                log "  case $CASE_ID / recon PVTU: exists ($_PVTU)"
+            else
+                _CASES_TO_RECON="$_CASES_TO_RECON $CASE"
+            fi
+        done
+        _CASES_TO_RECON="${_CASES_TO_RECON# }"
+        if [ -n "$_CASES_TO_RECON" ]; then
+            if [ "$DRY_RUN" = "1" ]; then
+                log "  DRY-RUN: would reconstruct PVTUs for cases: $_CASES_TO_RECON"
+            else
+                log "  Reconstructing PVTUs for cases: $_CASES_TO_RECON  (log $_RECON_LOG)"
+                CASES="$_CASES_TO_RECON" \
+                    FOM_ROOT="$FOM_ROOT" \
+                    OUT_ROOT="$ROM_RECON_ROOT" \
+                    ROM_FORMULA="$ROM_FORMULA" \
+                    JAXTRACE="$JAXTRACE" \
+                    bash "$_RECON_SCRIPT" 2>&1 | tee "$_RECON_LOG" >> "$GLOBAL_LOG"
+                _RECON_RC=${PIPESTATUS[0]}
+                if [ "$_RECON_RC" != "0" ]; then
+                    log "ERROR: reconstruction failed (exit $_RECON_RC) — see $_RECON_LOG"
+                    exit 4
+                fi
+            fi
+        fi
+    fi
+
+    # 2. Regenerate FOM per-case runners from the shared template.
+    #    --force overwrites; --uniform-steps + --fixed-dt matches what
+    #    the sweep expects (N_STEPS=2000, DT=3.75e-3).
+    if [[ "$VARIANTS" == *fom* ]]; then
+        _GEN_FOM_LOG="$SWEEP_ROOT/prep_generate_fom.log"
+        if [ "$DRY_RUN" = "1" ]; then
+            log "  DRY-RUN: would (cd $FOM_ROOT && bash $_GEN_FOM_SCRIPT --force --fixed-dt=3.75e-3 --max-steps=2000 --uniform-steps ...)"
+        else
+            log "  Regenerating FOM per-case runners  (log $_GEN_FOM_LOG)"
+            ( cd "$FOM_ROOT" && bash "$_GEN_FOM_SCRIPT" \
+                --force --fixed-dt=3.75e-3 --max-steps=2000 --uniform-steps \
+                --cohort-prefix="$FOM_ROOT" ) 2>&1 \
+                | tee "$_GEN_FOM_LOG" >> "$GLOBAL_LOG"
+            _GEN_FOM_RC=${PIPESTATUS[0]}
+            if [ "$_GEN_FOM_RC" != "0" ]; then
+                log "ERROR: FOM runner regeneration failed (exit $_GEN_FOM_RC) — see $_GEN_FOM_LOG"
+                exit 4
+            fi
+        fi
+    fi
+
+    # 3. Regenerate ROM recon runners for every case that has a PVTU.
+    #    generate_jaxtrace_recon_scripts.sh already skips cases without
+    #    one, so 'run over everything, let it filter' is the cleanest
+    #    approach.
+    if [[ "$VARIANTS" == *rom* ]]; then
+        _GEN_ROM_LOG="$SWEEP_ROOT/prep_generate_recon.log"
+        if [ "$DRY_RUN" = "1" ]; then
+            log "  DRY-RUN: would (cd $FOM_ROOT && bash $_GEN_RECON_SCRIPT --force --formula=$ROM_FORMULA --recon-root=$ROM_RECON_ROOT --jaxtrace-repo=$JAXTRACE)"
+        else
+            log "  Regenerating ROM recon runners  (log $_GEN_ROM_LOG)"
+            ( cd "$FOM_ROOT" && bash "$_GEN_RECON_SCRIPT" \
+                --force --formula="$ROM_FORMULA" \
+                --recon-root="$ROM_RECON_ROOT" \
+                --jaxtrace-repo="$JAXTRACE" ) 2>&1 \
+                | tee "$_GEN_ROM_LOG" >> "$GLOBAL_LOG"
+            _GEN_ROM_RC=${PIPESTATUS[0]}
+            if [ "$_GEN_ROM_RC" != "0" ]; then
+                log "ERROR: ROM recon runner regeneration failed (exit $_GEN_ROM_RC) — see $_GEN_ROM_LOG"
+                exit 4
+            fi
+        fi
+    fi
+else
+    log
+    log "== [0/3] SKIP prep (SKIP_PREP=1) =="
+fi
+
+# ── Static per-case checks (safety net after prep) ──────────────────────────
+# After the prep phase every artefact should be in place; if one is
+# still missing, something went wrong upstream and we fail hard rather
+# than silently produce partial results.
+_missing_reasons() {
+    local CASE_ID="$1"
+    local CASE_DIR="$FOM_ROOT/cylindrical_${CASE_ID}.gid"
+    local out=""
+    if [[ "$VARIANTS" == *fom* ]] && [ ! -f "$CASE_DIR/run_jaxtrace.sh" ]; then
+        out="$out no run_jaxtrace.sh;"
     fi
     if [[ "$VARIANTS" == *rom* ]]; then
-        if [ ! -f "$ROM_RUNNER" ]; then
-            log "ERROR: case $CASE_ID needs $ROM_RUNNER (run generate_jaxtrace_recon_scripts.sh first)"
-            exit 3
-        fi
-        if [ ! -f "$ROM_RECON_ROOT/cylindrical_${CASE_ID}.gid/post/cylindrical_0.pvtu" ]; then
-            log "ERROR: case $CASE_ID needs the ROM PVTU at $ROM_RECON_ROOT/cylindrical_${CASE_ID}.gid/post/cylindrical_0.pvtu (run reconstruct_rom_velocities.sh first)"
-            exit 3
-        fi
+        [ ! -f "$CASE_DIR/run_jaxtrace_recon.sh" ] && \
+            out="$out no run_jaxtrace_recon.sh;"
+        [ ! -f "$ROM_RECON_ROOT/cylindrical_${CASE_ID}.gid/post/cylindrical_0.pvtu" ] && \
+            out="$out no ROM PVTU;"
+    fi
+    echo "$out"
+}
+
+for CASE in $CASES; do
+    CASE_ID=$(printf "%03d" "$CASE")
+    REASONS="$(_missing_reasons "$CASE_ID")"
+    if [ -n "$REASONS" ]; then
+        log "ERROR: case $CASE_ID still missing after prep: $REASONS"
+        log "       inspect prep_reconstruct.log / prep_generate_fom.log / prep_generate_recon.log"
+        exit 3
     fi
 done
 
@@ -250,19 +391,26 @@ run_variant() {
 
     log "  case $CASE_ID / $VARIANT: RUNNING (log $LOG)"
     local T0=$SECONDS
-    if ( cd "$SRC_DIR" && bash "$(basename "$PATCHED")" > "$LOG" 2>&1 ); then
-        local DT=$(( SECONDS - T0 ))
-        if [ -f "$PARTICLES" ]; then
-            touch "$DONE_SENTINEL"
-            log "  case $CASE_ID / $VARIANT: OK (${DT}s, particles at $PARTICLES)"
-        else
-            log "  case $CASE_ID / $VARIANT: FAILED (${DT}s, particles.vtkhdf missing at $PARTICLES) — see $LOG"
-            return 1
-        fi
+    # tee to the per-variant log AND the global log so both `tail -f`
+    # invocations see live progress.  run_jaxtrace.sh already calls
+    # `python -u run_tracking.py` internally, so the pipeline is fully
+    # unbuffered end-to-end.
+    ( cd "$SRC_DIR" && bash "$(basename "$PATCHED")" 2>&1 ) \
+        | tee "$LOG" >> "$GLOBAL_LOG"
+    local RUN_RC=${PIPESTATUS[0]}
+    local DT=$(( SECONDS - T0 ))
+    if [ "$RUN_RC" != "0" ]; then
+        log "  case $CASE_ID / $VARIANT: FAILED (exit $RUN_RC, ${DT}s) — see $LOG"
+        rm -f "$PATCHED"
+        return "$RUN_RC"
+    fi
+    if [ -f "$PARTICLES" ]; then
+        touch "$DONE_SENTINEL"
+        log "  case $CASE_ID / $VARIANT: OK (${DT}s, particles at $PARTICLES)"
     else
-        local RC=$?
-        log "  case $CASE_ID / $VARIANT: FAILED (exit $RC) — see $LOG"
-        return $RC
+        log "  case $CASE_ID / $VARIANT: FAILED (${DT}s, particles.vtkhdf missing at $PARTICLES) — see $LOG"
+        rm -f "$PATCHED"
+        return 1
     fi
     rm -f "$PATCHED"
 }
@@ -322,18 +470,25 @@ compare_pair() {
     fi
 
     log "  case $CASE_ID / $LABEL: compare (log $LOG, vtu $VTU)"
-    python3 "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
+    # -u for unbuffered stdout so `tail -f $LOG` reflects live progress;
+    # `2>&1 | tee $LOG` mirrors output to both the sweep global stream
+    # AND the per-comparison log file.
+    python3 -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
         --fom-vtkhdf "$A_PART" --rom-vtkhdf "$B_PART" \
         --step "$COMPARE_STEP" --out-vtu "$VTU" \
-        > "$LOG" 2>&1 || log "    WARN: compare exited nonzero — see $LOG"
+        2>&1 | tee "$LOG" >> "$GLOBAL_LOG"
+    local COMPARE_RC=${PIPESTATUS[0]}
+    [ "$COMPARE_RC" != "0" ] && log "    WARN: compare exited $COMPARE_RC — see $LOG"
 
     # Also do a last-step comparison with --suggest-alive-step so the
     # ballistic-tail regime is covered too.
     local LAST_LOG="$OUT_DIR/compare_last.log"
-    python3 "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
+    python3 -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
         --fom-vtkhdf "$A_PART" --rom-vtkhdf "$B_PART" \
         --step last --suggest-alive-step \
-        > "$LAST_LOG" 2>&1 || log "    WARN: last-step compare exited nonzero — see $LAST_LOG"
+        2>&1 | tee "$LAST_LOG" >> "$GLOBAL_LOG"
+    local LAST_RC=${PIPESTATUS[0]}
+    [ "$LAST_RC" != "0" ] && log "    WARN: last-step compare exited $LAST_RC — see $LAST_LOG"
 }
 
 if [ "$SKIP_COMPARE" != "1" ]; then
@@ -380,10 +535,12 @@ mixing_pair() {
     fi
 
     log "  case $CASE_ID / $LABEL: mixing (log $LOG)"
-    python3 "$JAXTRACE/scripts/lagrangian_mixing_diagnostics.py" \
+    python3 -u "$JAXTRACE/scripts/lagrangian_mixing_diagnostics.py" \
         --fom-vtkhdf "$FOM_PART" --rom-vtkhdf "$ROM_PART" \
         --out-dir "$OUT_DIR" --stride "$MIXING_STRIDE" --plot \
-        > "$LOG" 2>&1 || log "    WARN: mixing exited nonzero — see $LOG"
+        2>&1 | tee "$LOG" >> "$GLOBAL_LOG"
+    local MIXING_RC=${PIPESTATUS[0]}
+    [ "$MIXING_RC" != "0" ] && log "    WARN: mixing exited $MIXING_RC — see $LOG"
 }
 
 if [ "$SKIP_MIXING" != "1" ]; then
