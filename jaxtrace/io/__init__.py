@@ -821,5 +821,26 @@ if MEMORY_OPTIMIZED_AVAILABLE:
         'MEMORY_OPTIMIZED_AVAILABLE'
     ])
 
+# OpenFOAM polyMesh bridge (for SCONE / AMLG-Patch benchmark)
+try:
+    from .openfoam_polymesh import (
+        read_polymesh,
+        polymesh_to_vtk_unstructured,
+        read_polymesh_to_vtu,
+        write_vtu_to_polymesh,
+        round_trip_check,
+    )
+    OPENFOAM_POLYMESH_AVAILABLE = True
+    __all__.extend([
+        'read_polymesh',
+        'polymesh_to_vtk_unstructured',
+        'read_polymesh_to_vtu',
+        'write_vtu_to_polymesh',
+        'round_trip_check',
+        'OPENFOAM_POLYMESH_AVAILABLE',
+    ])
+except ImportError:
+    OPENFOAM_POLYMESH_AVAILABLE = False
+
 # Remove None entries from __all__
 __all__ = [item for item in __all__ if item is not None]
