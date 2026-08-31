@@ -1,0 +1,18 @@
+% Table T2: Location correctness (methods x meshes)
+\begin{table}[t]
+\centering\small
+\caption{Location correctness on the R2-6 mesh cohort. MALMO reports \texttt{correct\%} (marked with $^*$), the fraction of queries returning the exact ground-truth host tet. RTXAdvect reports \texttt{found\%}, the fraction of particles that landed in a valid host tet (its BVH-based inside-test does not identify which one). SCONE reports material-tally cycle statistics rather than per-particle hits and thus provides no \texttt{correct\%} or \texttt{found\%}; interpret the status glyphs (\textit{ok}/\textit{fail}/\textit{segv}) instead. All rates use in-mesh barycentric sampling with a common random seed.}
+\label{tab:r26-found}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+method & \textbf{Tet63} & \textbf{Tet137} & \textbf{Tet298} & \textbf{Bunny} & \textbf{Poly264} & \textbf{Tet1820} & \textbf{Tet2856} & \textbf{Poly940} & \textbf{Poly1560} & \textbf{FSW} \\
+ & (63) & (137) & (298) & (379) & (1.4k) & (1.8k) & (2.9k) & (5.2k) & (8.7k) & (3.05M) \\
+\midrule
+MALMO \texttt{aabb} & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* \\
+MALMO \texttt{centroid} & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 99.99\,\%* & 100.00\,\%* & 99.64\,\%* & 100.00\,\%* & 100.00\,\%* \\
+MALMO \texttt{vertex\_multi} & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* & 96.12\,\%* & 100.00\,\%* & 99.90\,\%* & 99.97\,\%* & 100.00\,\%* & 100.00\,\%* & 100.00\,\%* \\
+\midrule
+RTXAdvect \texttt{RTX\_BVH} & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 100.00\,\% & 99.05\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}

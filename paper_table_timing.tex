@@ -1,0 +1,27 @@
+% Table T1: Query wall time (methods x meshes)
+\begin{table}[t]
+\centering\small
+\caption{Query wall time per batch on the R2-6 mesh cohort. Best of three trials for MALMO; \texttt{wall\_seconds\_outer} for SCONE; \texttt{Simulation RunTime} for RTXAdvect. Build times (octree, patch grid, BVH) amortise across queries and are reported in the accompanying build-time table. \textit{segv} = crashed at build (SCONE only); \textit{fail} = non-zero exit; \textit{timed out} = 1\,h per-mesh cap.}
+\label{tab:r26-timing}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+method & \textbf{Tet63} & \textbf{Tet137} & \textbf{Tet298} & \textbf{Bunny} & \textbf{Poly264} & \textbf{Tet1820} & \textbf{Tet2856} & \textbf{Poly940} & \textbf{Poly1560} & \textbf{FSW} \\
+ & (63) & (137) & (298) & (379) & (1.4k) & (1.8k) & (2.9k) & (5.2k) & (8.7k) & (3.05M) \\
+\midrule
+MALMO \texttt{aabb} & 148.1\,ms & 430.7\,ms & 778.9\,ms & 246.3\,ms & 280.5\,ms & 1.61\,s & 1.35\,s & 1.45\,s & 797.0\,ms & 1.60\,s \\
+MALMO \texttt{centroid} & 106.2\,ms & 983.5\,ms & 934.0\,ms & 246.7\,ms & 358.9\,ms & 1.46\,s & 1.49\,s & 1.70\,s & 1.63\,s & 2.43\,s \\
+MALMO \texttt{vertex\_multi} & 86.8\,ms & 400.4\,ms & 892.1\,ms & 4.91\,s & 191.5\,ms & 1.46\,s & 1.41\,s & 1.36\,s & 1.27\,s & 6.37\,s \\
+\midrule
+SCONE \texttt{none} (OMP=1) & 2.15\,s & 4.42\,s & 10.19\,s & 5.02\,s & 7.68\,s & 1.5\,min & 2.5\,min & 25.22\,s & 46.79\,s & \textit{fail} \\
+SCONE \texttt{none} (OMP=8) & 343.8\,ms & 656.4\,ms & 1.53\,s & 740.9\,ms & 1.10\,s & 13.25\,s & 23.68\,s & 3.75\,s & 6.90\,s & \textit{fail} \\
+SCONE \texttt{octree} (OMP=1) & 509.6\,ms & 595.0\,ms & 759.3\,ms & 436.4\,ms & \textit{fail} & 2.32\,s & 3.71\,s & 1.08\,s & 1.72\,s & \textit{fail} \\
+SCONE \texttt{octree} (OMP=8) & 138.3\,ms & 178.0\,ms & 240.7\,ms & 247.6\,ms & 232.9\,ms & 1.21\,s & 2.17\,s & 445.8\,ms & 888.3\,ms & \textit{fail} \\
+SCONE \texttt{patchSingle} (OMP=1) & \textit{fail} & 1.2\,min & 29.19\,s & \textit{fail} & 10.68\,s & 4.9\,min & \textit{fail} & 22.57\,s & 42.42\,s & \textit{fail} \\
+SCONE \texttt{patchSingle} (OMP=8) & \textit{fail} & 1.2\,min & 28.62\,s & \textit{fail} & 10.26\,s & 4.9\,min & \textit{fail} & 21.93\,s & 41.63\,s & \textit{fail} \\
+SCONE \texttt{patchMulti} (OMP=1) & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} \\
+SCONE \texttt{patchMulti} (OMP=8) & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} \\
+\midrule
+RTXAdvect \texttt{RTX\_BVH} & 696.8\,ms & 692.0\,ms & 706.5\,ms & 896.0\,ms & 697.3\,ms & 696.6\,ms & 702.8\,ms & 703.4\,ms & 706.0\,ms & 1.07\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
