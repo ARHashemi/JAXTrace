@@ -274,8 +274,14 @@ def write_md(rows, path: Path):
            "- **SCONE** — Kim et al. 2026 (Cambridge Nuclear) reference implementation of "
            "AMLG-Patch and its predecessors, four acceleration methods "
            "(`none`/`octree`/`patchSingle`/`patchMulti`), CPU + OpenMP (1 and 8 threads). "
-           "Runs on the pad-fix sweep with `BOX_PAD=5`. SCONE has no query-list driver so "
-           "`correct%` is not applicable (it ray-traces with internal validation).",
+           "Runs on the pad-fix sweep with `BOX_PAD=5`. SCONE's `rayVolPhysicsPackage` is a "
+           "material-tally Monte-Carlo package, not a point-location tool: it reports "
+           "cycle-level statistics (ray speed, elapsed time, per-material relative volume) "
+           "but never per-particle host-cell hits, so both `correct%` and `found%` show `—`. "
+           "Interpret the `status` column instead: `OK` means every ray contributed to the "
+           "tally (implicitly all found valid material); `FAIL(ec=1)` means SCONE's own "
+           "\"Ray has lost correct material\" error terminated tracking mid-cycle; `SEGV` "
+           "means the acceleration structure could not be built.",
            "- **RTXAdvect** — Wang et al. 2022 (CPC), ported to CUDA 13.3 + OptiX 9.1 on "
            "RTX 5090 / Blackwell (compute capability 12.0). BVH-based host-tet locator using "
            "RT-cores. Runs 1M particles × 100 steps. `found%` = 1 - (out-of-domain / N_seeded). "
