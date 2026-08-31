@@ -1,0 +1,67 @@
+// SCONE input for point-location smoke test.
+// Runs Kim/Ravoisin/Parks (2026) acceleration structure inside SCONE's
+// rayVolPhysicsPackage. This physics package ray-traces the geometry to
+// estimate cell volumes, which exercises the point-location acceleration
+// structure without requiring ACE cross-section data.
+//
+// Placeholders (substituted by scripts/scone_bench/run_pointloc.sh):
+//   __POLYMESH_PATH__   absolute path to the OpenFOAM polyMesh directory
+//   __ACCEL_METHOD__    one of: none, octree, patchSingle, patchMulti
+//   __BOX_HALFWIDTH__   "hx hy hz" halfwidths of the enclosing box (each >= mesh bbox)
+//   __BOX_ORIGIN__      "ox oy oz" origin of the enclosing box (mesh bbox centre)
+//   __POP__             ray population per cycle (workload knob)
+//   __CYCLES__          number of ray cycles
+//   __FILLS__           N whitespace-separated material names, one per cellZone in
+//                       the polyMesh (same order as in the mesh's cellZones file)
+
+type rayVolPhysicsPackage;
+
+pop       __POP__;
+cycles    __CYCLES__;
+mfp       1.0;
+abs_prob  0.005;
+robust    1;
+cache     0;
+
+geometry {
+  type geometryStd;
+  boundary (2 2 2 2 2 2);   // vacuum on all six sides
+  graph {type shrunk;}
+
+  surfaces {
+    boxContainer { id 1; type box; origin (__BOX_ORIGIN__); halfwidth (__BOX_HALFWIDTH__); }
+  }
+
+  cells {
+    hostCell { id 1; type simpleCell; surfaces (-1); filltype mat; material water; }
+  }
+
+  meshes {
+    testMesh {
+      id 1;
+      type OpenFOAMMesh;
+      path __POLYMESH_PATH__;
+      accelerationMethod __ACCEL_METHOD__;
+    }
+  }
+
+  universes {
+    root { id 1; type rootUniverse; border 1; fill u<2>; }
+    // The meshUniverse must sit at origin (0 0 0) so its bounding-box check
+    // compares the OpenFOAM mesh's *own* bbox (in file coords) against the
+    // world-frame boxContainer. The boxContainer's origin is the mesh bbox
+    // centre, so the box strictly contains the mesh.
+    mesh { id 2; type meshUniverse; origin (0.0 0.0 0.0); rotation (0.0 0.0 0.0); cell 1; mesh 1; fills (__FILLS__); }
+  }
+}
+
+nuclearData {
+  handles { }
+  materials {
+    // Single point-location material — SCONE only checks that the name exists
+    // in this block; empty composition is fine for the point-location smoke
+    // test (no neutron interactions ever fire).
+    mat   { temp 1; composition { } }
+    water { temp 1; composition { } }
+  }
+}
