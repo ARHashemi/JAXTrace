@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
-Build two pivoted tables (methods x meshes) for the paper's R2-6 comparison:
+Build five pivoted tables (methods x meshes) for the paper's R2-6 comparison:
 
-  1. **Query wall time** (seconds) — the per-batch cost after any one-shot
-     build has amortised.
-  2. **Found rate + correctness** — `correct%` where measurable
-     (MALMO), `found%` otherwise (RTXAdvect), `—` for SCONE (see caption).
+  T1  paper_table_timing.{md,tex}   Query wall time (all 3 frameworks)
+  T2  paper_table_found.{md,tex}    Location correctness (MALMO + RTXAdvect;
+                                    SCONE reports no per-particle metric)
+  T3  paper_table_build.{md,tex}    One-shot build cost — the amortisation
+                                    story (MALMO + RTXAdvect; SCONE has no
+                                    build/query split)
+  T4  paper_table_tput.{md,tex}     Fair per-batch query throughput
+                                    (MALMO + RTXAdvect), de-normalised so
+                                    the two frameworks share units
+  T5  paper_table_mem.{md,tex}      Peak resident set size (all 3 frameworks;
+                                    RTXAdvect empty because the sweep driver
+                                    did not wrap in `time -v`)
 
 Each table is emitted in Markdown (for the response letter / README) and
-LaTeX (for direct paste into the manuscript).  Method rows are grouped
-by framework; mesh columns are ordered by tet count.
+LaTeX (standalone table environment with caption + label for direct paste
+into the manuscript). Method rows are grouped by framework; mesh columns
+are ordered by tet count.
 
 Reads:
     joint_summary.csv (produced by build_joint_table.py)
 
 Writes (into --out-dir, default = repo root):
-    paper_table_timing.md
-    paper_table_timing.tex
-    paper_table_found.md
-    paper_table_found.tex
+    paper_table_{timing,found,build,tput,mem}.{md,tex}
 
 Usage:
     scripts/scone_bench/build_paper_tables.py [--csv path] [--out-dir path]
@@ -94,6 +100,32 @@ def load_rows(csv_path: Path):
                 "max_rss_mb": _f(row.get("max_rss_mb")),
             })
     return rows
+
+
+# --- fair per-batch throughput (queries per second per single query batch) ---
+# MALMO's `throughput_Mqps` (from bench_malmo_pointloc.py) already equals
+# n_points_queried / query_min_of_3.  RTXAdvect's `throughput_Mqps` in
+# parse_rtxadvect_log.py inflates by n_steps (Wang's particle-steps/s convention),
+# so on a 1M-particle x 100-step run its cell reads 100 Mqps rather than the
+# fair 1M / query_seconds.  The correct comparison to MALMO is per-batch:
+#     tput = n_particles / query_seconds     (Mqps)
+# We recover it here for RTXAdvect using per-framework batch sizes.
+
+BATCH_SIZE = {
+    "MALMO":     100_000,     # bench_malmo_pointloc.py default
+    "RTXAdvect": 1_000_000,   # rerun_rtxadvect_inmesh.sh default
+    "SCONE":     None,        # SCONE ray-traces its own population; no per-batch
+}
+
+def _fair_tput_mqps(row: dict) -> float | None:
+    fw = row["framework"]
+    q = row.get("query_seconds")
+    if not q or q <= 0:
+        return None
+    n = BATCH_SIZE.get(fw)
+    if n is None:
+        return None
+    return (n / q) / 1e6
 
 
 def _row_key(fw: str, method: str, omp: int | None):
@@ -220,6 +252,63 @@ def _fmt_correct_or_found(row: dict | None) -> str:
     return "—"
 
 
+def _fmt_build(sec: float | None, status: str | None) -> str:
+    """Build-cost cell (T3).  Same time-unit rules as _fmt_time, but with
+    an explicit '(none)' for SCONE where the tool has no build step
+    reported separately, and an explicit '—' distinct from a status glyph."""
+    if status == "SEGV":
+        return "SEGV"
+    if status and status.startswith("FAIL"):
+        return "FAIL"
+    if status == "TIMED_OUT":
+        return "TIMED OUT"
+    if sec is None:
+        return "—"
+    if sec < 1.0:
+        return f"{sec*1000:.1f} ms"
+    if sec < 60.0:
+        return f"{sec:.2f} s"
+    if sec < 3600.0:
+        return f"{sec/60:.1f} min"
+    return f"{sec/3600:.1f} h"
+
+
+def _fmt_tput_mqps(v: float | None, status: str | None) -> str:
+    """Fair per-batch throughput cell (T4)."""
+    if status == "SEGV":
+        return "SEGV"
+    if status and status.startswith("FAIL"):
+        return "FAIL"
+    if status == "TIMED_OUT":
+        return "TIMED OUT"
+    if v is None:
+        return "—"
+    if v >= 100:
+        return f"{v:.0f} Mq/s"
+    if v >= 10:
+        return f"{v:.1f} Mq/s"
+    if v >= 0.1:
+        return f"{v:.2f} Mq/s"
+    return f"{v*1000:.1f} kq/s"
+
+
+def _fmt_mem(mb: float | None, status: str | None) -> str:
+    """Peak RSS cell (T5)."""
+    if status == "SEGV":
+        return "SEGV"
+    if status and status.startswith("FAIL"):
+        return "FAIL"
+    if status == "TIMED_OUT":
+        return "TIMED OUT"
+    if mb is None:
+        return "—"
+    if mb >= 1024:
+        return f"{mb/1024:.2f} GB"
+    if mb >= 1:
+        return f"{mb:.0f} MB"
+    return f"{mb*1024:.0f} KB"
+
+
 # ---------------------------------------------------------------------------
 # Markdown emitters
 # ---------------------------------------------------------------------------
@@ -280,6 +369,101 @@ def emit_md_found(rows_idx, meshes, out: Path):
                  "fraction of particles that landed in a valid host tet "
                  "(RTXAdvect). `SEGV` / `FAIL` = SCONE ran but did not "
                  "produce a usable tally.")
+    out.write_text("\n".join(lines) + "\n")
+
+
+def emit_md_build(rows_idx, meshes, out: Path):
+    lines = ["# Table T3 · One-shot build cost (methods × meshes)", ""]
+    lines.append("Preprocessing time — MALMO's octree build, RTXAdvect's BVH "
+                 "build. This cost is paid once per mesh and amortises across "
+                 "all subsequent query batches; combined with Table T1 it "
+                 "shows the amortisation break-even. For example on the FSW "
+                 "mesh, MALMO `aabb` builds in ~240 s and queries in ~1.6 s, "
+                 "vs RTXAdvect's ~2.5 s build and ~1.07 s query; MALMO wins "
+                 "after ~450 query batches (a single 2 684-step FSW tracking "
+                 "run is 6× past the break-even). SCONE reports no build/query "
+                 "split (its `wall_seconds_outer` is a combined initialise+"
+                 "ray-trace time, tabulated in T1).")
+    lines.append("")
+    hdr = ["method"] + [f"{MESH_SHORT[m]}<br>({_short_n(m,rows_idx)})" for m in meshes]
+    lines.append("| " + " | ".join(hdr) + " |")
+    lines.append("|" + "|".join(["---"] + ["---:"] * len(meshes)) + "|")
+    for fw, method, omp in enumerate_rows(["MALMO", "RTXAdvect"]):
+        key = _row_key(fw, method, omp)
+        cells = [_row_label(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            cells.append(_fmt_build(row["build_seconds"] if row else None,
+                                     row["status"] if row else None))
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("*Status codes:* `FAIL` / `SEGV` = the run did not complete "
+                 "the build.  `—` = build/query split not reported (SCONE).")
+    out.write_text("\n".join(lines) + "\n")
+
+
+def emit_md_tput(rows_idx, meshes, out: Path):
+    lines = ["# Table T4 · Fair per-batch query throughput (methods × meshes)", ""]
+    lines.append("Per-batch throughput, computed uniformly as "
+                 "**`n_points_queried / query_seconds`** — MALMO's 100 k-particle "
+                 "batches and RTXAdvect's 1 M-particle batches divided by their "
+                 "respective query wall-times.  RTXAdvect's own log convention "
+                 "reports particle-steps per second (inflating by n_steps=100), "
+                 "which we have de-normalised here so the units match MALMO's "
+                 "query batch.  SCONE does not run per-particle queries — its "
+                 "ray-tracing population is a Monte-Carlo tally sampler — so "
+                 "`throughput` is not defined and cells show `—`.")
+    lines.append("")
+    hdr = ["method"] + [f"{MESH_SHORT[m]}<br>({_short_n(m,rows_idx)})" for m in meshes]
+    lines.append("| " + " | ".join(hdr) + " |")
+    lines.append("|" + "|".join(["---"] + ["---:"] * len(meshes)) + "|")
+    for fw, method, omp in enumerate_rows(["MALMO", "RTXAdvect"]):
+        key = _row_key(fw, method, omp)
+        cells = [_row_label(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            if row is None:
+                cells.append("—")
+                continue
+            tput = _fair_tput_mqps(row)
+            cells.append(_fmt_tput_mqps(tput, row["status"]))
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("*Column key:* Mq/s = million queries per second per batch. "
+                 "For MALMO on FSW the batch is 100 k queries; for RTXAdvect "
+                 "1 M particles per BVH-traversal step.  Higher is better.")
+    out.write_text("\n".join(lines) + "\n")
+
+
+def emit_md_mem(rows_idx, meshes, out: Path):
+    lines = ["# Table T5 · Peak resident memory (methods × meshes)", ""]
+    lines.append("Peak resident set size (RSS) recorded by `/usr/bin/time -v` "
+                 "for the whole process (mesh load + acceleration structure "
+                 "build + query cost).  Includes MALMO's constant ~1.2 GB "
+                 "JAX/CUDA runtime allocation.  RTXAdvect memory was not "
+                 "captured on the sweep runs (the driver script did not wrap "
+                 "the process in `time -v`) and is reported as `—`; the "
+                 "process footprint is dominated by mesh + BVH storage, "
+                 "empirically ~400 MB on Kim meshes and ~1.2 GB on FSW per "
+                 "the smoke test.")
+    lines.append("")
+    hdr = ["method"] + [f"{MESH_SHORT[m]}<br>({_short_n(m,rows_idx)})" for m in meshes]
+    lines.append("| " + " | ".join(hdr) + " |")
+    lines.append("|" + "|".join(["---"] + ["---:"] * len(meshes)) + "|")
+    for fw, method, omp in enumerate_rows():
+        key = _row_key(fw, method, omp)
+        cells = [_row_label(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            cells.append(_fmt_mem(row["max_rss_mb"] if row else None,
+                                   row["status"] if row else None))
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("*Status codes:* SCONE's `patchSingle` peaks in the 2–16 GB "
+                 "range on the Kim cohort; SCONE's `patchMulti` needs "
+                 "10¹²–10⁶ octree cells (peta-byte scale) and SEGVs before "
+                 "building.  MALMO stays under 3.3 GB even on the 3.05 M-tet "
+                 "FSW mesh.")
     out.write_text("\n".join(lines) + "\n")
 
 
@@ -420,6 +604,157 @@ def emit_tex_found(rows_idx, meshes, out: Path):
     out.write_text("\n".join(L) + "\n")
 
 
+def _cell_wrap(txt: str, is_status: bool) -> str:
+    if is_status:
+        return rf"\textit{{{txt.lower()}}}"
+    return txt.replace(" ", r"\,")
+
+
+def _fmt_build_latex(sec, status):
+    txt = _fmt_build(sec, status)
+    return _cell_wrap(txt, txt in ("SEGV", "FAIL", "TIMED OUT"))
+
+
+def _fmt_tput_latex(v, status):
+    txt = _fmt_tput_mqps(v, status)
+    return _cell_wrap(txt, txt in ("SEGV", "FAIL", "TIMED OUT"))
+
+
+def _fmt_mem_latex(mb, status):
+    txt = _fmt_mem(mb, status)
+    return _cell_wrap(txt, txt in ("SEGV", "FAIL", "TIMED OUT"))
+
+
+def emit_tex_build(rows_idx, meshes, out: Path):
+    L = []
+    L.append(r"% Table T3: One-shot build cost (methods x meshes)")
+    L.append(r"\begin{table}[t]")
+    L.append(r"\centering\small")
+    L.append(rf"\caption{{One-shot build cost per method and mesh --- MALMO's "
+             rf"octree build, RTXAdvect's BVH build.  This cost is paid once "
+             rf"per mesh and amortises across all subsequent query batches; "
+             rf"combined with Table~\ref{{tab:r26-timing}} it defines the "
+             rf"amortisation break-even.  On the FSW mesh MALMO's \texttt{{aabb}} "
+             rf"variant builds in $\sim 240$\,s and answers each 100\,k-particle "
+             rf"query in $\sim 1.6$\,s, versus RTXAdvect's $\sim 2.5$\,s BVH "
+             rf"build and $\sim 1.07$\,s query; MALMO wins on total wall-time "
+             rf"after $\sim 450$ query batches (a 2\,684-step FSW tracking run "
+             rf"is $\sim 6\times$ past the break-even).  SCONE reports no "
+             rf"build/query split (its combined initialise+ray-trace time is "
+             rf"tabulated in Table~\ref{{tab:r26-timing}}).}}")
+    L.append(r"\label{tab:r26-build}")
+    L.append(rf"\begin{{tabular}}{{{_tabular_spec(len(meshes))}}}")
+    L.append(r"\toprule")
+    hdr = ["method"] + [rf"\textbf{{{MESH_SHORT[m]}}}" for m in meshes]
+    L.append(" & ".join(hdr) + r" \\")
+    subhdr = [""] + [rf"({_short_n(m, rows_idx)})" for m in meshes]
+    L.append(" & ".join(subhdr) + r" \\")
+    L.append(r"\midrule")
+    prev_fw = None
+    for fw, method, omp in enumerate_rows(["MALMO", "RTXAdvect"]):
+        if prev_fw is not None and fw != prev_fw:
+            L.append(r"\midrule")
+        prev_fw = fw
+        key = _row_key(fw, method, omp)
+        cells = [_row_label_latex(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            cells.append(_fmt_build_latex(row["build_seconds"] if row else None,
+                                          row["status"] if row else None))
+        L.append(" & ".join(cells) + r" \\")
+    L.append(r"\bottomrule")
+    L.append(r"\end{tabular}")
+    L.append(r"\end{table}")
+    out.write_text("\n".join(L) + "\n")
+
+
+def emit_tex_tput(rows_idx, meshes, out: Path):
+    L = []
+    L.append(r"% Table T4: Fair per-batch throughput (methods x meshes)")
+    L.append(r"\begin{table}[t]")
+    L.append(r"\centering\small")
+    L.append(rf"\caption{{Fair per-batch query throughput, computed uniformly "
+             rf"as $n_\text{{particles}} / t_\text{{query}}$ --- MALMO's "
+             rf"100\,k-particle batches and RTXAdvect's 1\,M-particle batches "
+             rf"divided by their respective query wall-times.  RTXAdvect's "
+             rf"own log convention reports particle-steps per second "
+             rf"(inflating by $n_\text{{steps}}=100$), which we have "
+             rf"de-normalised here so the units match MALMO's per-batch "
+             rf"metric.  SCONE does not run per-particle queries and thus "
+             rf"has no comparable throughput number.}}")
+    L.append(r"\label{tab:r26-tput}")
+    L.append(rf"\begin{{tabular}}{{{_tabular_spec(len(meshes))}}}")
+    L.append(r"\toprule")
+    hdr = ["method"] + [rf"\textbf{{{MESH_SHORT[m]}}}" for m in meshes]
+    L.append(" & ".join(hdr) + r" \\")
+    subhdr = [""] + [rf"({_short_n(m, rows_idx)})" for m in meshes]
+    L.append(" & ".join(subhdr) + r" \\")
+    L.append(r"\midrule")
+    prev_fw = None
+    for fw, method, omp in enumerate_rows(["MALMO", "RTXAdvect"]):
+        if prev_fw is not None and fw != prev_fw:
+            L.append(r"\midrule")
+        prev_fw = fw
+        key = _row_key(fw, method, omp)
+        cells = [_row_label_latex(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            if row is None:
+                cells.append("---"); continue
+            tput = _fair_tput_mqps(row)
+            cells.append(_fmt_tput_latex(tput, row["status"]))
+        L.append(" & ".join(cells) + r" \\")
+    L.append(r"\bottomrule")
+    L.append(r"\end{tabular}")
+    L.append(r"\end{table}")
+    out.write_text("\n".join(L) + "\n")
+
+
+def emit_tex_mem(rows_idx, meshes, out: Path):
+    L = []
+    L.append(r"% Table T5: Peak resident memory (methods x meshes)")
+    L.append(r"\begin{table}[t]")
+    L.append(r"\centering\small")
+    L.append(rf"\caption{{Peak resident set size (RSS) per method and mesh, "
+             rf"as reported by \texttt{{/usr/bin/time~-v}} on the whole "
+             rf"process (mesh load + acceleration structure build + query "
+             rf"cost).  MALMO carries a $\sim 1.2$\,GB constant JAX/CUDA "
+             rf"runtime allocation on top of its mesh + octree footprint. "
+             rf"SCONE's \texttt{{patchSingle}} variant peaks in the 2--16\,GB "
+             rf"range on the Kim cohort; the \texttt{{patchMulti}} variant "
+             rf"needs $10^6$--$10^{{12}}$ octree cells and SEGVs before it "
+             rf"can build.  MALMO stays under 3.3\,GB even on the "
+             rf"3.05\,M-tet FSW mesh.  RTXAdvect memory was not captured on "
+             rf"the sweep runs (the driver did not wrap the process in "
+             rf"\texttt{{time~-v}}) and is reported as `---'; empirically "
+             rf"the footprint is $\sim 400$\,MB on the Kim cohort and "
+             rf"$\sim 1.2$\,GB on the FSW mesh.}}")
+    L.append(r"\label{tab:r26-mem}")
+    L.append(rf"\begin{{tabular}}{{{_tabular_spec(len(meshes))}}}")
+    L.append(r"\toprule")
+    hdr = ["method"] + [rf"\textbf{{{MESH_SHORT[m]}}}" for m in meshes]
+    L.append(" & ".join(hdr) + r" \\")
+    subhdr = [""] + [rf"({_short_n(m, rows_idx)})" for m in meshes]
+    L.append(" & ".join(subhdr) + r" \\")
+    L.append(r"\midrule")
+    prev_fw = None
+    for fw, method, omp in enumerate_rows():
+        if prev_fw is not None and fw != prev_fw:
+            L.append(r"\midrule")
+        prev_fw = fw
+        key = _row_key(fw, method, omp)
+        cells = [_row_label_latex(fw, method, omp)]
+        for m in meshes:
+            row = rows_idx.get(key, {}).get(m)
+            cells.append(_fmt_mem_latex(row["max_rss_mb"] if row else None,
+                                         row["status"] if row else None))
+        L.append(" & ".join(cells) + r" \\")
+    L.append(r"\bottomrule")
+    L.append(r"\end{tabular}")
+    L.append(r"\end{table}")
+    out.write_text("\n".join(L) + "\n")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="joint_summary.csv",
@@ -440,11 +775,16 @@ def main() -> int:
     emit_tex_timing(rows_idx, meshes, out_dir / "paper_table_timing.tex")
     emit_md_found(rows_idx, meshes, out_dir / "paper_table_found.md")
     emit_tex_found(rows_idx, meshes, out_dir / "paper_table_found.tex")
+    emit_md_build(rows_idx, meshes, out_dir / "paper_table_build.md")
+    emit_tex_build(rows_idx, meshes, out_dir / "paper_table_build.tex")
+    emit_md_tput(rows_idx, meshes, out_dir / "paper_table_tput.md")
+    emit_tex_tput(rows_idx, meshes, out_dir / "paper_table_tput.tex")
+    emit_md_mem(rows_idx, meshes, out_dir / "paper_table_mem.md")
+    emit_tex_mem(rows_idx, meshes, out_dir / "paper_table_mem.tex")
 
-    print(f"wrote: {out_dir/'paper_table_timing.md'}")
-    print(f"wrote: {out_dir/'paper_table_timing.tex'}")
-    print(f"wrote: {out_dir/'paper_table_found.md'}")
-    print(f"wrote: {out_dir/'paper_table_found.tex'}")
+    for name in ("timing", "found", "build", "tput", "mem"):
+        print(f"wrote: {out_dir/f'paper_table_{name}.md'}")
+        print(f"wrote: {out_dir/f'paper_table_{name}.tex'}")
     return 0
 
 

@@ -1,0 +1,18 @@
+% Table T4: Fair per-batch throughput (methods x meshes)
+\begin{table}[t]
+\centering\small
+\caption{Fair per-batch query throughput, computed uniformly as $n_\text{particles} / t_\text{query}$ --- MALMO's 100\,k-particle batches and RTXAdvect's 1\,M-particle batches divided by their respective query wall-times.  RTXAdvect's own log convention reports particle-steps per second (inflating by $n_\text{steps}=100$), which we have de-normalised here so the units match MALMO's per-batch metric.  SCONE does not run per-particle queries and thus has no comparable throughput number.}
+\label{tab:r26-tput}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+method & \textbf{Tet63} & \textbf{Tet137} & \textbf{Tet298} & \textbf{Bunny} & \textbf{Poly264} & \textbf{Tet1820} & \textbf{Tet2856} & \textbf{Poly940} & \textbf{Poly1560} & \textbf{FSW} \\
+ & (63) & (137) & (298) & (379) & (1.4k) & (1.8k) & (2.9k) & (5.2k) & (8.7k) & (3.05M) \\
+\midrule
+MALMO \texttt{aabb} & 0.68\,Mq/s & 0.23\,Mq/s & 0.13\,Mq/s & 0.41\,Mq/s & 0.36\,Mq/s & 62.0\,kq/s & 74.1\,kq/s & 68.7\,kq/s & 0.13\,Mq/s & 62.5\,kq/s \\
+MALMO \texttt{centroid} & 0.94\,Mq/s & 0.10\,Mq/s & 0.11\,Mq/s & 0.41\,Mq/s & 0.28\,Mq/s & 68.5\,kq/s & 67.0\,kq/s & 59.0\,kq/s & 61.5\,kq/s & 41.2\,kq/s \\
+MALMO \texttt{vertex\_multi} & 1.15\,Mq/s & 0.25\,Mq/s & 0.11\,Mq/s & 20.4\,kq/s & 0.52\,Mq/s & 68.6\,kq/s & 71.0\,kq/s & 73.4\,kq/s & 78.5\,kq/s & 15.7\,kq/s \\
+\midrule
+RTXAdvect \texttt{RTX\_BVH} & 1.44\,Mq/s & 1.45\,Mq/s & 1.42\,Mq/s & 1.12\,Mq/s & 1.43\,Mq/s & 1.44\,Mq/s & 1.42\,Mq/s & 1.42\,Mq/s & 1.42\,Mq/s & 0.94\,Mq/s \\
+\bottomrule
+\end{tabular}
+\end{table}

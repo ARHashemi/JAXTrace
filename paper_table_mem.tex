@@ -1,0 +1,27 @@
+% Table T5: Peak resident memory (methods x meshes)
+\begin{table}[t]
+\centering\small
+\caption{Peak resident set size (RSS) per method and mesh, as reported by \texttt{/usr/bin/time~-v} on the whole process (mesh load + acceleration structure build + query cost).  MALMO carries a $\sim 1.2$\,GB constant JAX/CUDA runtime allocation on top of its mesh + octree footprint. SCONE's \texttt{patchSingle} variant peaks in the 2--16\,GB range on the Kim cohort; the \texttt{patchMulti} variant needs $10^6$--$10^{12}$ octree cells and SEGVs before it can build.  MALMO stays under 3.3\,GB even on the 3.05\,M-tet FSW mesh.  RTXAdvect memory was not captured on the sweep runs (the driver did not wrap the process in \texttt{time~-v}) and is reported as `---'; empirically the footprint is $\sim 400$\,MB on the Kim cohort and $\sim 1.2$\,GB on the FSW mesh.}
+\label{tab:r26-mem}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+method & \textbf{Tet63} & \textbf{Tet137} & \textbf{Tet298} & \textbf{Bunny} & \textbf{Poly264} & \textbf{Tet1820} & \textbf{Tet2856} & \textbf{Poly940} & \textbf{Poly1560} & \textbf{FSW} \\
+ & (63) & (137) & (298) & (379) & (1.4k) & (1.8k) & (2.9k) & (5.2k) & (8.7k) & (3.05M) \\
+\midrule
+MALMO \texttt{aabb} & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 2.71\,GB \\
+MALMO \texttt{centroid} & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 2.48\,GB \\
+MALMO \texttt{vertex\_multi} & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.17\,GB & 1.18\,GB & 3.15\,GB \\
+\midrule
+SCONE \texttt{none} (OMP=1) & 6\,MB & 6\,MB & 8\,MB & 8\,MB & 8\,MB & 16\,MB & 22\,MB & 15\,MB & 20\,MB & \textit{fail} \\
+SCONE \texttt{none} (OMP=8) & 6\,MB & 7\,MB & 7\,MB & 8\,MB & 8\,MB & 16\,MB & 22\,MB & 15\,MB & 20\,MB & \textit{fail} \\
+SCONE \texttt{octree} (OMP=1) & 7\,MB & 8\,MB & 11\,MB & 13\,MB & \textit{fail} & 34\,MB & 49\,MB & 25\,MB & 39\,MB & \textit{fail} \\
+SCONE \texttt{octree} (OMP=8) & 7\,MB & 8\,MB & 11\,MB & 13\,MB & 11\,MB & 34\,MB & 49\,MB & 24\,MB & 38\,MB & \textit{fail} \\
+SCONE \texttt{patchSingle} (OMP=1) & \textit{fail} & 4.72\,GB & 2.03\,GB & \textit{fail} & 2.16\,GB & 15.46\,GB & \textit{fail} & 3.82\,GB & 6.88\,GB & \textit{fail} \\
+SCONE \texttt{patchSingle} (OMP=8) & \textit{fail} & 4.72\,GB & 2.03\,GB & \textit{fail} & 2.16\,GB & 15.46\,GB & \textit{fail} & 3.82\,GB & 6.88\,GB & \textit{fail} \\
+SCONE \texttt{patchMulti} (OMP=1) & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} \\
+SCONE \texttt{patchMulti} (OMP=8) & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{segv} & \textit{fail} \\
+\midrule
+RTXAdvect \texttt{RTX\_BVH} & 405\,MB & 405\,MB & 405\,MB & — & 405\,MB & 404\,MB & 405\,MB & 405\,MB & 406\,MB & — \\
+\bottomrule
+\end{tabular}
+\end{table}

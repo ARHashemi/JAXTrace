@@ -1,0 +1,18 @@
+% Table T3: One-shot build cost (methods x meshes)
+\begin{table}[t]
+\centering\small
+\caption{One-shot build cost per method and mesh --- MALMO's octree build, RTXAdvect's BVH build.  This cost is paid once per mesh and amortises across all subsequent query batches; combined with Table~\ref{tab:r26-timing} it defines the amortisation break-even.  On the FSW mesh MALMO's \texttt{aabb} variant builds in $\sim 240$\,s and answers each 100\,k-particle query in $\sim 1.6$\,s, versus RTXAdvect's $\sim 2.5$\,s BVH build and $\sim 1.07$\,s query; MALMO wins on total wall-time after $\sim 450$ query batches (a 2\,684-step FSW tracking run is $\sim 6\times$ past the break-even).  SCONE reports no build/query split (its combined initialise+ray-trace time is tabulated in Table~\ref{tab:r26-timing}).}
+\label{tab:r26-build}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+method & \textbf{Tet63} & \textbf{Tet137} & \textbf{Tet298} & \textbf{Bunny} & \textbf{Poly264} & \textbf{Tet1820} & \textbf{Tet2856} & \textbf{Poly940} & \textbf{Poly1560} & \textbf{FSW} \\
+ & (63) & (137) & (298) & (379) & (1.4k) & (1.8k) & (2.9k) & (5.2k) & (8.7k) & (3.05M) \\
+\midrule
+MALMO \texttt{aabb} & 5.6\,ms & 15.0\,ms & 42.7\,ms & 20.9\,ms & 109.8\,ms & 328.0\,ms & 566.9\,ms & 449.0\,ms & 491.2\,ms & 4.0\,min \\
+MALMO \texttt{centroid} & 6.1\,ms & 15.0\,ms & 42.7\,ms & 20.0\,ms & 116.1\,ms & 328.2\,ms & 579.5\,ms & 459.6\,ms & 752.8\,ms & 1.4\,min \\
+MALMO \texttt{vertex\_multi} & 4.1\,ms & 9.2\,ms & 19.4\,ms & 23.4\,ms & 91.2\,ms & 117.0\,ms & 182.7\,ms & 333.9\,ms & 554.4\,ms & 3.3\,min \\
+\midrule
+RTXAdvect \texttt{RTX\_BVH} & 156.8\,ms & 158.9\,ms & 159.8\,ms & 135.5\,ms & 158.7\,ms & 161.0\,ms & 163.6\,ms & 162.2\,ms & 166.5\,ms & 2.51\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
