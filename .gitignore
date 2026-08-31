@@ -79,3 +79,23 @@ archive/memory_reports/
 *.swp
 *.swo
 *~
+
+# Paper-revision generated data (large, generated on the workstation)
+3rdParty/
+rtxadvect_meshes/
+rtxadvect_runs/
+rtxadvect_smoke_*/
+scone_meshes/
+scone_runs/
+scone_runs_padfix/
+kim_meshes_vtu/
+malmo_runs/
+malmo_runs_fixed/
+malmo_runs_fsw_paper/
+malmo_runs_in_mesh/
+sweep_logs/
+results/
+
+# Paper-revision benchmark summaries (small, worth tracking despite *.csv rule above)
+!joint_summary.csv
+!joint_summary.md
