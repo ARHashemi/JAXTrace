@@ -145,12 +145,32 @@ def main():
              "point/cell data are carried into the ROM PVTU).",
     )
     ap.add_argument(
-        "--basis", type=Path, required=True,
-        help="Path to <case>.som.fswrom.basis",
+        "--basis", type=Path, default=None,
+        help="Path to <case>.som.fswrom.basis (shipped FEMUSS basis). "
+             "Not needed when --our-pod is given.",
     )
     ap.add_argument(
-        "--romdata", type=Path, required=True,
-        help="Path to <case>.som.fswrom.romdata",
+        "--romdata", type=Path, default=None,
+        help="Path to <case>.som.fswrom.romdata (shipped FEMUSS "
+             "coefficients). Not needed when --our-pod is given.",
+    )
+    ap.add_argument(
+        "--our-pod", type=Path, default=None,
+        help="Path to a basis built by scripts/build_our_pod_basis.py "
+             "(an .npz from jaxtrace.rom.pod_builder.save_pod). When "
+             "given, the reconstruction uses OUR POD instead of the "
+             "shipped FEMUSS files, and --formula is ignored (our basis "
+             "is always the 'centered' convention). The shipped basis "
+             "reconstructs this cohort at ~4%% L2; ours reaches ~0.5%% "
+             "with 3 modes.",
+    )
+    ap.add_argument(
+        "--n-modes", type=int, default=None,
+        help="With --our-pod: truncate to this many modes. Default: use "
+             "every mode stored in the npz. NOTE the stored basis keeps "
+             "all 20, and 20 modes span 20 snapshots exactly, so the "
+             "default reproduces each training case almost perfectly. "
+             "Pass a smaller K (e.g. 3 or 5) for a realistic ROM.",
     )
     ap.add_argument(
         "--formula", type=str, default="centered",
@@ -186,6 +206,14 @@ def main():
     args = ap.parse_args()
 
     # ----- Load ROM basis and coefficients -----
+    if args.our_pod is not None:
+        return _run_with_our_pod(args)
+
+    if args.basis is None or args.romdata is None:
+        print("[reconstruct] ERROR: pass either --our-pod, or both "
+              "--basis and --romdata", file=sys.stderr)
+        return 2
+
     print(f"[reconstruct] loading basis   : {args.basis}")
     basis = load_basis(args.basis, field_group=args.field_group, verbose=False)
     print(f"              n_nodes={basis.n_nodes:,}, n_modes={basis.n_modes}")
@@ -211,6 +239,49 @@ def main():
           f"|v|_max={np.abs(v_recon).max():.4e}, "
           f"|v|_rms={float(np.sqrt((v_recon**2).mean())):.4e}")
 
+    return _emit_pvtu(args, v_recon, n_modes=basis.n_modes,
+                      provenance=(f"basis         : {args.basis}\n"
+                                  f"romdata       : {args.romdata}\n"
+                                  f"formula       : {args.formula}\n"))
+
+
+def _run_with_our_pod(args) -> int:
+    """Reconstruct using a basis built by scripts/build_our_pod_basis.py."""
+    from jaxtrace.rom.pod_builder import load_pod
+
+    print(f"[reconstruct] loading our POD : {args.our_pod}")
+    pod = load_pod(args.our_pod)
+    k = pod.n_modes if args.n_modes is None else min(args.n_modes, pod.n_modes)
+    print(f"              n_nodes={pod.n_nodes:,}, modes stored={pod.n_modes}, "
+          f"using K={k}")
+    print(f"              source={pod.source}")
+    if k == pod.n_snap:
+        print("[reconstruct] WARNING: K equals the number of training "
+              "snapshots, so this reproduces the training case almost "
+              "exactly and is NOT a realistic ROM. Pass --n-modes 3 (or 5).")
+
+    if not (0 <= args.case < pod.n_snap):
+        print(f"[reconstruct] ERROR: --case {args.case} outside "
+              f"[0, {pod.n_snap})", file=sys.stderr)
+        return 3
+
+    v_recon = pod.reconstruct(args.case, n_modes=k)
+    print(f"[reconstruct] our POD K={k}: "
+          f"|v|_max={np.abs(v_recon).max():.4e}, "
+          f"|v|_rms={float(np.sqrt((v_recon**2).mean())):.4e}")
+
+    return _emit_pvtu(args, v_recon, n_modes=k,
+                      provenance=(f"our_pod       : {args.our_pod}\n"
+                                  f"pod_source    : {pod.source}\n"
+                                  f"formula       : centered (our POD)\n"))
+
+
+def _emit_pvtu(args, v_recon, n_modes: int, provenance: str) -> int:
+    """Write `v_recon` into the case's template PVTU and save it.
+
+    Shared by both the shipped-FEMUSS and our-POD paths so the two
+    produce byte-comparable output trees.
+    """
     # ----- Load the source PVTU as the template mesh -----
     case_stem = f"{args.case_prefix}_{args.case:03d}"
     source_pvtu = (args.fom_root / f"{case_stem}.gid" / "post"
@@ -222,9 +293,9 @@ def main():
     print(f"[reconstruct] loading template: {source_pvtu}")
     ug = _read_pvtu(source_pvtu)
     n_source_nodes = ug.GetNumberOfPoints()
-    if n_source_nodes != basis.n_nodes:
+    if n_source_nodes != v_recon.shape[0]:
         print(f"[reconstruct] ERROR: node count mismatch: template has "
-              f"{n_source_nodes:,}, basis has {basis.n_nodes:,}",
+              f"{n_source_nodes:,}, basis has {v_recon.shape[0]:,}",
               file=sys.stderr)
         return 5
 
@@ -292,15 +363,12 @@ def main():
     (out_case_dir / "ROM_MANIFEST.txt").write_text(
         f"case_prefix   : {args.case_prefix}\n"
         f"case_idx      : {args.case}\n"
-        f"formula       : {args.formula}\n"
-        f"basis         : {args.basis}\n"
-        f"romdata       : {args.romdata}\n"
+        + provenance +
         f"template_pvtu : {source_pvtu}\n"
         f"out_pvtu      : {out_pvtu}\n"
         f"out_timestep  : {args.out_timestep}\n"
-        f"n_nodes       : {basis.n_nodes}\n"
-        f"n_modes       : {basis.n_modes}\n"
-        f"coefficients  : {list(map(float, c[:3]))}\n"
+        f"n_nodes       : {v_recon.shape[0]}\n"
+        f"n_modes       : {n_modes}\n"
         f"|v|_max       : {float(np.abs(v_recon).max())}\n"
         f"|v|_rms       : {float(np.sqrt((v_recon**2).mean()))}\n"
     )

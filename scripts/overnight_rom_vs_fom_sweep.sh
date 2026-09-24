@@ -49,8 +49,17 @@
 #     particles.vtkhdf lands, so a re-invocation of this script
 #     picks up where it left off.  Delete the sentinel to force a
 #     re-run of a specific variant.
-#   * All logs (per-variant + per-comparison + per-mixing) sit under
-#     the sweep root directory, one file per artifact.
+#   * Comparison outputs land under the owning case tree so each
+#     <case>.gid/ is self-contained:
+#       FOM/<case>.gid/post_pt_compare/fom_hct_on_vs_off/
+#       ROM_recon_<formula>/<case>.gid/post_pt_compare/rom_hct_on_vs_off/
+#       ROM_recon_<formula>/<case>.gid/post_pt_compare/rom_vs_fom_hct_on/
+#       ROM_recon_<formula>/<case>.gid/post_pt_compare/rom_vs_fom_hct_off/
+#     Mixing outputs land under the ROM tree:
+#       ROM_recon_<formula>/<case>.gid/post_pt_mixing/hct_on/
+#       ROM_recon_<formula>/<case>.gid/post_pt_mixing/hct_off/
+#   * The sweep root only contains: sweep.log, summary.log, prep_*.log,
+#     and the per-variant tracker logs (case<NNN>_<variant>.log).
 #
 # Usage:
 #
@@ -103,6 +112,22 @@ SKIP_PREP="${SKIP_PREP:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 COMPARE_STEP="${COMPARE_STEP:-500}"
 MIXING_STRIDE="${MIXING_STRIDE:-20}"
+VENV="${VENV:-/flash/shared/jax/.venv}"
+
+# Activate the shared Python venv so scripts/compare_rom_vs_fom_tracking.py
+# and scripts/lagrangian_mixing_diagnostics.py can import numpy / vtk / h5py.
+# The case runners (run_jaxtrace.sh) source the venv on their own, so they
+# don't need this, but the sweep-side python invocations do.  Missing this
+# was the reason overnight_rom_vs_fom_20260716_165147 finished with every
+# tracker OK but every compare + mixing failing on ModuleNotFoundError.
+if [ -f "$VENV/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    source "$VENV/bin/activate"
+    PYTHON="$VENV/bin/python"
+else
+    echo "WARN: venv not found at $VENV — falling back to system python3" >&2
+    PYTHON=python3
+fi
 
 RUN_TAG_RE="run_grid-frac_n360000_s2000"   # deterministic under the current template
 
@@ -459,7 +484,18 @@ compare_pair() {
         return 0
     fi
 
-    local OUT_DIR="$SWEEP_ROOT/case${CASE_ID}_compare_${LABEL}"
+    # Route the output to the owning case tree so downstream tools can
+    # discover the artefact from the same <case>.gid root as its input
+    # archive.  Rule: comparisons whose inputs are both FOM go under the
+    # FOM tree; anything that touches ROM (rom-vs-rom or rom-vs-fom)
+    # goes under the ROM tree.  The sweep root only ends up with the
+    # per-variant tracker logs, sweep.log, and summary.log.
+    local COMPARE_TREE
+    case "$LABEL" in
+        fom_hct_on_vs_off) COMPARE_TREE="$FOM_ROOT" ;;
+        *)                 COMPARE_TREE="$ROM_RECON_ROOT" ;;
+    esac
+    local OUT_DIR="$COMPARE_TREE/cylindrical_${CASE_ID}.gid/post_pt_compare/${LABEL}"
     mkdir -p "$OUT_DIR"
     local LOG="$OUT_DIR/compare.log"
     local VTU="$OUT_DIR/${LABEL}_step${COMPARE_STEP}.vtu"
@@ -473,7 +509,7 @@ compare_pair() {
     # -u for unbuffered stdout so `tail -f $LOG` reflects live progress;
     # `2>&1 | tee $LOG` mirrors output to both the sweep global stream
     # AND the per-comparison log file.
-    python3 -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
+    "$PYTHON" -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
         --fom-vtkhdf "$A_PART" --rom-vtkhdf "$B_PART" \
         --step "$COMPARE_STEP" --out-vtu "$VTU" \
         2>&1 | tee "$LOG" >> "$GLOBAL_LOG"
@@ -483,7 +519,7 @@ compare_pair() {
     # Also do a last-step comparison with --suggest-alive-step so the
     # ballistic-tail regime is covered too.
     local LAST_LOG="$OUT_DIR/compare_last.log"
-    python3 -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
+    "$PYTHON" -u "$JAXTRACE/scripts/compare_rom_vs_fom_tracking.py" \
         --fom-vtkhdf "$A_PART" --rom-vtkhdf "$B_PART" \
         --step last --suggest-alive-step \
         2>&1 | tee "$LAST_LOG" >> "$GLOBAL_LOG"
@@ -525,7 +561,10 @@ mixing_pair() {
         return 0
     fi
 
-    local OUT_DIR="$SWEEP_ROOT/case${CASE_ID}_mixing_${LABEL}"
+    # Mixing always compares a ROM archive against a FOM archive, so
+    # its natural home is the ROM tree next to the ROM particles.vtkhdf
+    # that the diagnostic is scoring.
+    local OUT_DIR="$ROM_RECON_ROOT/cylindrical_${CASE_ID}.gid/post_pt_mixing/${LABEL}"
     mkdir -p "$OUT_DIR"
     local LOG="$OUT_DIR/mixing.log"
 
@@ -535,7 +574,7 @@ mixing_pair() {
     fi
 
     log "  case $CASE_ID / $LABEL: mixing (log $LOG)"
-    python3 -u "$JAXTRACE/scripts/lagrangian_mixing_diagnostics.py" \
+    "$PYTHON" -u "$JAXTRACE/scripts/lagrangian_mixing_diagnostics.py" \
         --fom-vtkhdf "$FOM_PART" --rom-vtkhdf "$ROM_PART" \
         --out-dir "$OUT_DIR" --stride "$MIXING_STRIDE" --plot \
         2>&1 | tee "$LOG" >> "$GLOBAL_LOG"

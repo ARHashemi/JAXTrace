@@ -25,6 +25,11 @@ def main() -> int:
     ap.add_argument("--dt", type=float, default=1e-3)
     ap.add_argument("--parser", required=True,
                     help="Path to parse_rtxadvect_log.py")
+    ap.add_argument("--particles", default=None,
+                    help="Optional particle-seed file (RTXAdvect --input-particles). "
+                         "When given, replaces --seeding-box so the query "
+                         "distribution matches MALMO's in-mesh barycentric "
+                         "sampler. Produced by make_inmesh_particles.py.")
     a = ap.parse_args()
 
     meta = json.load(open(a.meta))
@@ -45,9 +50,13 @@ def main() -> int:
         "--input_mesh", verts, cells,
         "--input_tet_velocity_field", zvel,
         "-dt", str(a.dt),
-        "--seeding-box", *sbox,
-        "--save-streamline-to-vtk", str(out / "streamline.vtk"),
     ]
+    # Seeding: in-mesh particle file when supplied, else bbox-uniform.
+    if a.particles:
+        cmd += ["--input-particles", a.particles]
+    else:
+        cmd += ["--seeding-box", *sbox]
+    cmd += ["--save-streamline-to-vtk", str(out / "streamline.vtk")]
     t0 = time.time()
     with open(log, "w") as f:
         proc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=out)
