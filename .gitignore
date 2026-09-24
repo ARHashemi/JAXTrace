@@ -99,3 +99,22 @@ results/
 # Paper-revision benchmark summaries (small, worth tracking despite *.csv rule above)
 !joint_summary.csv
 !joint_summary.md
+
+# ── ROM / damage outputs and run logs (large, regenerable on the workstation)
+rom_out/
+rom_out_*/
+logs/lumi/
+paper_figs/
+paper_tables_warmed/
+mesh_cyclic_*.pvd
+
+# Generated data containers
+*.vtkhdf
+*.npz
+*.h5
+
+# Slide decks (kept out of the repo; the .md source is tracked where useful)
+*.pptx
+
+# Editor/OS stragglers
+signal-desktop.sources
