@@ -58,6 +58,11 @@ from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_c
 from jaxtrace.gpu.search.mesh_aligned_octree_aabb import extract_octree_cells_aabb
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_morton_builder import build_mesh_aligned_morton_structure
+from jaxtrace.gpu.search.morton_global_builder import build_global_morton_structure
+from jaxtrace.gpu.search.morton_global_search import (
+    upload_global_morton_to_gpu,
+    search_L2_global_morton_single,
+)
 from jaxtrace.gpu.search.mesh_aligned_morton_search import (
     upload_mesh_aligned_morton_to_gpu,
     search_L2_mesh_aligned_morton_single,
@@ -87,6 +92,19 @@ def parse_args():
     parser.add_argument(
         "--input", type=Path, default=Path("/media/arhashemi/HDD2TB/Workspace/welding/Edgar/FLA/post"),
         help="Base input directory containing 0eule/ (mesh)",
+    )
+    parser.add_argument(
+        "--vtu", type=Path, default=None,
+        help="Static single-file .vtu/.pvtu tet mesh. When given, this REPLACES "
+             "the time-dependent PVTU loading path (--input/--mesh-subdir/"
+             "--mesh-pattern/--vel-range are ignored) and no velocity field is "
+             "loaded. Use for static point-location benchmarks on meshes that "
+             "are not time-dependent simulation output.",
+    )
+    parser.add_argument(
+        "--mesh-label", type=str, default=None,
+        help="Human-readable mesh name stamped into the log (defaults to the "
+             "--vtu stem, or the mesh subdir for the PVTU path).",
     )
     parser.add_argument(
         "--mesh-subdir", type=str, default="0eule",
@@ -138,6 +156,14 @@ def parse_args():
         "--perturbations", type=float, nargs="+", default=[0.0],
         help="List of perturbation scale factors (multiples of element size)",
     )
+    parser.add_argument(
+        "--in-domain-oracle", action="store_true",
+        help="Determine the in-domain reference set with an exhaustive "
+             "MALMO^AABB 5x5x5 search instead of the mesh bounding box. "
+             "On non-convex meshes this removes the ambiguity between a "
+             "search failure and a query perturbed outside the mesh "
+             "volume, so N_fail counts only genuine failures.",
+    )
     # --- Intra-element accuracy test ---
     parser.add_argument(
         "--position-types", type=str, nargs="+",
@@ -165,6 +191,27 @@ def parse_args():
         help="Particle counts for scalability sweep",
     )
     # --- Feature toggles ---
+    parser.add_argument(
+        "--seed-per-level", type=int, default=0,
+        help="Stratified seeding: draw this many elements from EACH refinement "
+             "level band to form the seed pool, instead of sampling uniformly "
+             "over all elements. Guarantees every level is represented. "
+             "0 (default) = uniform sampling.",
+    )
+    parser.add_argument(
+        "--skip-global-morton", action="store_true",
+        help="Skip the centroid-based global Morton baseline (gmorton r=*).",
+    )
+    parser.add_argument(
+        "--global-morton-leaf-capacity", type=int, default=256,
+        help="Leaf capacity for the centroid-based global Morton structure. "
+             "The +/-w band is measured in leaves of this size.",
+    )
+    parser.add_argument(
+        "--global-morton-radii", type=int, nargs="+", default=[2, 10],
+        help="Band radii for the centroid-based global Morton baseline. "
+             "Radius N searches 2N+1 leaves.",
+    )
     parser.add_argument(
         "--skip-intra", action="store_true",
         help="Skip intra-element accuracy test (faster run)",
@@ -307,6 +354,41 @@ def search_1x1x1_batch(positions_gpu, octree_gpu, batch_size=50000):
         all_tests[start:end] = np.array(tests, dtype=np.int32)
 
     return all_eids, all_tests
+
+
+def search_global_morton_batch(positions_gpu, gmorton_gpu, search_radius, batch_size=50000):
+    """
+    Centroid-based global Morton baseline.
+
+    Unlike search_radius_batch (which bands over mesh-aligned parent cubes
+    recovered from Kuhn structure, and is therefore undefined on general
+    unstructured tets), this baseline sorts ALL elements by the Morton code
+    of their centroid and scans a +/-search_radius band of fixed-capacity
+    leaves. It has no Kuhn requirement and runs on any tetrahedral mesh,
+    which makes it the fair test of whether 1-D space-filling-curve
+    locality is sufficient for host-cell recovery.
+
+    NOTE: the band is measured in LEAVES (capacity 256 elements), not in
+    single cells, so w = 2*search_radius + 1 leaves.
+    """
+    n = positions_gpu.shape[0]
+    radius_jax = jnp.int32(search_radius)
+
+    @jax.jit
+    def _batch(pos_batch):
+        def single(pos):
+            return search_L2_global_morton_single(
+                pos, gmorton_gpu, search_radius=radius_jax
+            )
+        return jax.vmap(single)(pos_batch)
+
+    all_eids = np.full(n, -1, dtype=np.int32)
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        eids = _batch(positions_gpu[start:end])
+        eids = jax.block_until_ready(eids)
+        all_eids[start:end] = np.array(eids, dtype=np.int32)
+    return all_eids
 
 
 def search_radius_batch(positions_gpu, morton_gpu, search_radius, batch_size=50000):
@@ -518,6 +600,72 @@ def generate_intra_element_particles(connectivity, node_positions, n_particles, 
     return positions, source_elements
 
 
+def load_static_vtu_tet_mesh(vtu_path, tetrahedralize=True):
+    """
+    Load a static single-file .vtu/.pvtu tetrahedral mesh.
+
+    Companion to the time-dependent ``load_velocity_sequence_from_pvtu`` path:
+    returns the same (node_positions, connectivity) pair but with no velocity
+    sequence, so static point-location benchmarks can run on meshes that are
+    not simulation output (Stanford Bunny, Wang et al. microfluidics / porous
+    media, Kim et al. fuel-pin, ...).
+
+    Non-tet cells are decomposed via vtkDataSetTriangleFilter, matching the
+    behaviour of scripts/scone_bench/bench_malmo_pointloc.py so both harnesses
+    see an identical tet mesh for the same input file.
+
+    Returns
+    -------
+    node_positions : (n_nodes, 3) float64
+    connectivity   : (n_elements, 4) int32
+    """
+    import vtk
+
+    reader = vtk.vtkXMLGenericDataObjectReader()
+    reader.SetFileName(str(vtu_path))
+    reader.Update()
+    ds = reader.GetOutput()
+    if ds is None or not ds.IsA("vtkUnstructuredGrid"):
+        raise ValueError(f"{vtu_path}: expected vtkUnstructuredGrid")
+
+    n_pts = ds.GetNumberOfPoints()
+    n_cells = ds.GetNumberOfCells()
+    if n_pts == 0 or n_cells == 0:
+        raise ValueError(f"{vtu_path}: empty mesh")
+
+    n_tet_native = sum(
+        1 for cid in range(n_cells)
+        if ds.GetCell(cid).GetCellType() == vtk.VTK_TETRA
+    )
+    n_other = n_cells - n_tet_native
+    if n_other > 0 and tetrahedralize:
+        print(f"  tetrahedralising {n_other:,} non-tet cells "
+              f"(passing through {n_tet_native:,} native tets)")
+        tri = vtk.vtkDataSetTriangleFilter()
+        tri.SetInputData(ds)
+        tri.TetrahedraOnlyOn()
+        tri.Update()
+        ds = tri.GetOutput()
+        n_pts = ds.GetNumberOfPoints()
+        n_cells = ds.GetNumberOfCells()
+        print(f"  after tetrahedralisation: {n_pts:,} nodes, {n_cells:,} tets")
+
+    pts = np.empty((n_pts, 3), dtype=np.float64)
+    for i in range(n_pts):
+        pts[i] = ds.GetPoint(i)
+
+    conn = []
+    for cid in range(n_cells):
+        c = ds.GetCell(cid)
+        if c.GetCellType() == vtk.VTK_TETRA:
+            ids = c.GetPointIds()
+            conn.append([int(ids.GetId(j)) for j in range(4)])
+    if not conn:
+        raise ValueError(f"{vtu_path}: no tet cells even after tetrahedralisation")
+
+    return pts, np.asarray(conn, dtype=np.int32)
+
+
 def compute_element_sizes(connectivity, node_positions):
     """Compute characteristic size (minimum edge length) per element."""
     v = node_positions[connectivity]  # (n_elem, 4, 3)
@@ -598,7 +746,7 @@ def hlo_cost_analysis(jit_fn, sample_input):
 
 
 def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu,
-                         radius=None, octree_gpu_aabb=None):
+                         radius=None, octree_gpu_aabb=None, gmorton_gpu=None):
     """Build a jitted vmapped batch function for cost analysis on a single batch."""
     if method_type == '1x1x1':
         max_tests = jnp.int32(150)
@@ -647,6 +795,14 @@ def build_jit_for_method(method_type, octree_gpu_vertex, octree_gpu_pc, morton_g
                 return search_mesh_aligned_octree_multi_local_where(pos, octree_gpu_aabb, max_tests=max_tests)
             return jax.vmap(single)(pos_batch)
         return _batch
+    elif method_type == 'gmorton':
+        radius_jax = jnp.int32(radius)
+        @jax.jit
+        def _batch(pos_batch):
+            def single(pos):
+                return search_L2_global_morton_single(pos, gmorton_gpu, search_radius=radius_jax)
+            return jax.vmap(single)(pos_batch)
+        return _batch
     elif method_type == 'radius':
         radius_jax = jnp.int32(radius)
         @jax.jit
@@ -685,20 +841,41 @@ def main():
     build_meta = {}
 
     # ---- Load mesh ----
-    MESH_BASE_PATH = args.input / args.mesh_subdir
-    print(f"[1/5] Loading mesh from {MESH_BASE_PATH} ...")
-    t0 = time.time()
+    # Two input paths:
+    #   (a) --vtu: static single-file tet mesh, no velocity field. Used for
+    #       point-location benchmarks on meshes that are not time-dependent
+    #       simulation output.
+    #   (b) default: time-dependent PVTU sequence (the FSW application mesh).
+    if args.vtu is not None:
+        mesh_label = args.mesh_label or Path(args.vtu).stem
+        print(f"[1/5] Loading static mesh from {args.vtu} ...")
+        print(f"      mesh label: {mesh_label}")
+        t0 = time.time()
 
-    with nvtx_range("stage1.mesh_io_pvtu_load"):
-        t_io_0 = time.time()
-        node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
-            base_path=MESH_BASE_PATH,
-            file_pattern=args.mesh_pattern,
-            timestep_range=tuple(args.vel_range),
-            field_name=args.vel_field,
-            verbose=False,
-        )
-        build_times['mesh_io_pvtu_load'] = time.time() - t_io_0
+        with nvtx_range("stage1.mesh_io_vtu_load"):
+            t_io_0 = time.time()
+            node_positions, connectivity = load_static_vtu_tet_mesh(args.vtu)
+            velocity_sequence = None
+            build_times['mesh_io_vtu_load'] = time.time() - t_io_0
+    else:
+        mesh_label = args.mesh_label or args.mesh_subdir
+        MESH_BASE_PATH = args.input / args.mesh_subdir
+        print(f"[1/5] Loading mesh from {MESH_BASE_PATH} ...")
+        t0 = time.time()
+
+        with nvtx_range("stage1.mesh_io_pvtu_load"):
+            t_io_0 = time.time()
+            node_positions, connectivity, velocity_sequence = load_velocity_sequence_from_pvtu(
+                base_path=MESH_BASE_PATH,
+                file_pattern=args.mesh_pattern,
+                timestep_range=tuple(args.vel_range),
+                field_name=args.vel_field,
+                verbose=False,
+            )
+            build_times['mesh_io_pvtu_load'] = time.time() - t_io_0
+
+    build_meta['mesh_label'] = mesh_label
+    build_meta['mesh_source'] = str(args.vtu) if args.vtu is not None else str(args.input / args.mesh_subdir)
 
     with nvtx_range("stage1.mesh_node_deduplication"):
         t_dedup_0 = time.time()
@@ -866,22 +1043,115 @@ def main():
             )
             build_times['octree_upload_aabb'] = time.time() - t_aabb_upload_0
 
-    # Mesh-aligned Morton structure (for radius search) — only with vertex
+    # Mesh-aligned Morton structure (for radius search) — only with vertex.
+    # morton_applicable stays False unless the structure actually builds on
+    # this mesh class (see the applicability gate below).
     morton_gpu = None
+    morton_applicable = False
     if use_vertex:
         t_m_0 = time.time()
         mesh_octree_cells_single = extract_octree_cells_single(
             node_positions, connectivity, tolerance=1e-6, verbose=False
         )
-        morton_struct = build_mesh_aligned_morton_structure(
-            node_positions, connectivity, mesh_octree_cells=mesh_octree_cells_single, verbose=False
+
+        # --- Applicability pre-check (MUST precede the builder) --------------
+        # extract_octree_cells_single() skips every non-Kuhn element. On a
+        # fully non-Kuhn mesh it returns ZERO cells, and
+        # build_mesh_aligned_morton_structure() then dies on
+        # cell_morton_codes.min() ("zero-size array to reduction operation").
+        # So the emptiness check has to happen here, before the builder runs,
+        # not after it.
+        n_single_cells = int(mesh_octree_cells_single.n_cells)
+        n_registered_morton = (
+            int(mesh_octree_cells_single.cell_to_elements_offsets[-1])
+            if n_single_cells > 0 else 0
         )
-        morton_gpu = upload_mesh_aligned_morton_to_gpu(
-            node_positions, connectivity, morton_struct, verbose=False
+        morton_coverage = n_registered_morton / max(n_elements, 1)
+
+        MORTON_MIN_COVERAGE = 0.50
+        morton_applicable = (n_single_cells > 0) and (morton_coverage >= MORTON_MIN_COVERAGE)
+
+        build_meta['morton_n_cells'] = n_single_cells
+        build_meta['morton_registered_elements'] = n_registered_morton
+        build_meta['morton_coverage_fraction'] = float(morton_coverage)
+        build_meta['morton_applicable'] = bool(morton_applicable)
+
+        if morton_applicable:
+            morton_struct = build_mesh_aligned_morton_structure(
+                node_positions, connectivity,
+                mesh_octree_cells=mesh_octree_cells_single, verbose=False
+            )
+            morton_gpu = upload_mesh_aligned_morton_to_gpu(
+                node_positions, connectivity, morton_struct, verbose=False
+            )
+            build_times['morton_structure_build_upload'] = time.time() - t_m_0
+            print(f"  Morton structure: {morton_struct.n_cells:,} cells, "
+                  f"{morton_struct.elements_per_cell_mean:.1f} elem/cell")
+        else:
+            build_times['morton_structure_build_upload'] = time.time() - t_m_0
+            print(f"  Morton structure: NOT BUILT "
+                  f"({n_single_cells:,} cells extractable)")
+
+        # --- Reporting for the Morton-linear baseline ------------------------
+        # extract_octree_cells_single() derives a parent cube per element from
+        # its axis-aligned edge triple, and SKIPS every element that has none
+        # (non-Kuhn). On a general unstructured tetrahedralisation almost every
+        # element is skipped, so the Morton structure collapses to a handful of
+        # cells and the w-band scan degenerates to ~0% found-rate.
+        #
+        # That degenerate number must NOT be reported as a Morton-linear
+        # baseline result: it would look like evidence that 1-D Morton locality
+        # is insufficient, when in fact the structure has no valid construction
+        # on this mesh class at all. The honest statement is "not applicable".
+        #
+        # Heuristic: a healthy structure registers a large fraction of the
+        # mesh. On the FSW mesh (99.9% Kuhn) this is ~0.17 cells/element with
+        # 5.9 elem/cell; a collapsed one is orders of magnitude below that.
+        # (Coverage and applicability are computed in the pre-check above,
+        # which must run before the builder to avoid its empty-array crash.)
+        if not morton_applicable:
+            morton_gpu = None  # disable the radius methods entirely
+            print()
+            print("  " + "!" * 74)
+            print(f"  WARNING: Morton-linear baseline NOT APPLICABLE on this mesh.")
+            print(f"           The Morton structure registers only "
+                  f"{n_registered_morton:,}/{n_elements:,} elements "
+                  f"({100*morton_coverage:.2f}%).")
+            print(f"           extract_octree_cells_single() requires each tet to have an")
+            print(f"           axis-aligned edge triple (Kuhn/Freudenthal decomposition);")
+            print(f"           non-Kuhn elements are skipped and cannot be registered.")
+            print(f"           The 'radius r=*' rows are SKIPPED for this mesh rather than")
+            print(f"           reported as a near-zero found-rate, which would misattribute")
+            print(f"           a missing construction to weak 1-D Morton locality.")
+            print("  " + "!" * 74)
+            print()
+        else:
+            print(f"  Morton baseline applicable: {n_registered_morton:,}/{n_elements:,} "
+                  f"elements registered ({100*morton_coverage:.1f}%)")
+
+    # --- Centroid-based global Morton baseline -----------------------------
+    # Independent of Kuhn structure: sorts every element by the Morton code
+    # of its centroid, so it is defined on ANY tetrahedral mesh. This is the
+    # generic "is 1-D space-filling-curve locality enough?" baseline, as
+    # opposed to the mesh-aligned parent-cube band above which requires
+    # axis-aligned edge triples.
+    gmorton_gpu = None
+    if not args.skip_global_morton:
+        t_gm_0 = time.time()
+        gmorton_struct = build_global_morton_structure(
+            node_positions, connectivity,
+            leaf_capacity=args.global_morton_leaf_capacity,
+            max_depth=21, verbose=False,
         )
-        build_times['morton_structure_build_upload'] = time.time() - t_m_0
-        print(f"  Morton structure: {morton_struct.n_cells:,} cells, "
-              f"{morton_struct.elements_per_cell_mean:.1f} elem/cell")
+        gmorton_gpu = upload_global_morton_to_gpu(
+            gmorton_struct, connectivity, node_positions
+        )
+        build_times['global_morton_build_upload'] = time.time() - t_gm_0
+        n_leaves = int(getattr(gmorton_struct, 'n_leaves', 0))
+        build_meta['global_morton_n_leaves'] = n_leaves
+        build_meta['global_morton_leaf_capacity'] = int(args.global_morton_leaf_capacity)
+        print(f"  Global Morton (centroid) structure: {n_leaves:,} leaves "
+              f"@ capacity {args.global_morton_leaf_capacity}")
 
     # --- Level distribution of octree cells ---
     ref_cells = mesh_octree_cells_multi if use_vertex else mesh_octree_cells_pc
@@ -958,6 +1228,46 @@ def main():
     print(f"    Valid elements: {len(valid_element_ids):,} / {n_elements:,} "
           f"({100*len(valid_element_ids)/n_elements:.1f}%)")
 
+    # ---- Stratified seeding by refinement level ----------------------------
+    # Uniform-over-elements sampling is dominated by the finest level: on the
+    # FSW mesh 85% of elements are at the finest level and only 0.07% at the
+    # coarsest, so a 5,000-query batch draws ~4 coarse-element queries. Any
+    # failure mode specific to coarse-to-fine transitions (the P3 case of
+    # Section 4) is then invisible at the reported precision.
+    #
+    # With --seed-per-level N we draw N elements from EACH refinement level
+    # band, so every level is represented by construction and the per-level
+    # found-rate becomes directly readable.
+    if args.seed_per_level > 0:
+        _V = node_positions[connectivity[valid_element_ids]]
+        _h = (_V.max(axis=1) - _V.min(axis=1)).max(axis=1)
+        _h_ref = _h.max()
+        # Level index from the element's characteristic size relative to the
+        # coarsest element present: level = round(-log2(h / h_max)).
+        _lv = np.round(-np.log2(np.maximum(_h, 1e-300) / _h_ref)).astype(int)
+
+        rng_strat = np.random.default_rng(args.seed)
+        picked, per_level_report = [], []
+        for L in np.unique(_lv):
+            pool = valid_element_ids[_lv == L]
+            take = min(args.seed_per_level, len(pool))
+            if take > 0:
+                picked.append(rng_strat.choice(pool, size=take, replace=False))
+            per_level_report.append((int(L), len(pool), int(take)))
+
+        if picked:
+            valid_element_ids = np.concatenate(picked)
+            print(f"\n  Stratified seeding ({args.seed_per_level} elements per level):")
+            print(f"    {'level':>6}{'available':>12}{'sampled':>10}")
+            for L, avail, take in per_level_report:
+                print(f"    {L:>6}{avail:>12,}{take:>10,}")
+            print(f"    total seed pool: {len(valid_element_ids):,} elements "
+                  f"across {len(per_level_report)} levels")
+            print(f"    NOTE: queries are drawn WITH replacement from this pool, "
+                  f"so each level receives ~{100.0/len(per_level_report):.1f}% of "
+                  f"the {args.n_particles:,} queries regardless of its share of "
+                  f"the mesh.")
+
     # ========================================================================
     # [4/5] ACCURACY BENCHMARK
     # ========================================================================
@@ -970,10 +1280,21 @@ def main():
     perturbation_factors = args.perturbations
 
     l2_methods = []
+    # Centroid-based global Morton: defined on any mesh, so it is listed
+    # first and independently of the Kuhn-dependent parent-cube band.
+    if gmorton_gpu is not None:
+        for _gr in args.global_morton_radii:
+            l2_methods.append((f'gmorton r={_gr}', 'gmorton', _gr))
     if use_vertex:
+        # The Morton-linear w-band baselines require a Kuhn-decomposable
+        # mesh; on general unstructured tets the structure collapses and the
+        # rows would be meaningless (see the applicability gate above).
+        if morton_applicable:
+            l2_methods += [
+                ('radius r=2',  'radius',  2),
+                ('radius r=10', 'radius', 10),
+            ]
         l2_methods += [
-            ('radius r=2',  'radius',  2),
-            ('radius r=10', 'radius', 10),
             ('1x1x1',       '1x1x1', None),
             ('3x3x3',       '3x3x3', None),
             ('5x5x5',       '5x5x5', None),
@@ -1018,6 +1339,45 @@ def main():
             (positions >= domain_min) & (positions <= domain_max), axis=1
         )
 
+    # ------------------------------------------------------------------
+    # In-domain oracle.
+    #
+    # The bounding-box test above cannot distinguish a genuine search
+    # failure from a query that perturbation pushed outside the mesh
+    # volume.  On non-convex domains (fill ratio < 1) that ambiguity
+    # dominates the reported failure counts at large perturbation.
+    #
+    # With --in-domain-oracle the reference set of interior queries is
+    # instead established by an exhaustive-coverage MALMO search
+    # (AABB registration at 5x5x5), which attains 100% strict
+    # correctness on every benchmark mesh.  A query that this oracle
+    # cannot host is outside the mesh volume, not a search failure.
+    # N_fail then counts only genuinely interior queries that a method
+    # failed to resolve.
+    # ------------------------------------------------------------------
+    if getattr(args, 'in_domain_oracle', False):
+        if octree_gpu_aabb is None:
+            raise SystemExit(
+                "--in-domain-oracle requires the AABB structure; "
+                "do not pass --skip-aabb with this flag."
+            )
+        print("  Establishing in-domain reference set "
+              "(MALMO^AABB 5x5x5 oracle)...")
+        for pf in perturbation_factors:
+            positions, _ = particle_sets[pf]
+            pos_gpu = jax.device_put(positions.astype(config.FLOAT_DTYPE_NP))
+            oracle_eids, _ = search_5x5x5_batch(
+                pos_gpu, octree_gpu_aabb, args.batch_size
+            )
+            oracle_eids = np.asarray(jax.block_until_ready(oracle_eids))
+            in_mesh = oracle_eids >= 0
+            n_bbox = int(in_bbox_sets[pf].sum())
+            in_bbox_sets[pf] = in_mesh
+            print(f"    perturbation={pf:.1f}x: in_mesh={int(in_mesh.sum())}"
+                  f"/{args.n_particles} (bbox said {n_bbox}; "
+                  f"{n_bbox - int(in_mesh.sum())} were outside the volume)")
+        print()
+
     results = {}
     n_warmup = args.warmup_runs
     n_runs = args.timing_runs
@@ -1047,6 +1407,9 @@ def main():
                 # AABB uses the same multi-local search as the vertex 3x3x3
                 # but on the AABB-registered octree.
                 search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_aabb, args.batch_size)
+            elif method_type == 'gmorton':
+                _r = radius
+                search_fn = lambda p, _r=_r: search_global_morton_batch(p, gmorton_gpu, _r, args.batch_size)
             elif method_type == 'radius':
                 _r = radius  # capture
                 search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
@@ -1058,7 +1421,7 @@ def main():
                 raw_result, times = timed_search(search_fn, positions_gpu, n_warmup, n_runs)
 
             # Extract results
-            if method_type == 'radius':
+            if method_type in ('radius', 'gmorton'):
                 found_eids = raw_result
                 mean_tests = float('nan')
             else:
@@ -1100,9 +1463,11 @@ def main():
             pct_found = 100 * n_found / n_p
             tests_str = f", mean_PIT={mean_tests:.1f}" if not np.isnan(mean_tests) else ""
             perf_str = f", {queries_per_sec:.0f} queries/s"
+            _dom = ("in_mesh" if getattr(args, 'in_domain_oracle', False)
+                    else "in_bbox")
             print(f"    perturb={pf:.1f}x: found={n_found:,} ({pct_found:.2f}%), "
                   f"correct_elem={n_correct:,}/{n_found:,} ({pct_correct_of_found:.1f}%), "
-                  f"search_fail={n_search_fail}, "
+                  f"search_fail={n_search_fail} (of {n_in_bbox:,} {_dom}), "
                   f"time={fmt_time_stats(times)}s{tests_str}{perf_str}")
 
         print()
@@ -1322,6 +1687,7 @@ def main():
         for method_name, method_type, radius in l2_methods:
             jit_fn = build_jit_for_method(
                 method_type, octree_gpu_vertex, octree_gpu_pc, morton_gpu,
+                gmorton_gpu=gmorton_gpu,
                 radius=radius, octree_gpu_aabb=octree_gpu_aabb,
             )
             ca = hlo_cost_analysis(jit_fn, sample_batch)
@@ -1416,10 +1782,16 @@ def main():
         print()
 
         intra_methods = []
+        if gmorton_gpu is not None:
+            for _gr in args.global_morton_radii:
+                intra_methods.append((f'gmorton r={_gr}', 'gmorton', _gr))
         if use_vertex:
+            if morton_applicable:
+                intra_methods += [
+                    ('radius r=2',  'radius',  2),
+                    ('radius r=10', 'radius', 10),
+                ]
             intra_methods += [
-                ('radius r=2',  'radius',  2),
-                ('radius r=10', 'radius', 10),
                 ('1x1x1',       '1x1x1', None),
                 ('3x3x3',       '3x3x3', None),
                 ('5x5x5',       '5x5x5', None),
@@ -1454,6 +1826,9 @@ def main():
                     )
                 elif method_type == '3x3x3_aabb':
                     search_fn = lambda p: search_3x3x3_batch(p, octree_gpu_aabb, args.batch_size)
+                elif method_type == 'gmorton':
+                    _r = radius
+                    search_fn = lambda p, _r=_r: search_global_morton_batch(p, gmorton_gpu, _r, args.batch_size)
                 elif method_type == 'radius':
                     _r = radius
                     search_fn = lambda p, _r=_r: search_radius_batch(p, morton_gpu, _r, args.batch_size)
@@ -1462,7 +1837,7 @@ def main():
 
                 raw_result, times = timed_search(search_fn, positions_gpu, n_warmup, n_runs)
 
-                if method_type == 'radius':
+                if method_type in ('radius', 'gmorton'):
                     found_eids = raw_result
                 else:
                     found_eids, _ = raw_result

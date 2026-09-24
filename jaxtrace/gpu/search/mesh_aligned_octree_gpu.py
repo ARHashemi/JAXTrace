@@ -110,6 +110,13 @@ class MeshAlignedOctreeGPU:
     # Shape: (max_level + 1, 3) float32, with unused levels set to 0
     level_cell_sizes: jax.Array  # (max_level + 1, 3) float32
 
+    # Mesh's actual refinement-level range (extracted from the mesh at build
+    # time, not hardcoded in the search kernel). Used by the search's
+    # multi-level loop so MALMO adapts to any conforming tet mesh
+    # regardless of scale — see paper Sec. 4 / Sec. 5.
+    min_level: jnp.int32
+    max_level: jnp.int32
+
     # Statistics
     n_cells: jnp.int32
     n_elements: jnp.int32
@@ -438,8 +445,9 @@ def upload_mesh_aligned_octree_to_gpu(
     # CRITICAL: Use actual cell sizes from mesh, not derived formulas!
     # This ensures grid index computation matches between assignment and query.
     unique_levels = np.unique(octree_cells.cell_levels)
-    max_level = int(np.max(unique_levels))
-    level_cell_sizes_cpu = np.zeros((max_level + 1, 3), dtype=config.FLOAT_DTYPE_NP)
+    min_level_int = int(np.min(unique_levels))
+    max_level_int = int(np.max(unique_levels))
+    level_cell_sizes_cpu = np.zeros((max_level_int + 1, 3), dtype=config.FLOAT_DTYPE_NP)
 
     for level in unique_levels:
         level_mask = octree_cells.cell_levels == level
@@ -449,6 +457,12 @@ def upload_mesh_aligned_octree_to_gpu(
         level_cell_sizes_cpu[level] = level_sizes[0]
 
     level_cell_sizes_gpu = jnp.array(level_cell_sizes_cpu, dtype=config.FLOAT_DTYPE_JNP)
+    min_level_gpu = jnp.int32(min_level_int)
+    max_level_gpu = jnp.int32(max_level_int)
+
+    if verbose:
+        print(f"  octree level range on this mesh: [{min_level_int}, {max_level_int}] "
+              f"(kernel will iterate {max_level_int - min_level_int + 1} levels)")
 
     # Statistics
     n_cells = jnp.int32(octree_cells.n_cells)
@@ -471,6 +485,8 @@ def upload_mesh_aligned_octree_to_gpu(
         bbox_min=bbox_min_gpu,
         bbox_max=bbox_max_gpu,
         level_cell_sizes=level_cell_sizes_gpu,
+        min_level=min_level_gpu,
+        max_level=max_level_gpu,
         n_cells=n_cells,
         n_elements=n_elements,
         mean_elements_per_cell=mean_elements_per_cell,

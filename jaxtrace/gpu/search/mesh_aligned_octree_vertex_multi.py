@@ -261,13 +261,51 @@ def extract_octree_cells_vertex_multi(
         )
         median_level = int(np.median(_kuhn_levels))
         median_cell_size = np.median(_kuhn_sizes, axis=0)
+        mesh_derived_fallback = False
     else:
-        median_level = 14
-        median_cell_size = np.array([
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-        ], dtype=np.float64)
+        # No Kuhn element anywhere in the mesh (a general unstructured
+        # tetrahedralisation). There is nothing to borrow a grid spacing
+        # from, so derive one from the mesh's own element geometry.
+        #
+        # The previous behaviour used a hardcoded level 14 with a
+        # cell size of ~1e-12, which made floor(vertex / cell_size)
+        # overflow into a single clamped Morton cell: the whole mesh
+        # collapsed into a handful of cells (observed: 793,716 of
+        # 819,726 elements in ONE cell), turning the neighbourhood
+        # search into a brute-force scan.
+        #
+        # Instead use the median per-element AABB extent as the grid
+        # spacing. This is the same quantity the mesh-aligned grid uses
+        # for non-regular meshes (Section "Per-level cell dimensions"),
+        # so the resulting cells are matched to actual element size.
+        _ext = (node_positions[connectivity].max(axis=1)
+                - node_positions[connectivity].min(axis=1))   # (n_elem, 3)
+        median_cell_size = np.median(_ext, axis=0).astype(np.float64)
+
+        # Guard against degenerate/flat directions: fall back to the
+        # largest finite median extent, then to the mesh bbox diagonal.
+        _pos = median_cell_size[median_cell_size > 0]
+        if _pos.size > 0:
+            _floor = float(_pos.min())
+        else:
+            _bbox = node_positions.max(axis=0) - node_positions.min(axis=0)
+            _floor = float(max(np.max(_bbox) / 1024.0, tolerance))
+        median_cell_size = np.where(
+            median_cell_size > 0, median_cell_size, _floor
+        ).astype(np.float64)
+
+        # Pick a level whose nominal spacing is closest to that size, so
+        # the cells land inside the level range the GPU kernel walks.
+        _bbox_span = float(np.max(node_positions.max(axis=0)
+                                  - node_positions.min(axis=0)))
+        _ratio = _bbox_span / float(np.min(median_cell_size))
+        median_level = int(np.clip(round(np.log2(max(_ratio, 1.0))), 1, 20))
+        mesh_derived_fallback = True
+
+        if verbose:
+            print(f"    No Kuhn elements in mesh — deriving orphan grid "
+                  f"from median element AABB extent: "
+                  f"cell_size={median_cell_size}, level={median_level}")
 
     for elem_id in non_kuhn_ids:
         node_ids = connectivity[elem_id]

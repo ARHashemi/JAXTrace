@@ -218,12 +218,23 @@ def extract_octree_cells_aabb(
         median_level = int(np.median(_kuhn_levels))
         median_cell_size = np.median(_kuhn_sizes, axis=0)
     else:
-        median_level = 14
-        median_cell_size = np.array([
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-        ], dtype=np.float64)
+        # All-non-Kuhn mesh (e.g. general Delaunay-like unstructured meshes
+        # such as StanfordBunny).  Derive an isotropic mesh-scale fallback
+        # from the median tet AABB diagonal so the AABB-overlap loop does
+        # bounded work — see mesh_aligned_octree_parent_cube.py for the
+        # same rationale.
+        _diag_lengths = np.empty(n_elements, dtype=np.float64)
+        for _eid in range(n_elements):
+            _v = node_positions[connectivity[_eid]]
+            _diag_lengths[_eid] = np.linalg.norm(_v.max(axis=0) - _v.min(axis=0))
+        _iso_size = max(float(np.median(_diag_lengths)), 1e-12)
+        median_cell_size = np.array(
+            [_iso_size, _iso_size, _iso_size], dtype=np.float64,
+        )
+        median_level = 0
+        if verbose:
+            print(f"  [fallback] all-non-Kuhn mesh detected: using isotropic "
+                  f"cell_size={_iso_size:.6g} at level 0")
 
     if non_kuhn_ids:
         if verbose:

@@ -259,7 +259,7 @@ def search_mesh_aligned_octree_with_neighbors_single(
         already_found = found_elem_id >= 0
 
         # Level to try (14, 13, 12, 11, 10, 9, 8, 7)
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
 
         # Use EXACT cell sizes from mesh for this level
         cell_size = octree_gpu.level_cell_sizes[level]
@@ -301,7 +301,7 @@ def search_mesh_aligned_octree_with_neighbors_single(
 
     # Try levels 14, 13, 12, 11, 10, 9, 8, 7 in sequence
     # Stop early if found
-    n_levels_to_try = 8
+    n_levels_to_try = octree_gpu.max_level - octree_gpu.min_level + 1
     init_state = (jnp.int32(-1), jnp.int32(0))
 
     final_elem_id, final_n_tests = lax.fori_loop(

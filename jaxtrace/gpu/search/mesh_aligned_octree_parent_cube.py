@@ -233,13 +233,35 @@ def extract_octree_cells_parent_cube(
         median_level = int(np.median(_kuhn_levels))
         median_cell_size = np.median(_kuhn_sizes, axis=0)
     else:
-        # Pathological all-non-Kuhn mesh: fall back to defaults.
-        median_level = 14
-        median_cell_size = np.array([
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-            max(tolerance, 1e-12),
-        ], dtype=np.float64)
+        # Pathological all-non-Kuhn mesh (no axis-aligned edges anywhere,
+        # e.g. Delaunay-like general unstructured meshes such as the
+        # StanfordBunny benchmark).  We can't infer a level or cell size
+        # from Kuhn structure, so derive them from mesh geometry:
+        #   - cell_size := median tet AABB diagonal (isotropic).
+        #   This gives ~ (n_elements)^(1/3) cells per axis for uniform
+        #   meshes — bounded work, mesh-scale-appropriate — and avoids
+        #   the tolerance-floor pathology that produced ~10^24-cell grids.
+        _diag_lengths = np.empty(n_elements, dtype=np.float64)
+        for _eid in range(n_elements):
+            _v = node_positions[connectivity[_eid]]
+            _diag_lengths[_eid] = np.linalg.norm(_v.max(axis=0) - _v.min(axis=0))
+        _iso_size = float(np.median(_diag_lengths))
+        _iso_size = max(_iso_size, 1e-12)  # guard against degenerate meshes
+        median_cell_size = np.array(
+            [_iso_size, _iso_size, _iso_size], dtype=np.float64,
+        )
+        # median_level is set so the resulting cells are visible to the
+        # kernel's level range.  Since we have no Kuhn levels to snap
+        # to, pick level 0 (finest granular cell) — the search's
+        # min_level..max_level loop will find it as long as any cell
+        # actually registers at level 0.  We DO use level 0 here rather
+        # than a nominal "14" because the fallback path only fires when
+        # kuhn_element_info is empty, so no other level is defined and
+        # the emitted octree will contain only these fallback cells.
+        median_level = 0
+        if verbose:
+            print(f"  [fallback] all-non-Kuhn mesh detected: using isotropic "
+                  f"cell_size={_iso_size:.6g} at level 0")
 
     if non_kuhn_ids:
         if verbose:

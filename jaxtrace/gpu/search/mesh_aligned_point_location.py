@@ -200,7 +200,7 @@ def search_mesh_aligned_octree_single(
         already_found = found_elem_id >= 0
 
         # Level to try (14, 13, 12, 11, 10, 9, 8, 7)
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
 
         # CRITICAL: Use EXACT cell sizes from mesh for each level
         cell_size = octree_gpu.level_cell_sizes[level]
@@ -276,7 +276,7 @@ def search_mesh_aligned_octree_single(
 
     # Try levels 14, 13, 12, 11, 10, 9, 8, 7 in sequence
     # Stop early if found
-    n_levels_to_try = 8
+    n_levels_to_try = octree_gpu.max_level - octree_gpu.min_level + 1
     init_state = (jnp.int32(-1), jnp.int32(0))
 
     final_elem_id, final_n_tests = lax.fori_loop(
@@ -332,7 +332,7 @@ def search_mesh_aligned_octree_multi_local(
 
         def search_level():
             # Level to try (14, 13, 12, 11, 10, 9, 8, 7)
-            level = 14 - level_idx
+            level = octree_gpu.max_level - level_idx
 
             # CRITICAL: Use EXACT cell sizes from mesh for each level
             cell_size = octree_gpu.level_cell_sizes[level]
@@ -468,7 +468,7 @@ def search_mesh_aligned_octree_multi_local(
         )
 
     # Try refinement levels 14, 13, 12, 11, 10, 9, 8, 7 (8 levels total)
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests = jax.lax.fori_loop(
         0, n_levels,
         try_level,
@@ -543,7 +543,7 @@ def search_mesh_aligned_octree_multi_local_where(
         found_elem, total_tests = carry
 
         # Level to try (14, 13, 12, 11, 10, 9, 8, 7)
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
 
         # CRITICAL: Use EXACT cell sizes from mesh for each level
         cell_size = octree_gpu.level_cell_sizes[level]
@@ -647,7 +647,7 @@ def search_mesh_aligned_octree_multi_local_where(
         return out_elem, out_tests
 
     # Try refinement levels 14, 13, 12, 11, 10, 9, 8, 7 (8 levels total)
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests = jax.lax.fori_loop(
         0, n_levels,
         try_level,
@@ -684,7 +684,7 @@ def search_mesh_aligned_octree_1x1x1_where(
         """Try searching center cell at one refinement level."""
         found_elem, total_tests = carry
 
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
         cell_size = octree_gpu.level_cell_sizes[level]
 
         i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
@@ -767,7 +767,7 @@ def search_mesh_aligned_octree_1x1x1_where(
         return out_elem, out_tests
 
     # Try refinement levels 14, 13, 12, 11, 10, 9, 8, 7
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests = jax.lax.fori_loop(
         0, n_levels,
         try_level,
@@ -808,7 +808,7 @@ def search_mesh_aligned_octree_5x5x5_where(
         """Try searching 5×5×5 neighborhood at one refinement level."""
         found_elem, total_tests = carry
 
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
         cell_size = octree_gpu.level_cell_sizes[level]
 
         i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
@@ -898,7 +898,7 @@ def search_mesh_aligned_octree_5x5x5_where(
         return out_elem, out_tests
 
     # Try refinement levels 14, 13, 12, 11, 10, 9, 8, 7
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests = jax.lax.fori_loop(
         0, n_levels,
         try_level,
@@ -925,7 +925,7 @@ def search_mesh_aligned_octree_3x3x3_with_stats(
 
     def try_level(level_idx, carry):
         found_elem, total_tests, found_level = carry
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
         cell_size = octree_gpu.level_cell_sizes[level]
 
         i_base = jnp.floor(pos[0] / cell_size[0]).astype(jnp.int32)
@@ -1005,7 +1005,7 @@ def search_mesh_aligned_octree_3x3x3_with_stats(
 
         return out_elem, out_tests, out_level
 
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests, final_level = jax.lax.fori_loop(
         0, n_levels, try_level,
         (jnp.int32(-1), jnp.int32(0), jnp.int32(-1))
@@ -1200,7 +1200,7 @@ def search_mesh_aligned_octree_static_where(
         """Try searching 3×3×3 neighbourhood at one refinement level."""
         found_elem, total_tests = carry
 
-        level = 14 - level_idx
+        level = octree_gpu.max_level - level_idx
 
         cell_size = octree_gpu.level_cell_sizes[level]
 
@@ -1292,7 +1292,7 @@ def search_mesh_aligned_octree_static_where(
 
         return out_elem, out_tests
 
-    n_levels = 8
+    n_levels = octree_gpu.max_level - octree_gpu.min_level + 1
     final_elem_id, final_n_tests = jax.lax.fori_loop(
         0, n_levels,
         try_level,

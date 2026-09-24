@@ -944,9 +944,9 @@ def _run_analytic_tracking(args):
     # is loaded, so leaving them in their CLI defaults must not block an
     # analytic run.
     rejected = []
-    if args.seed_source not in ("grid", "box", "grid-frac", "box-frac"):
+    if args.seed_source not in ("grid", "box", "grid-frac", "box-frac", "file"):
         rejected.append(
-            f"--seed-source={args.seed_source} (analytic path: use grid/box/grid-frac/box-frac)"
+            f"--seed-source={args.seed_source} (analytic path: use grid/box/grid-frac/box-frac/file)"
         )
     if getattr(args, "femuss_compare", False):
         rejected.append("--femuss-compare (mesh-tied)")
@@ -1055,7 +1055,29 @@ def _run_analytic_tracking(args):
     t_seed = _time.time()
     rng = np.random.default_rng(args.seed if hasattr(args, 'seed') else 42)
 
-    if args.seed_source in ("grid", "grid-frac"):
+    if args.seed_source == "file":
+        # Load positions from an .npy / .npz / .vtkhdf file.  vtkhdf is
+        # supported via a small inline reader so grid PT can start from
+        # the same particles a mesh PT was seeded with (typically the
+        # step-0 slice of the mesh PT's output particles.vtkhdf).
+        seed_path = Path(args.seed_file)
+        if not seed_path.exists():
+            raise FileNotFoundError(f"Seed file not found: {seed_path}")
+        if seed_path.suffix == ".vtkhdf":
+            import h5py
+            with h5py.File(seed_path, "r") as f:
+                offsets = f["VTKHDF/Steps/PointOffsets"][:]
+                n_particles = int(offsets[1] - offsets[0]) if len(offsets) > 1 \
+                    else f["VTKHDF/Points"].shape[0]
+                positions = f["VTKHDF/Points"][:n_particles].astype(
+                    config.FLOAT_DTYPE_NP)
+            print(f"  Seed source: vtkhdf file {seed_path.name}")
+            print(f"    step-0 slice: {n_particles:,} particles")
+        else:
+            positions, _, _ = seed_from_file(args)
+            n_particles = positions.shape[0]
+
+    elif args.seed_source in ("grid", "grid-frac"):
         # Build a uniform grid inside the bbox.
         if args.seed_source == "grid-frac":
             if args.seed_fraction is None or len(args.seed_fraction) != 6:

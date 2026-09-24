@@ -150,6 +150,31 @@ PAPER_MESH_PROPS = {
 # Log parsers — each returns the "measured" numbers for one table
 # =============================================================================
 
+def morton_baseline_applicable(log_text: str) -> bool:
+    """
+    True unless the harness flagged the Morton-linear baseline as
+    inapplicable on this mesh.
+
+    The Morton structure is built from axis-aligned parent cubes
+    (extract_octree_cells_single), so it only has a valid construction on
+    Kuhn/Freudenthal-decomposed meshes. On a general unstructured
+    tetrahedralisation nearly every element is skipped, the structure
+    collapses, and the w-band scan reports a near-zero found-rate.
+
+    Reporting that number as "Morton-linear w=5/w=21" would be a false
+    positive for the paper's argument: it looks like evidence that 1-D
+    Morton locality is insufficient, when the real cause is that the
+    structure cannot be built at all. benchmark_l2_accuracy.py emits an
+    explicit NOT APPLICABLE banner in that case; honour it here.
+    """
+    return "Morton-linear baseline NOT APPLICABLE" not in log_text
+
+
+def drop_morton_rows(d: dict) -> dict:
+    """Remove Morton-linear entries from a parsed per-method dict."""
+    return {k: v for k, v in d.items() if not k.startswith("Morton-linear")}
+
+
 def parse_perturb_summary(log_text: str) -> dict:
     """Parse the perturbation-sweep per-method per-sigma summary.
 
@@ -953,6 +978,17 @@ def main():
     # ---- Extract every measured quantity ----
     perturb = parse_perturb_summary(log_text)
     intra = parse_intra_element(log_text)
+
+    # The Morton-linear baseline only has a valid construction on
+    # Kuhn-decomposed meshes. When the harness flagged it as inapplicable,
+    # drop its rows rather than letting a degenerate near-zero found-rate
+    # be tabulated as a baseline result.
+    morton_ok = morton_baseline_applicable(log_text)
+    if not morton_ok:
+        print("[sec6_postprocess] Morton-linear baseline flagged NOT APPLICABLE "
+              "for this mesh; dropping its rows from all tables.")
+        perturb = {m: v for m, v in perturb.items() if not m.startswith("Morton-linear")}
+        intra = drop_morton_rows(intra)
     scalability = parse_scalability(log_text)
     level_dist = parse_level_distribution(log_text)
     failure_raw = parse_failure_decomp(log_text)

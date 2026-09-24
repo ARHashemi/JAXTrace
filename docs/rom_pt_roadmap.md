@@ -23,6 +23,24 @@ The literature pointers cited in the review are Xiong et al.
 predictability asymmetry) and Vennell et al.'s OceanTracker work
 (regular-grid throughput evidence).
 
+A second review [`rom_pt_roadmap_REVIEW2.md`](rom_pt_roadmap_REVIEW2.md)
+(post-full-cohort-results) surfaced three basis-construction
+alternatives (Lagrangian-inner-product POD; discretely divergence-free
+POD; higher mode count) which were checked against the literature and
+consolidated in
+[`rom_pt_roadmap_REVIEW2_evaluation.md`](rom_pt_roadmap_REVIEW2_evaluation.md).
+That evaluation adds four more literature-backed next-steps (Steps
+9 – 12: integrator×interp pairing test, temporal-derivative snapshots,
+FTLE/LCS diagnostics on existing PT outputs, stirred-tank-literature
+re-framing) which have been folded into the plan doc's revised
+priority table.
+
+**Implementation blueprints** for every step (with 64 peer-reviewed
+references, JAX/GPU implementation notes, expected impact numbers):
+[`rom_pt_implementation_dossier.md`](rom_pt_implementation_dossier.md).
+Raw abstracts (self-contained archive for offline reference):
+[`rom_pt_literature_abstracts.md`](rom_pt_literature_abstracts.md).
+
 ## 0. Where we are today
 
 **DONE**
@@ -314,6 +332,46 @@ displacement threshold.
 
 ## 5. Uniform-grid projection experiment
 
+**FSW-cases results:** [rom_pt_step5_step6_grid_report.md](rom_pt_step5_step6_grid_report.md)
+covers §5 and §6 together for cases 000/001/003/004 with **24 grid
+variants** — 6 families (uniform / 2lvl / 4lvl / MALMO / MALMO×3 /
+mesh-resolving uniform) × 2 Stage-1 projections (raw P1, HCT-3D) ×
+2 Stage-2 interpolations (trilinear, Catmull-Rom tricubic).
+
+Current best practice (Parts 4 + 5 of that report — 20-case rollout
+done, 3 further variants tested + eliminated):
+
+- **Definitive winner across the full 20-case cohort**: `4lvl_hct`
+  (block-refined 4-level, HCT-3D Stage-1, trilinear Stage-2).
+  Cohort mean rms 5.6 mm at mid-run (step 950), 7.8 mm at final step
+  (step 2000).  Both metrics use `rms_alive` — RMS restricted to
+  particles both trackers agree are still inside the domain at the
+  reporting step.
+- **Part 5 tested 3 further variants** — shear-band-targeted
+  (`4lvl_r22_hct`), 5-nested-block (`5lvl_hct`), and MALMO at
+  cells-per-edge=6 (`malmo6_hct`).  All three are **statistically
+  significantly worse** than `4lvl_hct` (Wilcoxon p ≤ 0.03), by
+  small margins (+0.09 to +0.18 mm).  Grid-topology optimisation is
+  effectively saturated for this problem.
+- The Part-4 shear-band spatial-pattern **is a velocity-gradient
+  sensitivity effect, not a resolution shortage** — throwing finer
+  cells at the shear band doesn't help.  Roadmap §2 Xiong-et-al
+  amplification localised to r ≈ 21 mm.
+- MALMO is definitively closed out — mesh-aligned topology gives no
+  measurable advantage under HCT projection at any resolution
+  tested.
+- **Per-case xy error maps** (relative and absolute) show a
+  **universal 3× shear-ring amplification** at r ≈ 4 – 7 mm around
+  the pin, on every case, on every variant.  Shear-layer relative
+  error is ~34 % (cohort median); outer bulk is ~13 %.  The pattern
+  is identical between `4lvl_hct` and `malmo6_hct` — final proof
+  that grid topology is not the lever.
+
+**Throughput**: 42× wall-time speedup vs mesh + HCT-3D reference
+(35 s per case vs 24 min for the mesh path).  All grid variants
+run within 30 – 37 s per case regardless of cell count (kernel
+launch dominates arithmetic).
+
 **TODO** — the main throughput lever we can pull.  Motivation: with
 the mesh path (either FOM or ROM PVTU) every RK4 sub-step does a
 point-in-tet search, which is the dominant cost for cylA (Section-6
@@ -403,6 +461,22 @@ projection was supposed to have — a signal that Section 6 is needed
 even more strongly than the displacement criterion suggests.
 
 ## 6. Block-wise refined grid (fallback)
+
+**FSW-cases results:** covered together with §5 in
+[rom_pt_step5_step6_grid_report.md](rom_pt_step5_step6_grid_report.md).
+
+Under raw-P1 Stage-1 (Part 1 of the report): MALMO auto-captured
+layout wins, hand-picked radial block refinements (2lvl / 4lvl with
+r < 16 / 8 mm cutoffs) are *worse* than plain uniform, and the
+15M-cell mesh-resolving uniform is the worst variant.
+
+Under HCT-3D Stage-1 (Part 2, current best practice): **the
+leaderboard flips**. The 4lvl and 2lvl block-refined layouts win
+by 8 – 25 % over MALMO on every case, and even the very-fine
+uniform_half becomes viable (mid-pack rather than worst). Hand-
+picked radial cutoffs are *fine* once the source field is C¹ —
+the mesh-alignment premium that MALMO enjoyed under P1 was hiding
+a P1 defect, not a Stage-2 sampling benefit.
 
 **TODO — only if Section 5 doesn't pass the acceptance criterion.**
 

@@ -1,5 +1,16 @@
 # FSW-ROM velocity reconstruction — findings
 
+> **⚠ Errata (2026-09-09).** The 4.04 % ± 1.08 % figure below is the
+> accuracy of the **shipped FEMUSS basis**, not a limit of POD on this
+> data. A POD built directly from the same 20 snapshots reaches
+> **0.52 % with the same 3 modes** (0.66 % leave-one-out). The shipped
+> basis was evidently built from a different snapshot set — its stored
+> sigmas (101.30, 6.09, 3.68) differ from what these snapshots produce
+> (111.52, 5.65, 4.06), and an optimal projection onto its modes still
+> gives 3.16 %. Not a truncation, precision, or Fortran-vs-Python issue;
+> all were checked. See [`rom_pt_ourpod_rerun.md`](rom_pt_ourpod_rerun.md).
+
+
 **Scope**: quantify how well a linear POD reconstruction from the
 `cylindrical.som.fswrom.basis` / `.romdata` pair recovers the FOM
 velocity field on the 20 cylindrical cohort cases, document the

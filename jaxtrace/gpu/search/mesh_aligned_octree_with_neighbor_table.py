@@ -243,6 +243,11 @@ class MeshAlignedOctreeGPUWithNeighbors:
     # Level-specific cell sizes
     level_cell_sizes: jax.Array  # (max_level + 1, 3) float32
 
+    # Mesh's actual refinement-level range (mesh-adaptive; used by the search
+    # loop so MALMO works on any conforming tet mesh regardless of scale).
+    min_level: jnp.int32
+    max_level: jnp.int32
+
     # Statistics
     n_cells: jnp.int32
     n_elements: jnp.int32
@@ -306,8 +311,9 @@ def upload_octree_with_neighbors_to_gpu(
 
     # Compute level-specific cell sizes
     unique_levels = np.unique(octree_with_neighbors.cell_levels)
-    max_level = int(np.max(unique_levels))
-    level_cell_sizes_cpu = np.zeros((max_level + 1, 3), dtype=np.float32)
+    min_level_int = int(np.min(unique_levels))
+    max_level_int = int(np.max(unique_levels))
+    level_cell_sizes_cpu = np.zeros((max_level_int + 1, 3), dtype=np.float32)
 
     for level in unique_levels:
         level_mask = octree_with_neighbors.cell_levels == level
@@ -315,6 +321,8 @@ def upload_octree_with_neighbors_to_gpu(
         level_cell_sizes_cpu[level] = level_sizes[0]
 
     level_cell_sizes_gpu = jnp.array(level_cell_sizes_cpu, dtype=jnp.float32)
+    min_level_gpu = jnp.int32(min_level_int)
+    max_level_gpu = jnp.int32(max_level_int)
 
     # Statistics
     n_cells = jnp.int32(octree_with_neighbors.n_cells)
@@ -338,6 +346,8 @@ def upload_octree_with_neighbors_to_gpu(
         bbox_min=bbox_min_gpu,
         bbox_max=bbox_max_gpu,
         level_cell_sizes=level_cell_sizes_gpu,
+        min_level=min_level_gpu,
+        max_level=max_level_gpu,
         n_cells=n_cells,
         n_elements=n_elements,
         mean_elements_per_cell=mean_elements_per_cell,
