@@ -65,6 +65,7 @@ def _create_rk4_fully_fused_timedep_impl(
     mesh_bbox_max: Optional[jax.Array] = None,
     levelset_gpu: Optional[jax.Array] = None,
     boundary_elements_gpu: Optional[jax.Array] = None,
+    damage_scalars_gpu: Optional[jax.Array] = None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -181,6 +182,18 @@ def _create_rk4_fully_fused_timedep_impl(
         wall_config is not None and
         'extended' in wall_config.values()
     )
+
+    # ── Damage accumulation along the pathline ──────────────────────────────
+    # Phase 1 of IMPLEMENTATION_PLAN_void_damage.md: carry ONE scalar per
+    # particle (accumulated equivalent strain) integrated along its own path.
+    #
+    # damage_scalars_gpu is (n_timesteps, n_nodes) float32 — the same layout and
+    # the same `time_idx % n_timesteps` indexing as velocity_fields_gpu, so a
+    # steady case is simply n_timesteps == 1 (no branch, no special case).
+    #
+    # Resolved at build time: when it is None the traced graph is byte-identical
+    # to a run without damage, so existing results cannot regress.
+    use_damage = damage_scalars_gpu is not None
 
     # ============================================================================
     # Single-Particle Helper Functions (Time-Dependent)
@@ -555,6 +568,60 @@ def _create_rk4_fully_fused_timedep_impl(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    def sample_damage_scalar(
+        pos: jax.Array,
+        elem_id: jax.Array,
+        damage_field: jax.Array,   # (n_nodes,) for the current timestep
+    ) -> jax.Array:
+        """Barycentric interpolation of one nodal scalar at a particle.
+
+        Deliberately mirrors ``interpolate_velocity_single`` rather than
+        refactoring it: keeping the velocity path byte-identical is what lets a
+        damage-off run reproduce existing results exactly (Phase 1 gate).
+
+        The cost is 6 dot products and a 3x3 solve — the same algebra the
+        velocity interpolation does — plus one extra gather of 4 floats at
+        ``nodes_idx``, which the velocity read has already pulled into cache.
+        The expensive part of the step (five L0/L1/L2 element searches) is not
+        repeated.
+        """
+        valid = (elem_id >= 0) & (elem_id < len(connectivity))
+
+        nodes_idx = connectivity[elem_id]          # (4,)
+        nodes = node_positions[nodes_idx]          # (4, 3)
+        node_vals = damage_field[nodes_idx]        # (4,)
+
+        v0 = nodes[1] - nodes[0]
+        v1 = nodes[2] - nodes[0]
+        v2 = nodes[3] - nodes[0]
+        vp = pos - nodes[0]
+
+        d00 = jnp.dot(v0, v0)
+        d01 = jnp.dot(v0, v1)
+        d02 = jnp.dot(v0, v2)
+        d11 = jnp.dot(v1, v1)
+        d12 = jnp.dot(v1, v2)
+        d22 = jnp.dot(v2, v2)
+
+        dp0 = jnp.dot(vp, v0)
+        dp1 = jnp.dot(vp, v1)
+        dp2 = jnp.dot(vp, v2)
+
+        det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+        det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN,
+                        config.INTERPOLATION_DET_MIN, det)
+
+        b1 = (dp0 * (d11*d22 - d12*d12) - d01 * (dp1*d22 - dp2*d12) + d02 * (dp1*d12 - dp2*d11)) / det
+        b2 = (d00 * (dp1*d22 - dp2*d12) - dp0 * (d01*d22 - d02*d12) + d02 * (d01*dp2 - d02*dp1)) / det
+        b3 = (d00 * (d11*dp2 - d12*dp1) - d01 * (d01*dp2 - d02*dp1) + dp0 * (d01*d12 - d02*d11)) / det
+        b0 = 1.0 - b1 - b2 - b3
+
+        val = b0 * node_vals[0] + b1 * node_vals[1] + b2 * node_vals[2] + b3 * node_vals[3]
+
+        # A particle outside the mesh accumulates nothing rather than picking up
+        # whatever happens to sit at element 0.
+        return jnp.where(valid, val, jnp.asarray(0.0, dtype=config.FLOAT_DTYPE_JNP))
+
     def check_inside_tool(pos, elem_id):
         """Check if position is inside tool (level-set < 0). Returns boolean."""
         valid = (elem_id >= 0) & (elem_id < len(connectivity))
@@ -633,12 +700,19 @@ def _create_rk4_fully_fused_timedep_impl(
             velocity_fields_gpu: jax.Array,
             time_idx: int,
             last_valid_velocities: jax.Array = None,
+            damage_state_gpu: jax.Array = None,
         ):
             n_timesteps = velocity_fields_gpu.shape[0]
             vel_idx = time_idx % n_timesteps
             velocity_field = velocity_fields_gpu[vel_idx]
 
-            def rk4_single_particle(pos, elem_id, last_vel):
+            if use_damage:
+                # Same cyclic indexing as velocity, so a steady case is
+                # n_timesteps == 1 and every step reads index 0.
+                n_dmg = damage_scalars_gpu.shape[0]
+                damage_field = damage_scalars_gpu[time_idx % n_dmg]
+
+            def rk4_single_particle(pos, elem_id, last_vel, dmg):
                 # --- Extended domain: ballistic propagation for exited particles ---
                 if use_extended_domain:
                     already_exited = elem_id < 0
@@ -750,11 +824,30 @@ def _create_rk4_fully_fused_timedep_impl(
                 else:
                     vel_out = last_vel  # pass-through (unused when extended domain off)
 
+                # ── Damage accumulation ────────────────────────────────
+                # Explicit Euler at the k1 stage, not a 4th-order integration
+                # of the damage ODE: the driver is itself an interpolated
+                # field, so 4th-order accuracy on top of that buys nothing and
+                # would cost four extra samples per step.
+                if use_damage:
+                    edot_k1 = sample_damage_scalar(pos, elem_k1, damage_field)
+                    dmg_new = dmg + dt * edot_k1
+                    # Mirror exactly how the position is treated: if the step
+                    # was discarded, the accumulator must not advance either.
+                    if use_skip_step_on_fail:
+                        dmg_new = jnp.where(any_failed, dmg, dmg_new)
+                    if use_skip_step_on_tool:
+                        dmg_new = jnp.where(any_inside, dmg, dmg_new)
+                    if use_extended_domain:
+                        dmg_new = jnp.where(already_exited, dmg, dmg_new)
+                else:
+                    dmg_new = dmg
+
                 if collect_stats:
                     hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
-                    return pos_final, elem_final, hit_levels, vel_out
+                    return pos_final, elem_final, hit_levels, vel_out, dmg_new
                 else:
-                    return pos_final, elem_final, vel_out
+                    return pos_final, elem_final, vel_out, dmg_new
 
             # Provide zero velocities if not passed (non-extended mode)
             if use_extended_domain:
@@ -764,10 +857,18 @@ def _create_rk4_fully_fused_timedep_impl(
                 # Dummy array — not used in computation, just satisfies vmap signature
                 vels_in = jnp.zeros_like(positions_gpu)
 
+            # Dummy accumulator when damage is off — never read, just satisfies
+            # the vmap signature, exactly as vels_in does above.
+            if use_damage:
+                dmg_in = damage_state_gpu
+            else:
+                dmg_in = jnp.zeros(positions_gpu.shape[0],
+                                   dtype=config.FLOAT_DTYPE_JNP)
+
             if collect_stats:
-                positions_final, element_ids_final, all_hit_levels, vels_out = jax.vmap(
+                positions_final, element_ids_final, all_hit_levels, vels_out, dmg_out = jax.vmap(
                     rk4_single_particle
-                )(positions_gpu, element_ids_gpu, vels_in)
+                )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
 
                 # Aggregate counts across all particles and all 5 sub-steps
                 l0_hits = jnp.sum(all_hit_levels == 0).astype(jnp.int32)
@@ -775,19 +876,25 @@ def _create_rk4_fully_fused_timedep_impl(
                 l2_hits = jnp.sum(all_hit_levels == 2).astype(jnp.int32)
                 misses  = jnp.sum(all_hit_levels == -1).astype(jnp.int32)
 
+                # Damage is appended LAST so every existing unpacking site keeps
+                # working unchanged when damage is off.
                 if use_extended_domain:
-                    return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses), vels_out
+                    out = (positions_final, element_ids_final,
+                           (l0_hits, l1_hits, l2_hits, misses), vels_out)
                 else:
-                    return positions_final, element_ids_final, (l0_hits, l1_hits, l2_hits, misses)
+                    out = (positions_final, element_ids_final,
+                           (l0_hits, l1_hits, l2_hits, misses))
+                return out + (dmg_out,) if use_damage else out
             else:
-                positions_final, element_ids_final, vels_out = jax.vmap(
+                positions_final, element_ids_final, vels_out, dmg_out = jax.vmap(
                     rk4_single_particle
-                )(positions_gpu, element_ids_gpu, vels_in)
+                )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
 
                 if use_extended_domain:
-                    return positions_final, element_ids_final, vels_out
+                    out = (positions_final, element_ids_final, vels_out)
                 else:
-                    return positions_final, element_ids_final
+                    out = (positions_final, element_ids_final)
+                return out + (dmg_out,) if use_damage else out
 
         return rk4_step
 
@@ -820,6 +927,7 @@ def create_rk4_fully_fused_timedep(
     mesh_bbox_max=None,
     levelset_gpu=None,
     boundary_elements_gpu=None,
+    damage_scalars_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -835,6 +943,7 @@ def create_rk4_fully_fused_timedep(
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
         mesh_bbox_min, mesh_bbox_max, levelset_gpu, boundary_elements_gpu,
+        damage_scalars_gpu,
     )
     return step_fn
 
@@ -862,6 +971,7 @@ def create_rk4_fully_fused_timedep_with_stats(
     mesh_bbox_max=None,
     levelset_gpu=None,
     boundary_elements_gpu=None,
+    damage_scalars_gpu=None,
 ):
     """
     Create fully-fused RK4 integrator with time-dependent velocity.
@@ -880,5 +990,6 @@ def create_rk4_fully_fused_timedep_with_stats(
         mesh_aligned_octree_use_multi_local, mesh_aligned_octree_use_where,
         kdtree_gpu, kdtree_k_nearest, kdtree_max_tests,
         mesh_bbox_min, mesh_bbox_max, levelset_gpu, boundary_elements_gpu,
+        damage_scalars_gpu,
     )
     return step_fn, step_fn_with_stats

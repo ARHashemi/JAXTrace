@@ -483,6 +483,52 @@ def parse_args():
     # --- RK4 mode / experimental ---
     parser.add_argument("--rk4-mode", type=str, default="fused", choices=["fused", "split"],
                         help="RK4 kernel mode")
+    parser.add_argument("--damage", action="store_true", default=False,
+                        help="Accumulate a pathline-integrated damage scalar "
+                             "(effective strain rate by default) per particle. "
+                             "Adds one nodal-scalar sample per step at the k1 "
+                             "stage, reusing the element search already done "
+                             "for velocity. Off => compiled out entirely.")
+    parser.add_argument("--damage-driver", type=str, default="edot",
+                        choices=["edot", "models"],
+                        help="What to accumulate along pathlines. "
+                             "'edot' (Phase 1) = effective strain rate only; "
+                             "needs no pressure. "
+                             "'models' (Phase 3) = Rice-Tracey ln(Phi) AND "
+                             "Cockcroft-Latham C together, which need eta and "
+                             "s1_ratio and therefore ALSO load pressure and "
+                             "temperature.")
+    parser.add_argument("--pressure-field", type=str, default="Pressure",
+                        help="Nodal pressure array name, needed by "
+                             "--damage-driver=models for sigma_m = -p.")
+    parser.add_argument("--damage-order", type=int, default=1, choices=(1, 4),
+                        help="Quadrature order for the DAMAGE ACCUMULATOR only; "
+                             "the particle POSITION is always RK4. 1 = explicit "
+                             "Euler at the k1 stage (default, matches the 45-case "
+                             "survey). 4 = the RK4 weights (k1+2k2+2k3+k4)/6 over "
+                             "the four stages the velocity step already visits, which "
+                             "costs 3 extra gathers per scalar per step but NO extra "
+                             "element searches. Order 4 does not achieve 4th-order "
+                             "convergence here (the P1 driver is C0, so any 4th-order "
+                             "quadrature degrades across element faces); its real "
+                             "benefit is sampling the step INTERIOR rather than only "
+                             "its start, "
+                             "removing the k1-only bias where the driver has a steep "
+                             "gradient -- i.e. in the shear layer.")
+    parser.add_argument("--damage-mat", type=Path, default=None,
+                        help="GiD .mat supplying the Norton tables for "
+                             "sigma_eq. Defaults to the first *.mat found "
+                             "beside the case.")
+    parser.add_argument("--damage-steps-mm", type=float, default=None,
+                        help="Set --n-steps from a TRAVEL DISTANCE in mm "
+                             "instead of a step count: n_steps = "
+                             "(mm/1000)/(v_adv*dt), with v_adv and dt read "
+                             "from the case's data/*.som.{fix,dat}. This makes "
+                             "the physical distance comparable across cases "
+                             "whose dt and v_adv differ (see O22).")
+    parser.add_argument("--damage-out", type=Path, default=None,
+                        help="Write final per-particle damage to this .npz "
+                             "(default: alongside the other outputs).")
     parser.add_argument("--l2-vectorized", action="store_true", default=False,
                         help="Use vectorized L2 (experimental)")
     parser.add_argument("--registration", type=str, default=None,
@@ -888,6 +934,67 @@ def _resolve_case_paths(args):
 # =============================================================================
 # Analytic-source path
 # =============================================================================
+
+def read_case_solver_params(case_dir: Path) -> dict:
+    """Solver dt, signed RPM and advancing speed, from the case's own data/ folder.
+
+    This is the same source the per-case ``run_jaxtrace.sh`` files use, so a
+    tracking run derived from it matches the FOM it is tracking through.
+
+        TIME_STEP  <- data/*.som.dat     solver dt [s]
+        RPM        <- data/*.som.dat     signed; POSITIVE = counter-clockwise
+        v_adv      <- data/*.som.fix     largest prescribed BC speed [m/s]
+
+    ⚠️ Why this must be per case (O22). Both dt and v_adv vary between cases:
+    across the ROM cohort dt spans 1.9e-3 .. 3.8e-3 s and v_adv 0.005 .. 0.010 m/s,
+    so a FIXED n_steps samples wildly different physical distances -- 107 steps
+    carries a particle 2 mm in cylindrical_000 but only 0.4 mm in cylindrical_002.
+    PinShapes needs ~551 steps for the same 2 mm. Comparing cases at a fixed step
+    count compares different experiments.
+
+    Returns {"dt", "rpm", "v_adv"}, any of which may be None if not found.
+    """
+    out = {"dt": None, "rpm": None, "v_adv": None}
+    data = Path(case_dir) / "data"
+    if not data.is_dir():
+        return out
+
+    for f in sorted(data.glob("*.som.dat")):
+        for line in open(f, errors="replace"):
+            u = line.strip().upper()
+            if u.startswith("TIME_STEP:") and out["dt"] is None:
+                try:
+                    out["dt"] = float(line.split(":")[1])
+                except (ValueError, IndexError):
+                    pass
+            elif u.startswith("RPM:") and out["rpm"] is None:
+                try:
+                    out["rpm"] = float(line.split(":")[1])
+                except (ValueError, IndexError):
+                    pass
+        if out["dt"] is not None:
+            break
+
+    # The prescribed velocity BC. Take the largest physically plausible speed:
+    # the file also carries constraint codes (001/010/111) and zeros.
+    best = 0.0
+    for f in sorted(data.glob("*.som.fix")):
+        for line in open(f, errors="replace"):
+            tok = line.split()
+            if len(tok) < 4:
+                continue
+            for t in tok[2:5]:
+                try:
+                    v = abs(float(t))
+                except ValueError:
+                    continue
+                if 1.0e-6 < v < 10.0:
+                    best = max(best, v)
+        if best:
+            break
+    out["v_adv"] = best or None
+    return out
+
 
 def _run_analytic_tracking(args):
     """Drive RK4 tracking against a user-supplied analytic velocity field.
@@ -1443,6 +1550,38 @@ def main():
     EXPORT_FREQUENCY = args.export_freq
     LOG_INTERVAL = args.log_interval
 
+    # ------------------------------------------------------------------
+    # O22: derive N_STEPS (and optionally DT) from the case's OWN solver
+    # parameters, so a travel DISTANCE is comparable between cases.
+    #
+    # ⚠️ Why a fixed n_steps is not comparable. dt and v_adv both vary per case:
+    # across the ROM cohort dt spans 1.9e-3..3.8e-3 s and v_adv 0.005..0.010 m/s.
+    # 107 steps carries a particle 2 mm in cylindrical_000 and 0.4 mm in
+    # cylindrical_002; PinShapes needs ~551 steps for the same 2 mm. The Phase 1
+    # throughput gate ran 400 steps and NOT ONE particle reached the tool.
+    # ------------------------------------------------------------------
+    _case_params = read_case_solver_params(Path(args.input).resolve().parent)
+    if _case_params["dt"] or _case_params["v_adv"]:
+        print(f"  [case] solver dt={_case_params['dt']}  "
+              f"RPM={_case_params['rpm']} ({'CCW' if (_case_params['rpm'] or 0) > 0 else 'CW'})  "
+              f"v_adv={_case_params['v_adv']} m/s")
+    if args.damage_steps_mm is not None:
+        _dt = _case_params["dt"] or DT
+        _v = _case_params["v_adv"]
+        if not _v:
+            raise RuntimeError(
+                "--damage-steps-mm needs the advancing speed, which was not found "
+                f"in {Path(args.input).resolve().parent / 'data'}/*.som.fix")
+        N_STEPS = int(round((args.damage_steps_mm * 1.0e-3) / (_v * _dt)))
+        DT = _dt
+        print(f"  [case] --damage-steps-mm {args.damage_steps_mm} mm "
+              f"-> N_STEPS={N_STEPS}, DT={DT:.4g} s "
+              f"(travel {args.damage_steps_mm} mm at v={_v} m/s)")
+        if _case_params["rpm"]:
+            _rev = (60.0 / abs(_case_params["rpm"])) / _dt
+            print(f"  [case] that is {N_STEPS / _rev:.2f} tool revolutions "
+                  f"({_rev:.0f} steps/rev)")
+
     # Apply CLI flags to config
     config.RK4_SUBSTEP_BBOX_CLAMP = args.bbox_clamp and not args.no_bbox_clamp
     config.RK4_BOUNDARY_PROJECTION = not args.no_boundary_proj
@@ -1621,7 +1760,19 @@ def main():
     # Displacement, identical wall time to the legacy single-field path.
     fields_to_load = [VELOCITY_FIELD]
     needs_temperature = args.track_max_temperature or args.export_temperature
-    if needs_temperature:
+
+    # ⚠️ Phase 2: eta = sigma_m/sigma_eq and s1_ratio BOTH need pressure, and the
+    # Norton rheology needs temperature. Phase 1 deliberately avoided this (it
+    # integrated edot only, which depends on grad(u) alone) -- that property ends
+    # here. The extra arrays are read from the ALREADY-OPEN PVTU, so this is one
+    # more field per timestep, not a second traversal.
+    damage_needs_fields = args.damage and args.damage_driver != "edot"
+    if damage_needs_fields:
+        needs_temperature = True
+        if args.pressure_field not in fields_to_load:
+            fields_to_load.append(args.pressure_field)
+
+    if needs_temperature and args.temperature_field not in fields_to_load:
         fields_to_load.append(args.temperature_field)
 
     if len(fields_to_load) == 1:
@@ -1636,6 +1787,7 @@ def main():
             )
         )
         temperature_sequence = None
+        pressure_sequence = None
     else:
         # Multi-field path: one pass over the PVTUs for every needed field.
         from jaxtrace.gpu.mesh_loader_timedep import load_field_sequences_from_pvtu
@@ -1647,7 +1799,8 @@ def main():
             verbose=False,
         )
         velocity_sequence = _fields[VELOCITY_FIELD]
-        temperature_sequence = _fields[args.temperature_field]
+        temperature_sequence = _fields.get(args.temperature_field)
+        pressure_sequence = _fields.get(args.pressure_field)
         print(f"    Loaded fields in single pass: {fields_to_load}")
         print(f"    Temperature: {temperature_sequence.shape}  "
               f"({temperature_sequence.nbytes / (1024**2):.1f} MB)")
@@ -1687,7 +1840,16 @@ def main():
     print(f"  Elements: {connectivity.shape[0]:,}, Nodes: {node_positions.shape[0]:,}")
 
     print("  Deduplicating...")
-    scalar_seqs = {'Temperature': temperature_sequence} if temperature_sequence is not None else None
+    # ⚠️ EVERY nodal field must be remapped by dedup, not just velocity. Missing
+    # one gives a silent shape mismatch later: pressure stayed at 180,461 nodes
+    # while the deduplicated mesh had 140,461, and the damage builder failed with
+    # "operands could not be broadcast together".
+    scalar_seqs = {}
+    if temperature_sequence is not None:
+        scalar_seqs['Temperature'] = temperature_sequence
+    if pressure_sequence is not None:
+        scalar_seqs['Pressure'] = pressure_sequence
+    scalar_seqs = scalar_seqs or None
     node_positions, connectivity, n_dup, velocity_sequence = deduplicate_nodes(
         node_positions, connectivity,
         velocity_sequence=velocity_sequence,
@@ -1695,7 +1857,8 @@ def main():
         verbose=False,
     )
     if scalar_seqs is not None:
-        temperature_sequence = scalar_seqs['Temperature']
+        temperature_sequence = scalar_seqs.get('Temperature', temperature_sequence)
+        pressure_sequence = scalar_seqs.get('Pressure', pressure_sequence)
     connectivity = connectivity.astype(np.int32)
     print(f"  Removed {n_dup:,} duplicates -> {node_positions.shape[0]:,} nodes")
 
@@ -1845,6 +2008,93 @@ def main():
     set_inverse_matrices_gpu(M_inv_gpu, p0_gpu)
 
     velocity_sequence_gpu = jax.device_put(velocity_sequence)
+
+    # ------------------------------------------------------------------
+    # Pathline damage driver (--damage).
+    #
+    # Built from velocity_sequence, which is already loaded, deduplicated and
+    # final at this point — so this costs no extra PVTU pass and no extra
+    # per-step host transfer. The result is uploaded ONCE, shaped
+    # (n_timesteps, n_nodes) exactly like velocity_sequence_gpu, and indexed by
+    # the kernel with the same `time_idx % n_timesteps`.
+    #
+    # Only the effective strain rate is needed for Phase 1; it depends on grad(u)
+    # alone, not on pressure, which is why no second field load is required here.
+    # ------------------------------------------------------------------
+    damage_scalars_gpu = None
+    if args.damage:
+        from jaxtrace.damage.fields import build_damage_fields
+        from jaxtrace.damage.rheology import build_sigma_eq
+        t_dmg = time.time()
+        n_ts = velocity_sequence.shape[0]
+        n_nod = node_positions.shape[0]
+
+        # ⚠️ Phase 2: the kernel takes a STACK of nodal scalars, not one field.
+        #   driver='edot'   -> 1 slot : [edot]                   (Phase 1, no pressure)
+        #   driver='models' -> 3 slots: [edot, eta, s1_ratio]     (Phase 3 inputs)
+        # Shape is (n_slots, n_timesteps, n_nodes), mirroring the velocity
+        # contract so a steady case is n_timesteps == 1 and `time_idx % n_ts`
+        # reads slice 0 with no branch.
+        want_models = (args.damage_driver == "models")
+        slots = ["edot", "eta", "s1_ratio"] if want_models else ["edot"]
+
+        if want_models and pressure_sequence is None:
+            raise RuntimeError(
+                "--damage-driver=models needs the pressure field; "
+                f"'{args.pressure_field}' was not loaded. Check the field name.")
+
+        mat_path = args.damage_mat
+        if want_models and mat_path is None:
+            _cands = sorted(Path(args.input).resolve().parent.glob("*.mat")) \
+                     or sorted(Path(args.input).resolve().glob("*.mat"))
+            mat_path = _cands[0] if _cands else None
+
+        stack = np.empty((len(slots), n_ts, n_nod), dtype=config.FLOAT_DTYPE_NP)
+        for _t in range(n_ts):
+            if not want_models:
+                f = build_damage_fields(
+                    node_positions, connectivity,
+                    velocity_sequence[_t], None, verbose=False)
+                stack[0, _t] = f["edot"]
+                continue
+
+            # Two passes, as run_stage1 does: edot first, then sigma_eq from the
+            # FOM's own Norton tables, then rebuild so eta uses the real rheology.
+            edot0 = build_damage_fields(
+                node_positions, connectivity,
+                velocity_sequence[_t], None, verbose=False,
+            )["edot"].astype(np.float64)
+            T_t = (temperature_sequence[_t] if temperature_sequence is not None
+                   else None)
+            if mat_path is not None and T_t is not None:
+                sigma_eq, _ = build_sigma_eq("norton", edot0, T_t,
+                                             mat_path=mat_path)
+            else:
+                # No tables: sigma_eq proportional to edot. eta is then a RANKING
+                # quantity only, which is stated rather than hidden.
+                sigma_eq = None
+                print("  [damage] WARNING: no .mat or no temperature; "
+                      "sigma_eq falls back to 3*edot -> eta is scale-free")
+            f = build_damage_fields(
+                node_positions, connectivity,
+                velocity_sequence[_t], pressure_sequence[_t],
+                sigma_flow=sigma_eq, verbose=False)
+            stack[0, _t] = f["edot"]
+            stack[1, _t] = f["eta"]
+            stack[2, _t] = f["s1_ratio"]
+
+        damage_scalars_gpu = jax.device_put(stack)
+        print(f"  [damage] driver='{args.damage_driver}'  slots={slots}  "
+              f"{stack.shape}  ({stack.nbytes / (1024**2):.1f} MB)  "
+              f"built in {time.time() - t_dmg:.1f}s")
+        print(f"  [damage] edot     : median {float(np.median(stack[0])):.3g}  "
+              f"max {float(stack[0].max()):.3g} 1/s")
+        if want_models:
+            print(f"  [damage] eta      : median {float(np.median(stack[1])):+.4f}  "
+                  f"range [{float(stack[1].min()):+.3f}, {float(stack[1].max()):+.3f}]")
+            print(f"  [damage] s1_ratio : median {float(np.median(stack[2])):+.4f}")
+            if mat_path is not None:
+                print(f"  [damage] sigma_eq : norton, {mat_path}")
 
     # ------------------------------------------------------------------
     # Gradient recovery + higher-order velocity reconstruction.
@@ -2140,6 +2390,8 @@ def main():
         node_gradient_gpu=node_gradient_gpu,
         hct_bernstein_gpu=hct_bernstein_gpu,
         return_search_closures=args.hit_stats_log,
+        damage_scalars_gpu=damage_scalars_gpu,
+        damage_order=args.damage_order,
     )
     # create_rk4_comparison returns just rk4_step by default; when
     # --hit-stats-log is set, it returns (rk4_step, closures) so we can
@@ -2334,9 +2586,26 @@ def main():
         positions_gpu = apply_inlet_drift(
             positions_gpu, pending_entry_gpu, DT, drift_vel_gpu,
         )
-    positions_gpu, element_ids_gpu = rk4_step(
-        positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0
-    )
+    if args.damage:
+        # Per-particle accumulator, zero-initialised. Lives on the GPU for the
+        # whole run: no host transfer per step.
+        # ⚠️ Shape follows the driver: 1 scalar for 'edot', 2 for 'models'
+        # ([lnPhi, C]). The kernel vmaps over the leading particle axis either way.
+        _n_acc = 2 if args.damage_driver == "models" else 1
+        if _n_acc == 1:
+            damage_gpu = jnp.zeros(n_particles, dtype=config.FLOAT_DTYPE_JNP)
+        else:
+            damage_gpu = jnp.zeros((n_particles, _n_acc),
+                                   dtype=config.FLOAT_DTYPE_JNP)
+        positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
+            positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0,
+            damage_gpu,
+        )
+    else:
+        damage_gpu = None
+        positions_gpu, element_ids_gpu = rk4_step(
+            positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0
+        )
     jax.block_until_ready(positions_gpu)
     stage_times['6_compile'] = time.time() - t_compile
     print(f"  Compilation: {stage_times['6_compile']:.1f}s")
@@ -2687,9 +2956,15 @@ def main():
         # restore. Reference assignment — free when unused.
         if latch_and_advance_escape is not None:
             positions_pre_step = positions_gpu
-        positions_gpu, element_ids_gpu = rk4_step(
-            positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
-        )
+        if args.damage:
+            positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
+                positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu,
+                step - 1, damage_gpu,
+            )
+        else:
+            positions_gpu, element_ids_gpu = rk4_step(
+                positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
+            )
         if suppress_pending_recovery is not None:
             positions_gpu, element_ids_gpu, drift_vel_gpu, pending_entry_gpu = \
                 suppress_pending_recovery(
@@ -2815,12 +3090,108 @@ def main():
                 _collect_temperature_extras(step_extras)
                 if rho_part_np is not None and not args.density_no_particle_density:
                     step_extras['Density'] = rho_part_np
+                # ⚠️ Damage as PointData on the exported particles, so ParaView can
+                # colour pathlines by accumulated damage directly.
+                #
+                # Cost: this block is already inside `if do_export`, so the
+                # device->host copy happens ONLY on export steps -- not every RK4
+                # step. At the default --export-freq that is a few hundred copies of
+                # a (n_particles, 2) float32 array (0.8 MB at 100k particles) over a
+                # whole run, against ~2756 tracking steps. The accumulator itself
+                # stays on the GPU throughout; nothing about the no-per-step-transfer
+                # property of Phase 1 changes.
+                if args.damage and damage_gpu is not None:
+                    _dmg = np.asarray(damage_gpu)
+                    if _dmg.ndim == 2 and _dmg.shape[1] >= 2:
+                        # driver=models: name them, do not export an opaque 2-vector
+                        step_extras['Damage_lnPhi'] = _dmg[:, 0]
+                        step_extras['Damage_CL'] = _dmg[:, 1]
+                    else:
+                        step_extras['Damage_ebar'] = _dmg.reshape(-1)
                 exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
                                         element_ids=eid_export,
                                         extra_scalars=step_extras or extra_scalars)
 
     t_elapsed = time.time() - t_start
     stage_times['7_tracking'] = t_elapsed
+
+    # ------------------------------------------------------------------
+    # Pathline damage: one host transfer, at the end.
+    # ------------------------------------------------------------------
+    if args.damage and damage_gpu is not None:
+        dmg_cpu = np.asarray(jax.block_until_ready(damage_gpu))
+        alive = np.asarray(element_ids_gpu) >= 0
+        # 'models' carries two columns: [lnPhi, C]. Report each separately -- a
+        # combined statistic would hide one model failing while the other works,
+        # and their disagreement is the diagnostic value of running both.
+        multi = (dmg_cpu.ndim == 2 and dmg_cpu.shape[1] >= 2)
+        n_moved = int((np.abs(dmg_cpu).sum(axis=1) > 0).sum()) if multi \
+            else int((dmg_cpu > 0).sum())
+        print()
+        print(f"  [damage] driver='{args.damage_driver}'  "
+              f"accumulated on {n_moved:,}/{len(dmg_cpu):,} particles "
+              f"({100.0 * n_moved / max(len(dmg_cpu), 1):.1f} %)")
+        if multi:
+            ln_phi, C = dmg_cpu[:, 0], dmg_cpu[:, 1]
+            # ⚠️ Phi is a VOLUME FRACTION and cannot exceed 1. With the usual
+            # assumed seed Phi0 = 1e-4, failure is reached at
+            #     ln(Phi/Phi0) = ln(1/1e-4) = 9.21
+            # Rice-Tracey as specified in the plan has NO saturation term -- the
+            # (1-Phi) factor in He et al. eq.(1) is what bounds it -- so lnPhi
+            # keeps growing without limit. Values far above ~9.2 do not mean
+            # "more damaged", they mean "failed, and the model stopped being
+            # valid some time ago". Report the fraction past failure rather than
+            # exp() of a number that would print as 1e359.
+            phi0 = 1.0e-4
+            ln_fail = float(np.log(1.0 / phi0))
+            n_fail = int((ln_phi >= ln_fail).sum())
+            print(f"  [damage] Rice-Tracey ln(Phi/Phi0): median "
+                  f"{float(np.median(ln_phi)):.4g}  max {float(ln_phi.max()):.4g}")
+            print(f"  [damage]   -> Phi/Phi0 (median)  : "
+                  f"{float(np.exp(min(np.median(ln_phi), ln_fail))):.4g}")
+            print(f"  [damage]   -> PAST FAILURE        : {n_fail:,}/{len(ln_phi):,} "
+                  f"({100.0 * n_fail / max(len(ln_phi), 1):.1f} %) exceed "
+                  f"ln(1/Phi0)={ln_fail:.2f}")
+            if n_fail:
+                print(f"  [damage]   ⚠️  Rice-Tracey has no saturation term, so "
+                      f"lnPhi grows without bound past failure.")
+                print(f"  [damage]   ⚠️  Treat lnPhi as a SUSCEPTIBILITY RANKING, "
+                      f"not a porosity. max={float(ln_phi.max()):.4g} is "
+                      f"{float(ln_phi.max()) / ln_fail:.0f}x the failure threshold.")
+            print(f"  [damage] Cockcroft-Latham C      : median "
+                  f"{float(np.median(C)):.4g}  max {float(C.max()):.4g}")
+            # Do the two laws RANK particles the same way? That is the cheap
+            # cross-check the plan asks for; disagreement is diagnostic.
+            if len(ln_phi) > 10:
+                _a = np.argsort(np.argsort(ln_phi)).astype(np.float64)
+                _b = np.argsort(np.argsort(C)).astype(np.float64)
+                _r = float(np.corrcoef(_a, _b)[0, 1])
+                print(f"  [damage] rank corr(lnPhi, C)     : {_r:+.4f}"
+                      f"   ({'models agree' if _r > 0.9 else 'MODELS DISAGREE — investigate'})")
+        else:
+            print(f"  [damage] value : median {float(np.median(dmg_cpu)):.4g}  "
+                  f"mean {float(dmg_cpu.mean()):.4g}  max {float(dmg_cpu.max()):.4g}")
+        print(f"  [damage] alive at end: {int(alive.sum()):,}/{len(dmg_cpu):,}")
+        if n_moved == 0:
+            # A silent no-op accumulator would otherwise look like a clean run.
+            print("  [damage] WARNING: nothing accumulated — the damage path "
+                  "produced no signal. Check the driver field is non-zero.")
+        dmg_path = args.damage_out
+        if dmg_path is None:
+            dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"
+        dmg_path = Path(dmg_path)
+        dmg_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            dmg_path,
+            damage=dmg_cpu.astype(np.float32),
+            positions=np.asarray(positions_gpu, dtype=np.float32),
+            element_ids=np.asarray(element_ids_gpu, dtype=np.int32),
+            driver=args.damage_driver,
+            n_steps=np.int64(N_STEPS),
+            dt=np.float64(DT),
+        )
+        print(f"  [damage] wrote {dmg_path}")
+
     stats_csv.close()
     if hit_stats_csv is not None:
         hit_stats_csv.close()

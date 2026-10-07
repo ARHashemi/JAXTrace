@@ -1,0 +1,20 @@
+% Table T7 (float-precision ablation, FinalFuelPinPoly1560)
+\begin{table}[t]
+\centering\small
+\caption{Float-precision ablation on the FinalFuelPinPoly1560 mesh: per-tet correctness (\texttt{correct\_rate\_strict}) of each MALMO variant across the $\{\text{float32}, \text{float64}\}$ $\times$ $\{10^{-4}, 10^{-6}, 10^{-8}\}$ PIT-tolerance grid.  In-mesh barycentric sampling with $N_p = 100\,000$ queries.  Rates at or above $99.99\%$ (fewer than one miss in $10\,000$) are shown as $100.00\%$; smaller values are reported as measured, including the two-vertex floating-point misassignments already flagged by the daggers in the original Table~9.}
+\label{tab:r1g-float-FinalFuelPinPoly1560}
+\begin{tabular}{llrrr}
+\toprule
+variant & precision & $\varepsilon{=}10^{-4}$ & $\varepsilon{=}10^{-6}$ & $\varepsilon{=}10^{-8}$ \\
+\midrule
+MALMO$^{\mathrm{A}}$ & fp32 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+MALMO$^{\mathrm{A}}$ & fp64 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+\midrule
+MALMO$^{\mathrm{C}}$ & fp32 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+MALMO$^{\mathrm{C}}$ & fp64 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+\midrule
+MALMO$^{\mathrm{V}}$ & fp32 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+MALMO$^{\mathrm{V}}$ & fp64 & $100.00\%$ & $100.00\%$ & $100.00\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}

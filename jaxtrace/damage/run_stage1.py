@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 import time
 from pathlib import Path
 
@@ -248,9 +250,191 @@ def quadrant_survey(points, levelset, edot, eta, velocity, verbose=True) -> dict
     return out
 
 
+def phase_paths(pvtu: Path, start: int, end: int, stride: int) -> list:
+    """Timestep files covering one revolution, derived from a template path.
+
+    The prefix is taken from the supplied PVTU, so copied cases (D4.gid
+    holding C2_*.pvtu) resolve correctly.
+    """
+    stem = pvtu.stem
+    m = re.search(r"^(.*)_(\d+)$", stem)
+    if not m:
+        raise RuntimeError(f"cannot parse a timestep index from {pvtu.name}")
+    prefix = m.group(1)
+    out = []
+    for i in range(start, end + 1, stride):
+        p = pvtu.with_name(f"{prefix}_{i}{pvtu.suffix}")
+        if p.is_file():
+            out.append((i, p))
+    return out
+
+
+def run_phase_averaged(args) -> int:
+    """Stream one revolution, accumulating the damage drivers per node.
+
+    Memory stays at ONE timestep: each PVTU is read, reduced to nodal scalars
+    and discarded.  Only the accumulators persist.  A full revolution of these
+    meshes is ~100 GB on disk, so loading it outright is not an option.
+    """
+    start, end = args.phase_range
+    t0 = time.time()
+    print(f"=== stage 1 (phase-averaged) : {args.case}, model {args.model} ===")
+    print(f"  revolution: steps {start}..{end} stride {args.phase_stride}")
+
+    steps = phase_paths(args.pvtu, start, end, args.phase_stride)
+    if not steps:
+        print(f"  ERROR: no files found in {start}..{end}", file=sys.stderr)
+        return 1
+    print(f"  {len(steps)} timesteps resolved "
+          f"({steps[0][1].name} .. {steps[-1][1].name})")
+
+    acc = None
+    per_phase = []
+
+    for k, (idx, path) in enumerate(steps, 1):
+        data = read_pvtu(path)
+        edot_e = build_damage_fields(
+            data["points"], data["connectivity"],
+            data["velocity"], data["pressure"],
+            mu_eff=np.full(len(data["points"]), args.mu_eff), verbose=False,
+        )["edot"].astype(np.float64)
+
+        sigma_eq, rheo_info = build_sigma_eq(
+            args.model, edot_e, data["temperature"],
+            mu_eff=args.mu_eff, mat_path=args.mat,
+        )
+        f = build_damage_fields(
+            data["points"], data["connectivity"],
+            data["velocity"], data["pressure"],
+            sigma_flow=sigma_eq, verbose=False,
+        )
+
+        if acc is None:
+            n = len(data["points"])
+            acc = {
+                "points": data["points"], "levelset": data["levelset"],
+                "n_nodes": n, "n_elems": len(data["connectivity"]),
+                "eta_sum": np.zeros(n), "eta_max": np.full(n, -np.inf),
+                "edot_sum": np.zeros(n), "edot_max": np.zeros(n),
+                "sigma_m_sum": np.zeros(n), "s1_sum": np.zeros(n),
+                "tensile_count": np.zeros(n, dtype=np.int32),
+                "velocity_sum": np.zeros_like(data["velocity"]),
+                "rheo": rheo_info, "n": 0,
+            }
+
+        eta = f["eta"].astype(np.float64)
+        acc["eta_sum"] += eta
+        np.maximum(acc["eta_max"], eta, out=acc["eta_max"])
+        acc["edot_sum"] += f["edot"]
+        np.maximum(acc["edot_max"], f["edot"], out=acc["edot_max"])
+        acc["sigma_m_sum"] += f["sigma_m"]
+        acc["s1_sum"] += f["s1_ratio"]
+        acc["tensile_count"] += (eta > 0)
+        acc["velocity_sum"] += data["velocity"]
+        acc["n"] += 1
+
+        # Per-phase survey, so the spread across the revolution is visible.
+        sv = quadrant_survey(data["points"], data["levelset"],
+                             f["edot"].astype(np.float64), eta,
+                             data["velocity"], verbose=False)
+        per_phase.append({
+            "step": idx,
+            "growth_ratio": sv["growth_ratio_adv_over_ret"],
+            "tensile_flank": sv["tensile_flank"],
+        })
+
+        if k % 10 == 0 or k == len(steps):
+            print(f"    [{k}/{len(steps)}] step {idx}  "
+                  f"({time.time()-t0:.0f}s)", flush=True)
+
+    n = acc["n"]
+    eta_mean = acc["eta_sum"] / n
+    edot_mean = acc["edot_sum"] / n
+
+    print(f"  averaged {n} phases")
+    survey = quadrant_survey(acc["points"], acc["levelset"],
+                             edot_mean, eta_mean,
+                             acc["velocity_sum"] / n)
+
+    ratios = [p["growth_ratio"] for p in per_phase
+              if np.isfinite(p["growth_ratio"])]
+    flanks = [p["tensile_flank"] for p in per_phase]
+    spread = {
+        "n_phases": n,
+        "growth_ratio_mean": float(np.mean(ratios)) if ratios else float("nan"),
+        "growth_ratio_std": float(np.std(ratios)) if ratios else float("nan"),
+        "growth_ratio_min": float(np.min(ratios)) if ratios else float("nan"),
+        "growth_ratio_max": float(np.max(ratios)) if ratios else float("nan"),
+        "frac_phases_advancing": float(flanks.count("advancing") / len(flanks)),
+    }
+    print(f"  phase spread: ratio {spread['growth_ratio_min']:.3f}"
+          f"..{spread['growth_ratio_max']:.3f} "
+          f"(mean {spread['growth_ratio_mean']:.3f}, "
+          f"sd {spread['growth_ratio_std']:.3f}); "
+          f"{spread['frac_phases_advancing']:.0%} of phases advancing-tensile")
+
+    runtime = time.time() - t0
+    args.outdir.mkdir(parents=True, exist_ok=True)
+    tag = f"{args.case}_{args.model}_rev"
+    np.savez_compressed(
+        args.outdir / f"dmg_{tag}.npz",
+        eta_mean=eta_mean.astype(np.float32),
+        eta_max=acc["eta_max"].astype(np.float32),
+        edot_mean=edot_mean.astype(np.float32),
+        edot_max=acc["edot_max"].astype(np.float32),
+        sigma_m_mean=(acc["sigma_m_sum"] / n).astype(np.float32),
+        s1_ratio_mean=(acc["s1_sum"] / n).astype(np.float32),
+        tensile_fraction=(acc["tensile_count"] / n).astype(np.float32),
+        points=acc["points"].astype(np.float32),
+        levelset=acc["levelset"].astype(np.float32),
+    )
+    meta = {
+        "case": args.case, "model": args.model, "mode": "phase-averaged",
+        "phase_range": [start, end], "phase_stride": args.phase_stride,
+        "n_phases": n, "n_nodes": acc["n_nodes"], "n_elems": acc["n_elems"],
+        "rheology": acc["rheo"], "survey": survey,
+        "phase_spread": spread, "per_phase": per_phase,
+        "runtime_s": runtime,
+    }
+    (args.outdir / f"dmg_{tag}.json").write_text(json.dumps(meta, indent=2))
+
+    if args.summary is not None:
+        aw = survey["quadrants"].get("adv_wake", {})
+        rw = survey["quadrants"].get("ret_wake", {})
+        with open(args.summary, "a") as fh:
+            fh.write(",".join(str(v) for v in [
+                args.case, args.model + "_rev", acc["n_nodes"], acc["n_elems"],
+                "", f"{np.median(edot_mean):.3f}", f"{acc['edot_max'].max():.1f}",
+                "", f"{np.median(eta_mean):.5f}",
+                f"{aw.get('eta_median', float('nan')):.5f}",
+                f"{aw.get('frac_positive', float('nan')):.4f}",
+                f"{rw.get('eta_median', float('nan')):.5f}",
+                f"{rw.get('frac_positive', float('nan')):.4f}",
+                f"{survey['growth_ratio_adv_over_ret']:.4f}",
+                survey["tensile_flank"],
+                int(survey["matches_literature_expectation"]),
+                survey["orientation"]["rotation"],
+                survey["orientation"]["advancing_side"],
+                f"{runtime:.1f}",
+            ]) + "\n")
+
+    print(f"  wrote dmg_{tag}.npz + .json  ({runtime:.1f}s)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pvtu", required=True, type=Path)
+    ap.add_argument("--pvtu", required=True, type=Path,
+                    help="a single PVTU, or the LAST step of a revolution "
+                         "when --phase-range is given")
+    ap.add_argument("--phase-range", nargs=2, type=int, metavar=("START", "END"),
+                    help="timestep range covering ONE FULL REVOLUTION "
+                         "(VEL_START VEL_END from the case's run_jaxtrace.sh). "
+                         "Threaded/fluted/flats/tilted tools are periodic at "
+                         "omega, so a single snapshot is one arbitrary phase.")
+    ap.add_argument("--phase-stride", type=int, default=1,
+                    help="sample every Nth step of the range (default 1). "
+                         "Use e.g. 20 for a cheap 8-phase probe.")
     ap.add_argument("--case", required=True)
     ap.add_argument("--model", default="norton",
                     choices=["constant", "norton", "sellars_tegart"])
@@ -268,6 +452,9 @@ def main() -> int:
 
     print(f"=== stage 1 : case {args.case}, model {args.model} ===")
     print(f"  {args.pvtu}")
+
+    if args.phase_range:
+        return run_phase_averaged(args)
 
     data = read_pvtu(args.pvtu)
     n_nodes = len(data["points"])

@@ -1,0 +1,21 @@
+% Table T6 (batch-size scaling, FinalFuelPinPoly1560)
+\begin{table}[t]
+\centering\small
+\caption{Batch-size scaling on the FinalFuelPinPoly1560 mesh, kernel-only-equivalent query wall time (best of 3 trials, \texttt{jax.block\_until\_ready()} synchronised) per MALMO variant.  Upper block: query wall time in milliseconds.  Lower block: throughput in $\text{Mq}/\text{s}$ (= $n_\text{particles}/t_\text{query}$).  Below $N_p \\approx 50\\,000$ the kernel is launch-latency dominated, so cross-variant comparisons in that regime are not meaningful; the reader should draw variant-ordering conclusions from the $N_p \\ge 100\\,000$ columns.}
+\label{tab:r27-batch-FinalFuelPinPoly1560}
+\begin{tabular}{lrrrrr}
+\toprule
+variant & $N_p{=}10{,}000$ & $N_p{=}50{,}000$ & $N_p{=}100{,}000$ & $N_p{=}200{,}000$ & $N_p{=}500{,}000$ \\
+\midrule
+\multicolumn{6}{l}{\emph{query wall time (ms)}} \\
+MALMO$^{\mathrm{A}}$ & 12.6 & 62.9 & 126.4 & 252.9 & 630.3 \\
+MALMO$^{\mathrm{C}}$ & 23.5 & 117.6 & 234.9 & 469.5 & 1176.3 \\
+MALMO$^{\mathrm{V}}$ & 19.5 & 96.9 & 195.5 & 395.4 & 986.5 \\
+\midrule
+\multicolumn{6}{l}{\emph{throughput (Mq/s)}} \\
+MALMO$^{\mathrm{A}}$ & 0.80 & 0.79 & 0.79 & 0.79 & 0.79 \\
+MALMO$^{\mathrm{C}}$ & 0.43 & 0.43 & 0.43 & 0.43 & 0.43 \\
+MALMO$^{\mathrm{V}}$ & 0.51 & 0.52 & 0.51 & 0.51 & 0.51 \\
+\bottomrule
+\end{tabular}
+\end{table}

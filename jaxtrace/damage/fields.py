@@ -151,7 +151,7 @@ def build_damage_fields(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
     velocity: np.ndarray,
-    pressure: np.ndarray,
+    pressure: Optional[np.ndarray] = None,
     mu_eff: Optional[np.ndarray] = None,
     sigma_flow: Optional[np.ndarray] = None,
     *,
@@ -169,9 +169,13 @@ def build_damage_fields(
     velocity : (n_nodes, 3)
         The field stored as ``Displacement`` in these PVTU files; it is a
         velocity in m/s and is used directly, with no division by dt.
-    pressure : (n_nodes,)
+    pressure : (n_nodes,), optional
         Raw ``Pressure``.  Negated internally to give sigma_m (see module
-        docstring).
+        docstring).  When ``None`` the pressure-derived outputs (``sigma_m``,
+        ``eta``, ``s1_over_seq``) are returned as ``None``: ``edot`` depends on
+        grad(u) alone and is unaffected.  Phase 1's pathline accumulator needs
+        only ``edot``, so a tracking run can build the driver without a second
+        field load.
     mu_eff : (n_nodes,), optional
         Effective viscosity.  If given, sigma_eq = 3 * mu_eff * edot
         (the kinematic route).  Otherwise ``sigma_flow`` is used.
@@ -212,6 +216,18 @@ def build_damage_fields(
     edot = elements_to_nodes(edot_e, connectivity, n_nodes, volume)
 
     # sigma_m: tension-positive, from the compressive fluid pressure.
+    # edot above needs only grad(u); everything below this line needs pressure.
+    if pressure is None:
+        if verbose:
+            print("  [fields] pressure=None -> edot only "
+                  "(sigma_m / eta / s1_over_seq are None)")
+        return {
+            "edot": edot.astype(np.float32),
+            "sigma_m": None, "sigma_eq": None,
+            "eta": None, "s1_over_seq": None,
+            "n_active": int((edot > edot_floor).sum()),
+            "n_inverted": int((volume < 0).sum()),
+        }
     sigma_m = -np.asarray(pressure, dtype=np.float64)
 
     if mu_eff is not None:

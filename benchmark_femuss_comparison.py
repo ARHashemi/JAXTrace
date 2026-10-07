@@ -694,6 +694,17 @@ def create_rk4_comparison(
     p0_gpu=None,
     rk4_mode="fused",
     use_l2_vectorized=False,
+    # Pathline-integrated damage. (n_timesteps, n_nodes) float32 nodal scalar
+    # indexed exactly like velocity_fields_gpu, so a steady case is
+    # n_timesteps == 1. None => the accumulator is compiled out entirely and
+    # rk4_step keeps its original 2-tuple return, so no existing caller changes.
+    damage_scalars_gpu=None,
+    # Quadrature order for the damage accumulator ONLY -- the POSITION is always
+    # RK4. 1 = explicit Euler at the k1 stage (one extra gather/step); 4 = the
+    # the RK4 weights (k1 + 2k2 + 2k3 + k4)/6 over the four stages the velocity step
+    # already visits. See the note at the integration site for why order 4 does not
+    # achieve 4th-order convergence here.
+    damage_order: int = 1,
     # Gradient-recovery / higher-order velocity reconstruction. Two
     # methods supported; kernel picks by which arrays are non-None.
     #
@@ -738,6 +749,20 @@ def create_rk4_comparison(
         failed_substage_policy = 'last_valid_vel'
     use_last_valid_vel = (failed_substage_policy == 'last_valid_vel')
     use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
+    # Build-time flag: closes over a Python bool, so when damage is off the
+    # accumulator and its sampler are absent from the traced graph.
+    use_damage = damage_scalars_gpu is not None
+    # ⚠️ Phase 2: damage_scalars_gpu is a STACK (n_slots, n_timesteps, n_nodes).
+    #   1 slot  -> [edot]                 : accumulate ebar = integral(edot dt)
+    #   3 slots -> [edot, eta, s1_ratio]  : accumulate lnPhi (Rice-Tracey) and
+    #                                       C (Cockcroft-Latham), 2 states
+    # n_slots is a Python int at trace time, so the unused branch is compiled out.
+    n_damage_slots = int(damage_scalars_gpu.shape[0]) if use_damage else 0
+    use_damage_models = (n_damage_slots >= 3)
+    # Python int at trace time -> the unused quadrature branch is compiled out.
+    if int(damage_order) not in (1, 4):
+        raise ValueError(f"damage_order must be 1 or 4, got {damage_order!r}")
+    use_damage_rk4 = (int(damage_order) == 4)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
     # L0 skip for boundary elements (mixed level-set sign at tool boundary)
@@ -1210,6 +1235,54 @@ def create_rk4_comparison(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    # ---- Nodal scalar sampler (pathline damage driver) ----
+    # Deliberately a separate function rather than a generalisation of
+    # interpolate_velocity_single: that is the hot velocity path and is left
+    # byte-identical. P1 barycentric only — the damage driver is a nodal scalar
+    # and the HCT/gradient reconstructions do not apply to it. The element
+    # search is NOT repeated; elem_id comes from the velocity stage that already
+    # paid for it, so the added cost is one 4-float gather already in cache.
+    def interpolate_scalar_single(pos, elem_id, scalar_field):
+        valid = (elem_id >= 0) & (elem_id < len(connectivity))
+        nodes_idx = connectivity[elem_id]
+        node_vals = scalar_field[nodes_idx]
+
+        if use_direct_inverse:
+            M_inv = M_inv_gpu[elem_id]
+            local = pos - p0_gpu[elem_id]
+            bary = M_inv @ local
+            b1, b2, b3 = bary[0], bary[1], bary[2]
+            b0 = 1.0 - b1 - b2 - b3
+        else:
+            nodes = node_positions[nodes_idx]
+            v0 = nodes[1] - nodes[0]
+            v1 = nodes[2] - nodes[0]
+            v2 = nodes[3] - nodes[0]
+            vp = pos - nodes[0]
+            d00, d01, d02 = jnp.dot(v0, v0), jnp.dot(v0, v1), jnp.dot(v0, v2)
+            d11, d12 = jnp.dot(v1, v1), jnp.dot(v1, v2)
+            d22 = jnp.dot(v2, v2)
+            dp0, dp1, dp2 = jnp.dot(vp, v0), jnp.dot(vp, v1), jnp.dot(vp, v2)
+            det = d00 * (d11*d22 - d12*d12) - d01 * (d01*d22 - d02*d12) + d02 * (d01*d12 - d02*d11)
+            det = jnp.where(jnp.abs(det) < config.INTERPOLATION_DET_MIN,
+                            config.INTERPOLATION_DET_MIN, det)
+            b1 = (dp0*(d11*d22-d12*d12) - d01*(dp1*d22-dp2*d12) + d02*(dp1*d12-dp2*d11)) / det
+            b2 = (d00*(dp1*d22-dp2*d12) - dp0*(d01*d22-d02*d12) + d02*(d01*dp2-d02*dp1)) / det
+            b3 = (d00*(d11*dp2-d12*dp1) - d01*(d01*dp2-d02*dp1) + dp0*(d01*d12-d02*d11)) / det
+            b0 = 1.0 - b1 - b2 - b3
+
+        val = b0*node_vals[0] + b1*node_vals[1] + b2*node_vals[2] + b3*node_vals[3]
+
+        # Inside the tool there is no material, so no damage accrues.
+        if use_levelset_mask:
+            node_ls = levelset_gpu[nodes_idx]
+            ls_val = b0*node_ls[0] + b1*node_ls[1] + b2*node_ls[2] + b3*node_ls[3]
+            val = jnp.where(ls_val >= 0.0, val, 0.0)
+
+        # An exited particle (elem_id < 0) must accumulate nothing rather than
+        # read whatever sits at element 0.
+        return jnp.where(valid, val, 0.0)
+
     # ---- Check inside tool (for skip_step level-set mode) ----
     def check_inside_tool(pos, elem_id):
         """Returns True if position is inside tool (level-set < 0)."""
@@ -1374,16 +1447,25 @@ def create_rk4_comparison(
         #   vel  = interpolate_velocity_single(pos, elem, velocity_field)
         # and tool_mask() is check_inside_tool() when use_skip_step_on_tool.
         @jax.jit
-        def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx):
+        def rk4_step(positions_gpu, element_ids_gpu, dt, velocity_fields_gpu, time_idx,
+                     damage_state_gpu=None):
             n_timesteps = velocity_fields_gpu.shape[0]
             vel_idx = time_idx % n_timesteps
             velocity_field = velocity_fields_gpu[vel_idx]
+            if use_damage:
+                # Same cyclic indexing as velocity: a steady case is one slice.
+                # Stack layout is (n_slots, n_timesteps, n_nodes).
+                _dti = time_idx % damage_scalars_gpu.shape[1]
+                damage_field = damage_scalars_gpu[0, _dti]
+                if use_damage_models:
+                    eta_field = damage_scalars_gpu[1, _dti]
+                    s1_field = damage_scalars_gpu[2, _dti]
             # Real-valued physical time at the start of this step.
             # The mesh provider ignores it (slice already picked above);
             # the analytic provider uses it when is_time_dependent=True.
             t_phys = (time_idx.astype(dt.dtype) if hasattr(time_idx, 'dtype') else jnp.asarray(time_idx, dtype=dt.dtype)) * dt
 
-            def rk4_single(pos, elem_id):
+            def rk4_single(pos, elem_id, dmg):
                 # Stage 1
                 vel_k1, elem_k1 = _provider.sample(pos, elem_id, velocity_field, t_phys)
                 pos_k1 = pos + 0.5 * dt * vel_k1
@@ -1438,10 +1520,133 @@ def create_rk4_comparison(
                     pos_final = jnp.where(lost, pos_clamped, pos_final)
                     elem_final = jnp.where(lost, elem_recovered, elem_final)
 
-                return pos_final, elem_final
+                if not use_damage:
+                    return pos_final, elem_final
 
-            positions_final, element_ids_final = jax.vmap(rk4_single)(
-                positions_gpu, element_ids_gpu
+                # ---- Damage quadrature: Euler (order 1) or RK4 (order 4) ----
+                #
+                # ⚠️ The POSITION is RK4 either way. Only the ACCUMULATOR's
+                # quadrature is switched here, and the two are different problems:
+                #
+                #   position:  dx/dt = u(x(t))  -- the RHS depends on the state, and
+                #              the trajectory is strongly curved (a particle orbits
+                #              the tool, sweeping ~9 deg and ~0.47 mm of arc per step
+                #              at r=3mm in the cohort). RK4 is genuinely needed:
+                #              Euler cuts the corner element after element.
+                #
+                #   accumulator: d(lnPhi)/dt = f(eta(x), edot(x)) -- the RHS does NOT
+                #              depend on the accumulator, so this is pure quadrature
+                #              of a known function along an already-determined path.
+                #
+                # For that quadrature, order 4 is NOT formally achieved: the driver is
+                # P1-interpolated, so f(x(t)) is C0 with a DISCONTINUOUS DERIVATIVE at
+                # every element face, and ANY 4th-order quadrature degrades to 1st-2nd
+                # order across a kink. The reason to offer order 4 anyway is different and
+                # real: it SAMPLES THE MIDPOINT. At 9 deg/step the k1-only estimate is
+                # taken up to 9 deg of arc before the step's midpoint, which biases the
+                # integral wherever the driver has a steep gradient -- i.e. exactly in
+                # the shear layer we care about. The k2/k3 stages remove that bias.
+                #
+                # Cost: order 4 needs 3 extra gathers per scalar per step, at elements
+                # (elem_k2/k3/k4) the velocity step ALREADY located -- so no extra
+                # searches, only extra reads from memory already in cache.
+                #
+                # Reuses elem_k1 — the search is already paid for.
+                edot_k1 = interpolate_scalar_single(pos, elem_k1, damage_field)
+                if use_damage_rk4:
+                    edot_k2 = interpolate_scalar_single(pos_k1, elem_k2, damage_field)
+                    edot_k3 = interpolate_scalar_single(pos_k2, elem_k3, damage_field)
+                    edot_k4 = interpolate_scalar_single(pos_k3, elem_k4, damage_field)
+
+                if not use_damage_models:
+                    # Phase 1: a single accumulator, ebar = integral(edot dt).
+                    if use_damage_rk4:
+                        inc1 = (edot_k1 + 2.0*edot_k2 + 2.0*edot_k3 + edot_k4) / 6.0
+                    else:
+                        inc1 = edot_k1
+                    dmg_new = dmg + dt * inc1
+                    if use_skip_step_on_fail:
+                        dmg_new = jnp.where(any_failed, dmg, dmg_new)
+                    if use_skip_step_on_tool:
+                        dmg_new = jnp.where(any_inside, dmg, dmg_new)
+                    return pos_final, elem_final, dmg_new
+
+                # ---- Phase 3: two damage models, integrated together ----
+                # Agreement between two different laws is the cheapest evidence
+                # available; disagreement is diagnostic. dmg is (2,): [lnPhi, C].
+                eta_k1 = interpolate_scalar_single(pos, elem_k1, eta_field)
+                s1_k1 = interpolate_scalar_single(pos, elem_k1, s1_field)
+                if use_damage_rk4:
+                    eta_k2 = interpolate_scalar_single(pos_k1, elem_k2, eta_field)
+                    eta_k3 = interpolate_scalar_single(pos_k2, elem_k3, eta_field)
+                    eta_k4 = interpolate_scalar_single(pos_k3, elem_k4, eta_field)
+                    s1_k2 = interpolate_scalar_single(pos_k1, elem_k2, s1_field)
+                    s1_k3 = interpolate_scalar_single(pos_k2, elem_k3, s1_field)
+                    s1_k4 = interpolate_scalar_single(pos_k3, elem_k4, s1_field)
+
+                # ⚠️ Clamp eta BEFORE the exponential. A bad pressure
+                # reconstruction can drive eta large and positive, and exp(1.5*eta)
+                # then overflows to inf, which poisons the accumulator for the rest
+                # of the run. +-3 matches fields.py's ETA_CLAMP, and eta never
+                # exceeded 0.96 in magnitude across the 45-case survey — so this
+                # only ever fires on pathological input.
+                eta_c = jnp.clip(eta_k1, -3.0, 3.0)
+
+                # Rice-Tracey, in LOG space. The ODE is multiplicative, so
+                # integrating ln(Phi) makes it linear in the accumulator, removes
+                # the stiffness, and keeps Phi > 0 by construction. Verified stable
+                # to 1.2e-13 over 10,000 steps.
+                dlogphi = 0.849 * edot_k1 * jnp.exp(1.5 * eta_c)
+
+                # Cockcroft-Latham. The Macaulay bracket max(sigma_1, 0) zeroes the
+                # integrand wherever the largest principal stress is compressive.
+                # ⚠️ Measured (O52): in THIS flow that almost never happens --
+                # sigma_1 > 0 at ~95 % of active nodes under the shoulder, because
+                # sigma_1 = sigma_m + sigma_eq*s1_hat and the shear-dominated
+                # deviatoric term (s1_hat ~ +0.87) swamps the volumetric one
+                # (eta ~ -0.05). So this law does NOT switch off under the tool; it
+                # tracks the DEVIATORIC state while Rice-Tracey tracks the
+                # volumetric one. That difference is why both are run.
+                dC = jnp.maximum(s1_k1, 0.0) * edot_k1
+
+                if use_damage_rk4:
+                    # ⚠️ The RK4 weights apply to the RATE, so each stage needs its
+                    # OWN eta and s1 -- weighting only edot while holding eta at k1
+                    # would be wrong, because exp(1.5*eta) is the dominant and most
+                    # rapidly varying factor. Each stage is clamped before its own
+                    # exponential, for the same overflow reason as k1 above.
+                    def _rates(edot_s, eta_s, s1_s):
+                        e_c = jnp.clip(eta_s, -3.0, 3.0)
+                        return (0.849 * edot_s * jnp.exp(1.5 * e_c),
+                                jnp.maximum(s1_s, 0.0) * edot_s)
+
+                    dlp2, dC2 = _rates(edot_k2, eta_k2, s1_k2)
+                    dlp3, dC3 = _rates(edot_k3, eta_k3, s1_k3)
+                    dlp4, dC4 = _rates(edot_k4, eta_k4, s1_k4)
+                    dlogphi = (dlogphi + 2.0*dlp2 + 2.0*dlp3 + dlp4) / 6.0
+                    dC      = (dC      + 2.0*dC2  + 2.0*dC3  + dC4 ) / 6.0
+
+                inc = jnp.stack([dlogphi, dC])
+                dmg_new = dmg + dt * inc
+
+                # Freeze BOTH accumulators on any step the position also skipped:
+                # otherwise damage accrues on steps that never physically happened.
+                if use_skip_step_on_fail:
+                    dmg_new = jnp.where(any_failed, dmg, dmg_new)
+                if use_skip_step_on_tool:
+                    dmg_new = jnp.where(any_inside, dmg, dmg_new)
+
+                return pos_final, elem_final, dmg_new
+
+            if use_damage:
+                positions_final, element_ids_final, damage_final = jax.vmap(rk4_single)(
+                    positions_gpu, element_ids_gpu, damage_state_gpu
+                )
+                # Damage appended LAST so existing 2-tuple unpacking is unaffected.
+                return positions_final, element_ids_final, damage_final
+
+            positions_final, element_ids_final = jax.vmap(rk4_single, in_axes=(0, 0, None))(
+                positions_gpu, element_ids_gpu, None
             )
             return positions_final, element_ids_final
 

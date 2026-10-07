@@ -111,13 +111,49 @@ def sigma_eq_norton(
     norton: Dict[str, np.ndarray],
     *,
     edot_floor: float = 1.0e-3,
+    shear_convention: bool = True,
 ) -> np.ndarray:
-    """Option B — the FOM's own Norton law.
+    """Option B — the FOM's own Norton-Hoff law, in VON MISES measures.
 
-    sigma_eq = VISCO(T) * edot ** EXPVI(T)
+    ⚠️ THE .mat TABLES ARE IN SHEAR MEASURES, NOT VON MISES.
 
-    Both coefficients are interpolated linearly in temperature and held
-    constant outside the tabulated range.
+    Venghaus, *Finite Elements in Analysis & Design* 224 (2023) 103986,
+    Publication 1 eq. (5), defines the model the FOM integrates as
+
+        s = 2 mu_eff e,   mu_eff = mu0(T) * gamma**(m-1)
+        gamma = sqrt(2) * ||e||            <- SHEAR equivalent strain rate
+        tau   = (sqrt(2)/2) * ||s||        <- SHEAR equivalent stress = mu_eff*gamma
+
+    where ``mu0`` is exactly the ``Plastic_viscosity`` (VISCO) table and ``m`` the
+    ``Exponent_viscosity`` (EXPVI) table. So the tables give **tau(gamma)**.
+
+    Our pipeline works in von Mises measures:
+
+        edot = sqrt(2/3) * ||e||   =>  gamma    = sqrt(3) * edot
+        seq  = sqrt(3/2) * ||s||   =>  seq      = sqrt(3) * tau
+
+    Hence the correct evaluation is
+
+        seq = sqrt(3) * VISCO(T) * (sqrt(3) * edot) ** EXPVI(T)
+
+    and the total correction over the naive ``VISCO * edot**EXPVI`` is
+    ``sqrt(3) * sqrt(3)**m`` = 1.816 at m = 0.086.
+
+    ⚠️ This was found by measurement before it was found in the thesis. The naive
+    form gave sigma_eq = **0.569x** the solver's OWN exported deviatoric stress,
+    constant to +-0.8 % across 64 cases and flat over a 99,270x strain-rate range
+    — the signature of a pure convention factor. With the conversion applied the
+    ratio becomes **1.0346** (581,488 cells, cylindrical_000), and the measured
+    correction 1.8187 matches the predicted 1.8163 to 0.13 %.
+
+    ⚠️ An earlier analysis wrongly *excluded* a sqrt(3) convention by comparing
+    1/0.569 = 1.7575 against the bare sqrt(3) = 1.7321 and calling the 1.47 % gap
+    decisive. The error was testing the rate rescaling and the stress rescaling
+    separately: each contributes sqrt(3), and feeding a rescaled rate into a power
+    law adds the extra ``sqrt(3)**m``.
+
+    Set ``shear_convention=False`` to get the old (incorrect) behaviour, for
+    reproducing pre-2026-09-30 numbers only.
     """
     T = np.asarray(temperature_C, dtype=np.float64)
     e = np.maximum(np.asarray(edot, dtype=np.float64), edot_floor)
@@ -125,7 +161,13 @@ def sigma_eq_norton(
     visco = np.interp(T, norton["T_visco"], norton["visco"])
     expvi = np.interp(T, norton["T_expvi"], norton["expvi"])
 
-    return visco * np.power(e, expvi)
+    if not shear_convention:
+        return visco * np.power(e, expvi)
+
+    sqrt3 = np.sqrt(3.0)
+    gamma = sqrt3 * e                      # von Mises rate -> shear rate
+    tau = visco * np.power(gamma, expvi)   # the table's own output
+    return sqrt3 * tau                     # shear stress -> von Mises stress
 
 
 def sigma_eq_sellars_tegart(
