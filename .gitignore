@@ -118,3 +118,8 @@ mesh_cyclic_*.pvd
 
 # Editor/OS stragglers
 signal-desktop.sources
+
+# Regenerable LaTeX/pandoc byproducts
+docs/rom_latex/
+docs/damage/_doc_for_pandoc.md
+docs/damage/*.pdf

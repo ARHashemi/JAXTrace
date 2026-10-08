@@ -20,6 +20,7 @@ against the run output — see `RUN_ON_LUMI.md`.
 | `FUTURE_MODELS_EXPLAINED.md` | Lee–Dawson and GTN derived from scratch, every symbol and parameter; plus a ranked table of 14 candidate models. |
 | `PRIMER_fsw_physics_for_me.md` | Background physics, written as self-study notes. |
 | `OPEN_QUESTIONS.md` | The running log of open items, numbered (O1, O2, …). Claims retracted after checking are recorded here with their replacements. |
+| `NEXT_STEPS_detachment_criterion.md` | **Forward plan (2026-10-08).** Independent indicators to add alongside the damage laws, and the dimensionless detachment criterion — the route to a void that is a mass-deficit outcome rather than a damage proxy. Design only; no code. |
 
 ## The rest
 

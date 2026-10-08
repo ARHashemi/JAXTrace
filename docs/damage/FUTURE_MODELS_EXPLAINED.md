@@ -899,6 +899,11 @@ might compare the rate at which the cavity opens (∝ travel speed) against the 
 material can be delivered (∝ rotation speed and flow stress) — which is close to what
 **Arbegast's flow-partitioning** model does, and dimensionally natural.
 
+✅ **This is developed further in `NEXT_STEPS_detachment_criterion.md`** (Part B): the
+two candidate groups $\Pi_1=\omega r_\text{pin}/v_\text{adv}$ and a thermal-softening
+$\Pi_2$, why a detachment rule can produce a *genuine* mass-deficit void rather than a
+damage proxy, and how to falsify it.
+
 ---
 
 ## 4. Side by side
