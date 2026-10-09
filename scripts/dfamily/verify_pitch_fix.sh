@@ -122,6 +122,33 @@ s = setvar(s, "RUN_TAG",            f'"pitchfix_{case}"')
 s = setvar(s, "EXPORT_FORMAT",      "vtu")
 s = setvar(s, "LOG_INTERVAL",       "100")
 
+# Unbuffered python, so the log is readable DURING the run instead of only
+# after it exits. The case scripts invoke a plain `python`, whose stdout is
+# block-buffered when redirected to a file; on an 8000-step run that means the
+# log sits at ~1.3 kB for hours and the only way to tell which phase the job is
+# in is to probe /proc for open file descriptors and rchar growth. The
+# production array (sbatch_phase4_rk4_array.sh:281,284) already used both
+# `srun --unbuffered` and `python3 -u`; the per-case scripts do not.
+#
+# PYTHONUNBUFFERED is set via the environment rather than by editing the
+# command line, so it survives regardless of how the script spells the python
+# invocation.
+s, nu = re.subn(r'^(\s*)python (\$JAXTRACE/run_tracking\.py)',
+                lambda m: f'{m.group(1)}python -u {m.group(2)}', s, count=1,
+                flags=re.M)
+if not nu:
+    print("WARNING: could not add -u to the python invocation", file=sys.stderr)
+
+# Also ask srun not to buffer, and export PYTHONUNBUFFERED into the container.
+s, ns = re.subn(r'^(\s*)srun (?!--unbuffered)(\S)',
+                lambda m: f'{m.group(1)}srun --unbuffered {m.group(2)}', s,
+                count=1, flags=re.M)
+s, ne = re.subn(r'^(\s*)--env TF_CPP_MIN_LOG_LEVEL=',
+                lambda m: f'{m.group(1)}--env PYTHONUNBUFFERED=1 \\\n'
+                          f'{m.group(1)}--env TF_CPP_MIN_LOG_LEVEL=',
+                s, count=1, flags=re.M)
+print(f"  unbuffered: python -u={bool(nu)} srun={bool(ns)} PYTHONUNBUFFERED={bool(ne)}")
+
 # EXPORT_FREQ: the case default is 1, i.e. a 10-14 MB VTU every step = 8,000
 # files and ~80-110 GB for an 8000-step run. That made job 22638923 write-bound
 # at 0.4-0.5 step/s. Nothing in this verification needs per-step geometry: the

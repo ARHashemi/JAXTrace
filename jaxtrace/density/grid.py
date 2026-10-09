@@ -190,13 +190,30 @@ def iterate_vtkhdf_steps(
     path: str,
     *,
     step_indices=None,           # optional iterable of step indices to read
+    fields=None,                 # optional list[str] of PointData field names
+    return_fields: bool = False, # if True, yield (step, t, P, fields_dict)
 ):
     """
-    Yield ``(step_index, time_value, positions_np)`` per step from a
-    particles.vtkhdf file written by :class:`TransientPolyDataWriter`.
+    Yield per-step records from a particles.vtkhdf file written by
+    :class:`jaxtrace.io.vtkhdf_writer.TransientPolyDataWriter`.
 
-    If ``step_indices`` is provided, only those steps are yielded (in order).
-    ``positions_np`` is a numpy float32 array of shape (n_particles_at_step, 3).
+    By default each iteration yields ``(step_index, time_value, positions_np)``,
+    matching the original 3-tuple signature.
+
+    When ``return_fields=True`` the yielded tuple becomes
+    ``(step_index, time_value, positions_np, fields_dict)`` where
+    ``fields_dict`` maps each requested PointData name to its per-step
+    NumPy slice (shape ``(n_particles_at_step, ...)``).
+
+    Parameters
+    ----------
+    fields
+        Iterable of PointData field names to read. ``None`` (the default)
+        means "all fields present in the file". Unknown names are silently
+        skipped.
+    return_fields
+        Toggle the 4-tuple yield. Kept off by default so old callers
+        (the density runner, the prefetcher) are not affected.
     """
     import h5py
 
@@ -208,6 +225,25 @@ def iterate_vtkhdf_steps(
         times = root["Steps/Values"][:]                 # (n_steps,)
         pts = root["Points"]                            # (sum_npts, 3)
 
+        # Resolve which PointData fields to read.
+        pd_group = root["PointData"] if "PointData" in root else None
+        pd_offsets_group = (
+            root["Steps/PointDataOffsets"]
+            if "Steps/PointDataOffsets" in root else None
+        )
+        if return_fields and pd_group is not None and pd_offsets_group is not None:
+            available = sorted(pd_group.keys())
+            if fields is None:
+                wanted = available
+            else:
+                wanted = [n for n in fields if n in available]
+            field_dsets = {n: pd_group[n] for n in wanted}
+            field_offsets = {n: pd_offsets_group[n][:] for n in wanted}
+        else:
+            wanted = []
+            field_dsets = {}
+            field_offsets = {}
+
         idxs = range(n_steps) if step_indices is None else list(step_indices)
         for step in idxs:
             if step < 0 or step >= n_steps:
@@ -215,7 +251,22 @@ def iterate_vtkhdf_steps(
             start = int(point_offsets[step])
             count = int(n_points[step])
             block = pts[start:start + count]
-            yield step, float(times[step]), np.asarray(block, dtype=np.float32)
+            P = np.asarray(block, dtype=np.float32)
+            if not return_fields:
+                yield step, float(times[step]), P
+                continue
+
+            field_block = {}
+            for name in wanted:
+                dset = field_dsets[name]
+                offs = field_offsets[name]
+                # Per-step offset table mirrors PointOffsets: row `step` is the
+                # starting row in the flat dataset for this step. The slice
+                # length matches n_points[step] by construction.
+                f_start = int(offs[step])
+                arr = dset[f_start:f_start + count]
+                field_block[name] = np.asarray(arr)
+            yield step, float(times[step]), P, field_block
 
 
 def prefetch_vtkhdf_steps(

@@ -317,6 +317,7 @@ class _StaticImageDataWriter:
         compression: str | None = "gzip",
         compression_opts: int = 1,
         blosc_threads: int = 4,
+        file_attrs: Optional[Dict[str, Any]] = None,
     ) -> None:
         import h5py
 
@@ -336,6 +337,8 @@ class _StaticImageDataWriter:
         root.attrs["Origin"] = np.asarray(grid.origin, dtype="f8")
         root.attrs["Spacing"] = np.asarray(grid.spacing, dtype="f8")
         root.attrs["Direction"] = np.eye(3, dtype="f8").ravel()
+        for k, v in (file_attrs or {}).items():
+            root.attrs[k] = v
 
         self._point_data = root.create_group("PointData")
         self._root = root
@@ -478,6 +481,7 @@ def write_time_average(
     compression: str | None = "gzip",
     compression_opts: int = 1,
     blosc_threads: int = 4,
+    file_attrs: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Write the finalized time-average fields as a single ImageData file.
@@ -507,9 +511,52 @@ def write_time_average(
             compression=compression,
             compression_opts=compression_opts,
             blosc_threads=blosc_threads,
+            file_attrs=file_attrs,
         )
         writer.write_fields(fields_3d)
         writer.close()
         return path
 
     raise ValueError(f"unknown format {fmt!r}")
+
+
+def read_time_average_vtkhdf(in_path: Path) -> Tuple[VoxelGrid, Dict[str, np.ndarray], Dict[str, Any]]:
+    """
+    Reverse of :func:`write_time_average` for the static-ImageData
+    (``fmt='vtkhdf'``) variant: return the voxel grid reconstructed
+    from the file's WholeExtent/Origin/Spacing attrs, the PointData
+    fields as ``(Nx, Ny, Nz)`` arrays, and the flat dict of
+    ``/VTKHDF`` attrs (for time/drift metadata round-trip).
+    """
+    import h5py
+    in_path = Path(in_path)
+    with h5py.File(str(in_path), "r") as f:
+        root = f["/VTKHDF"]
+        whole = np.asarray(root.attrs["WholeExtent"], dtype=np.int64)
+        origin = np.asarray(root.attrs["Origin"], dtype=np.float32)
+        spacing = np.asarray(root.attrs["Spacing"], dtype=np.float32)
+        nx = int(whole[1] - whole[0] + 1)
+        ny = int(whole[3] - whole[2] + 1)
+        nz = int(whole[5] - whole[4] + 1)
+        # bbox_min = first voxel center - half spacing (matches make_voxel_grid)
+        bbox_min = origin - 0.5 * spacing
+        bbox_max = bbox_min + spacing * np.array([nx, ny, nz], dtype=np.float32)
+        # Use the canonical builder so derived state matches a fresh grid.
+        from .grid import make_voxel_grid
+        grid = make_voxel_grid(
+            bbox_min=tuple(bbox_min.tolist()),
+            bbox_max=tuple(bbox_max.tolist()),
+            resolution=(nx, ny, nz),
+        )
+        fields: Dict[str, np.ndarray] = {}
+        for name in sorted(root["PointData"].keys()):
+            block_zyx = np.asarray(root["PointData"][name][:], dtype=np.float32)
+            # Files are stored (Nz, Ny, Nx); transpose back to (Nx, Ny, Nz).
+            if block_zyx.shape == (nz, ny, nx):
+                fields[name] = np.transpose(block_zyx, (2, 1, 0)).copy()
+            else:
+                fields[name] = block_zyx
+        attrs: Dict[str, Any] = {}
+        for k, v in root.attrs.items():
+            attrs[k] = v.tolist() if hasattr(v, "tolist") else v
+    return grid, fields, attrs
