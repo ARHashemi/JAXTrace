@@ -3,6 +3,24 @@
 **A stand-alone analysis.** Written 2026-10-07. No case folder was modified;
 everything below comes from reading the existing output files.
 
+> **SUPERSEDED — read [`05_root_cause_and_fix.md`](05_root_cause_and_fix.md)
+> for the resolved answer.**
+>
+> This file is kept as the record of how the investigation started. Two of its
+> conclusions did not survive measurement:
+>
+> - *Explanation A* (the level set zeroing velocity) was **ruled out**: frozen
+>   particles sit outside the tool radius and 100% of them had `ElementID<0`.
+> - The suggested remedy — raising `ENHANCED_SEARCH_BAND`, `L0_SKIP_BAND` or
+>   `L2_NEIGHBORHOOD` — **cannot work**. Widening a search does not help when
+>   the search is computing the wrong cell index in the first place.
+>
+> The actual cause: the octree's per-level cell size was taken from the *first*
+> cell at each level, which on the cuboid D meshes is an unrepresentative cubic
+> outlier. The z index was inflated 1.197×, growing with depth to 14 cells, so
+> the true host fell outside the 3×3×3 neighbourhood. Fixed by using the
+> per-axis median.
+
 ---
 
 ## 0. Vocabulary (read this first if the terms are unfamiliar)

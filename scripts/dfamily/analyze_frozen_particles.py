@@ -54,12 +54,29 @@ def _require_vtk():
 
 
 def list_steps(run_dir: Path):
-    """Return sorted (step, path) for every per-step particle file."""
-    out = []
-    for f in os.listdir(run_dir):
-        m = re.match(r"particles_step_(\d+)\.vtu$", f)
-        if m:
-            out.append((int(m.group(1)), run_dir / f))
+    """Return sorted (step, path) for every per-step particle file.
+
+    RUN_TAG makes run_tracking.py write into <output>/<run_tag>/, so the
+    files are usually one level down from the directory the user names.
+    Search the given directory first, then its immediate subdirectories.
+    """
+    pat = re.compile(r"particles_step_(\d+)\.vtu$")
+
+    def scan(d: Path):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return []
+        return [(int(m.group(1)), d / n)
+                for n in names if (m := pat.match(n))]
+
+    out = scan(run_dir)
+    if not out:
+        for sub in sorted(p for p in run_dir.iterdir() if p.is_dir()):
+            out = scan(sub)
+            if out:
+                print(f"[steps] found particle files in {sub.name}/")
+                break
     return sorted(out)
 
 
@@ -181,6 +198,18 @@ def main():
         say()
     else:
         lost = eF < 0
+        # Caveat worth stating in the report rather than assuming: when a run
+        # uses an inlet wall, particles seeded outside the mesh bbox drift
+        # inward in "pending-entry" mode and are FORCED to ElementID=-1 until
+        # they cross the bbox (_suppress_pending_recovery in run_tracking.py).
+        # Those are not search failures. This run was launched without
+        # --inlet-wall, so inlet drift is inactive and every -1 here is a
+        # genuine failed host lookup -- but if you re-run WITH an inlet wall,
+        # the ElementID<0 column stops meaning "search failed".
+        say("_ElementID<0 is read as a failed host lookup. That reading assumes "
+            "the run had no inlet wall; with `--inlet-wall`, pending-entry "
+            "particles are forced to -1 while still outside the mesh bbox._")
+        say()
         say("| group | n | ElementID < 0 (search failed) | ElementID >= 0 (velocity was zero) |")
         say("|---|---:|---:|---:|")
         for name, m in (("dead on arrival", doa), ("froze later", late),
@@ -191,13 +220,33 @@ def main():
             say(f"| {name} | {m.sum():,} | {nl:,} ({100*nl/m.sum():.1f}%) "
                 f"| {m.sum()-nl:,} ({100*(m.sum()-nl)/m.sum():.1f}%) |")
         say()
-        nl_late = int((late & lost).sum())
-        if late.sum():
-            frac = 100 * nl_late / late.sum()
-            say(f"**Verdict for the late freezers:** {frac:.1f}% have no host element.")
+        def verdict(label, mask):
+            """Interpret the search-vs-velocity split for one population."""
+            if not mask.sum():
+                return
+            frac = 100 * int((mask & lost).sum()) / mask.sum()
+            say(f"**Verdict for {label}:** {frac:.1f}% have no host element.")
             if frac > 70:
-                say("Dominated by **search failure** — MALMO/L0-L1-L2 is losing them.")
-                say("Act on `ENHANCED_SEARCH_BAND`, `L0_SKIP_BAND`, `L2_NEIGHBORHOOD`.")
+                say("Dominated by **a failed host lookup** — the particles have")
+                say("no host element, so the velocity field and level set are")
+                say("exonerated. That does NOT yet say the search kernel is at")
+                say("fault: the search can only find what the octree registers.")
+                say()
+                say("Separate the two causes before acting:")
+                say()
+                say("- `scripts/dfamily/registration_sweep.sh <CASE> "
+                    "--only aabb,parent_cube` — if `aabb` eliminates the loss,")
+                say("  the cause is registration COVERAGE, not the search.")
+                say("- `scripts/dfamily/audit_octree_coverage.py` — asks, per")
+                say("  lost particle, whether the element that truly contains")
+                say("  it is registered in a cell the 3x3x3 search visits.")
+                say()
+                say("The paper's Table T2 is the prior here: `aabb` is 100.00%")
+                say("correct on all 10 cohort meshes while `centroid` drops to")
+                say("99.64%, and the D meshes are 50-59% non-Kuhn. Widening")
+                say("`ENHANCED_SEARCH_BAND` / `L0_SKIP_BAND` / `L2_NEIGHBORHOOD`")
+                say("cannot find an element absent from the cells searched, so")
+                say("reach for those only once coverage is ruled out.")
             elif frac < 30:
                 say("Dominated by **zero velocity** — the host is found, the")
                 say("velocity given to it is zero. Search settings will NOT help;")
@@ -205,7 +254,64 @@ def main():
             else:
                 say("**Mixed** — both mechanisms are active; treat them separately")
                 say("by depth and radius using section 3.")
-        say()
+            say()
+
+        # Interpret whichever populations actually exist. A run whose losses
+        # are all dead-on-arrival still needs a verdict, so don't report only
+        # on the late freezers.
+        verdict("the late freezers", late)
+        verdict("the dead-on-arrival particles", doa)
+        if not late.sum() and not doa.sum():
+            say("No frozen particles found — nothing to diagnose.")
+            say()
+
+    # Read the mesh once, before it is needed: section 2b wants its bounding
+    # box and section 3 wants its LEVEL field.
+    tool = None
+    mesh_pts = mesh_lev = None
+    if args.level_set:
+        mesh_pts, mesh_lev = read_levelset(args.level_set, args.level_set_pieces)
+
+    # ---- boundary-snap check ----------------------------------------------
+    # run_tracking.py notes that the kernel's boundary-projection recovery can
+    # flip element_id back to >= 0 by snapping a lost particle to bbox+tol.
+    # Such a particle reads as "host found, zero velocity" in section 2 while
+    # really being a search-adjacent artefact. Separate the two by asking how
+    # close each frozen-but-hosted particle sits to a bbox face.
+    if eF is not None:
+        hosted_frozen = fin & (eF >= 0)
+        if hosted_frozen.sum():
+            # Prefer the MESH bbox; the particle cloud's own extent is only a
+            # lower bound on the domain and would misplace any face the
+            # particles never reach.
+            if mesh_pts is not None:
+                lo = mesh_pts.min(axis=0)
+                hi = mesh_pts.max(axis=0)
+                bbox_src = "mesh"
+            else:
+                lo = pF.min(axis=0)
+                hi = pF.max(axis=0)
+                bbox_src = "particle extent (mesh file not supplied)"
+            d = np.minimum(np.abs(pF - lo), np.abs(pF - hi)).min(axis=1)
+            near = hosted_frozen & (d < 0.05)   # within 50 um of a face
+            say("## 2b. Are the hosted-but-frozen particles stuck on a boundary?")
+            say()
+            say(f"Bounding box taken from: {bbox_src}.")
+            say()
+            say(f"Of {int(hosted_frozen.sum()):,} frozen particles that still "
+                f"hold a valid host element, "
+                f"{int(near.sum()):,} ({100*near.sum()/hosted_frozen.sum():.1f}%) "
+                f"sit within 50 um of a bounding-box face.")
+            say()
+            if 100 * near.sum() / hosted_frozen.sum() > 50:
+                say("Most of them are on the domain boundary, so their valid")
+                say("host is likely the result of boundary-projection snapping")
+                say("rather than genuine interior stagnation.")
+            else:
+                say("Most of them are in the interior, away from any bbox face.")
+                say("Their zero velocity is therefore a property of the velocity")
+                say("field or the level set, not a boundary-snap artefact.")
+            say()
 
     # ---- geometry ----------------------------------------------------------
     say("## 3. Where they stop")
@@ -214,11 +320,9 @@ def main():
     r = np.hypot(pF[:, 0], pF[:, 1])
     bands = [(-6, -4), (-4, -2), (-2, 0), (0, 2)]
 
-    tool = None
     if args.level_set:
-        pts, lev = read_levelset(args.level_set, args.level_set_pieces)
-        if pts is not None:
-            tool = tool_radius_by_depth(pts, lev, bands)
+        if mesh_pts is not None:
+            tool = tool_radius_by_depth(mesh_pts, mesh_lev, bands)
             say(f"Tool region (`LEVEL < 0`) from `{args.level_set.name}` "
                 f"({args.level_set_pieces} pieces sampled):")
             say()
@@ -232,36 +336,48 @@ def main():
             say(f"(no LEVEL field found in {args.level_set})")
             say()
 
-    say("Late freezers by depth:")
-    say()
-    hdr = "| depth (mm) | n | median r (mm) |"
-    sep = "|---|---:|---:|"
-    if tool:
-        hdr += " inside tool |"
-        sep += "---:|"
-    say(hdr); say(sep)
-    for b in bands:
-        m = late & (z >= b[0]) & (z < b[1])
-        if not m.sum():
-            continue
-        row = f"| {b[0]} .. {b[1]} | {m.sum():,} | {np.median(r[m]):.2f} |"
+    def geometry(label, sel):
+        """Depth table + radial histogram for one frozen population."""
+        if not sel.sum():
+            say(f"({label}: none)")
+            say()
+            return
+        say(f"{label} by depth:")
+        say()
+        hdr = "| depth (mm) | n | median r (mm) |"
+        sep = "|---|---:|---:|"
         if tool:
-            rr = tool[b][0]
-            ins = int((r[m] <= rr).sum()) if np.isfinite(rr) else 0
-            row += f" {ins:,} ({100*ins/m.sum():.1f}%) |"
-        say(row)
-    say()
+            hdr += " inside tool |"
+            sep += "---:|"
+        say(hdr); say(sep)
+        for b in bands:
+            m = sel & (z >= b[0]) & (z < b[1])
+            if not m.sum():
+                continue
+            row = f"| {b[0]} .. {b[1]} | {m.sum():,} | {np.median(r[m]):.2f} |"
+            if tool:
+                rr = tool[b][0]
+                ins = int((r[m] <= rr).sum()) if np.isfinite(rr) else 0
+                row += f" {ins:,} ({100*ins/m.sum():.1f}%) |"
+            say(row)
+        say()
 
-    hist, edges = np.histogram(r[late], bins=np.arange(0, 21, 1))
-    say("Radial histogram of late freezers (1 mm bins):")
-    say()
-    say("```")
-    mx = max(hist.max(), 1)
-    for i, c in enumerate(hist):
-        if c:
-            say(f"  {edges[i]:4.0f}-{edges[i+1]:2.0f} mm {c:7,d} {'#'*int(50*c/mx)}")
-    say("```")
-    say()
+        hist, edges = np.histogram(r[sel], bins=np.arange(0, 21, 1))
+        say(f"Radial histogram of {label.lower()} (1 mm bins):")
+        say()
+        say("```")
+        mx = max(hist.max(), 1)
+        for i, c in enumerate(hist):
+            if c:
+                say(f"  {edges[i]:4.0f}-{edges[i+1]:2.0f} mm {c:7,d} {'#'*int(50*c/mx)}")
+        say("```")
+        say()
+
+    # Report geometry for every frozen population that exists, so the spatial
+    # picture survives whichever way the freeze timing falls out.
+    geometry("Late freezers", late)
+    if doa.sum():
+        geometry("Dead-on-arrival particles", doa)
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

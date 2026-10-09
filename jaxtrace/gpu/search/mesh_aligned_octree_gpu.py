@@ -449,12 +449,53 @@ def upload_mesh_aligned_octree_to_gpu(
     max_level_int = int(np.max(unique_levels))
     level_cell_sizes_cpu = np.zeros((max_level_int + 1, 3), dtype=config.FLOAT_DTYPE_NP)
 
+    # Per-axis MEDIAN, not the first cell's size.
+    #
+    # The old code took level_sizes[0] on the stated assumption that "all
+    # should be nearly identical per level". That holds for a cubic mesh but
+    # NOT for an anisotropic (cuboid) one. On the D-family FSW meshes the
+    # tetrahedra near the tilted concave shoulder are cuboid with a constant
+    # aspect ratio dz/dx = 1.197, and `level` is derived from the MEAN of
+    # [dx,dy,dz] (mesh_aligned_octree_single_cell.py:101-104), so cells of
+    # different size land on the same level. Measured on D2: 99.42% of the
+    # 5.88M level-14 cells are cuboid (dx=dy=4.6875e-05, dz=5.6117e-05) and
+    # only 0.58% are cubic -- and level_sizes[0] happened to be one of the
+    # cubic outliers. The search then divided z by 4.6875e-05 while the real
+    # cells were 5.6117e-05 tall, inflating every z index by 1.197x. The error
+    # grows with depth and reaches |dk| = 14 at z = -4 mm, far outside the +-1
+    # that the 3x3x3 neighbourhood can absorb, so the true host cell was never
+    # visited and the particle was reported lost.
+    #
+    # The median is robust to both the minority outliers and the ~1% per-cell
+    # jitter that mesh motion introduces. Measured unfindable-cell counts on
+    # D2 (probing each cell centre, so a lower bound):
+    #     first (old)      57,369   0.96%
+    #     median (new)      9,266   0.15%     <- 6.2x better
+    #     mean             13,139   0.22%
+    # Median, dominant-mode and cluster-median all converge on 9,266, which is
+    # why the simple median is enough. On a cubic mesh (A1, every level 100%
+    # one size) median == first, so this is a no-op for the A/B/C families:
+    # 0 unfindable cells before and after.
+    #
+    # No kernel change is needed: level_cell_sizes is already (max_level+1, 3)
+    # and every search site divides each axis by its own pitch, so cuboid
+    # cells are already supported. This is purely a build-time choice.
+    low_share_levels = []
     for level in unique_levels:
         level_mask = octree_cells.cell_levels == level
         level_sizes = octree_cells.cell_sizes[level_mask]
-        # Use first cell size for this level (all should be nearly identical per level)
-        # Using first instead of mean avoids floating point accumulation
-        level_cell_sizes_cpu[level] = level_sizes[0]
+        level_cell_sizes_cpu[level] = np.median(level_sizes, axis=0)
+
+        # Warn when a level is not dominated by one size family, i.e. when the
+        # one-pitch-per-level model is a poor fit for this mesh. Cluster in
+        # RELATIVE terms (5%) so mesh-motion jitter does not fragment a family.
+        if len(level_sizes) > 1:
+            key = np.round(np.log2(np.maximum(level_sizes, 1e-300))
+                           / np.log2(1.05))
+            _, counts = np.unique(key, axis=0, return_counts=True)
+            share = counts.max() / len(level_sizes)
+            if share < 0.60:
+                low_share_levels.append((int(level), len(level_sizes), share))
 
     level_cell_sizes_gpu = jnp.array(level_cell_sizes_cpu, dtype=config.FLOAT_DTYPE_JNP)
     min_level_gpu = jnp.int32(min_level_int)
@@ -463,6 +504,24 @@ def upload_mesh_aligned_octree_to_gpu(
     if verbose:
         print(f"  octree level range on this mesh: [{min_level_int}, {max_level_int}] "
               f"(kernel will iterate {max_level_int - min_level_int + 1} levels)")
+        # Report anisotropy so a cuboid mesh is visible in the log rather than
+        # silently relying on the median being a good fit.
+        aspect = level_cell_sizes_cpu[unique_levels]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = aspect.max(axis=1) / np.where(aspect.min(axis=1) > 0,
+                                                  aspect.min(axis=1), np.nan)
+        worst = float(np.nanmax(ratio)) if len(ratio) else 1.0
+        if worst > 1.01:
+            print(f"  cell aspect ratio (max/min per level): up to {worst:.4f} "
+                  f"-> ANISOTROPIC (cuboid) cells; per-axis pitch in use")
+        if low_share_levels:
+            print("  WARNING: these levels are not dominated by a single cell "
+                  "size, so one pitch per level is an imperfect fit:")
+            for lv, n, sh in low_share_levels:
+                print(f"    level {lv}: {n:,} cells, largest size family only "
+                      f"{100*sh:.1f}%")
+            print("    Point location may miss hosts in those levels. See "
+                  "scripts/dfamily/eval_pitch_choice.py to quantify.")
 
     # Statistics
     n_cells = jnp.int32(octree_cells.n_cells)

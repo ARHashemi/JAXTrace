@@ -116,6 +116,7 @@ from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
 from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
+from jaxtrace.gpu.search.mesh_aligned_octree_aabb import extract_octree_cells_aabb
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.tracking.initial_assignment_cascading import (
     initial_assignment_mesh_aligned_multi_local,
@@ -532,8 +533,16 @@ def parse_args():
     parser.add_argument("--l2-vectorized", action="store_true", default=False,
                         help="Use vectorized L2 (experimental)")
     parser.add_argument("--registration", type=str, default=None,
-                        choices=["vertex_multi", "parent_cube"],
-                        help="Override octree registration method")
+                        choices=["vertex_multi", "parent_cube", "aabb"],
+                        help="Override octree registration method. 'aabb' "
+                             "registers every element in every cell its AABB "
+                             "overlaps; it is the only method that reaches "
+                             "100%% correct on all 10 meshes of the paper's "
+                             "R2-6 cohort (Table T2), including the fully "
+                             "non-Kuhn ones, whereas 'centroid'/parent_cube "
+                             "drops to 99.64%% and vertex_multi to 96.12%%. "
+                             "Use it on high-non-Kuhn meshes (the D family is "
+                             "50-59%% non-Kuhn).")
     parser.add_argument("--no-orphan-fallback", action="store_true", default=False,
                         help="Disable the AABB fallback for non-Kuhn elements "
                              "that have no Kuhn neighbour. By default such "
@@ -1955,7 +1964,19 @@ def main():
         node_positions=node_positions, connectivity=connectivity,
         leaf_capacity=256, max_depth=21, verbose=False,
     )
-    if config.OCTREE_REGISTRATION_METHOD == "parent_cube":
+    if config.OCTREE_REGISTRATION_METHOD == "aabb":
+        # AABB-overlap registration: each element is registered in EVERY cell
+        # its bounding box overlaps, so a query cell can never miss an element
+        # whose volume reaches into it. This is the coverage-complete option
+        # (paper Table T2: 100.00% correct on all 10 cohort meshes).
+        mesh_octree_cells = extract_octree_cells_aabb(
+            node_positions, connectivity, tolerance=1e-6, verbose=True,
+        )
+        print(f"  AABB-overlap octree: {mesh_octree_cells.n_cells:,} cells, "
+              f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell "
+              f"(max {mesh_octree_cells.max_elements_per_cell}), "
+              f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
+    elif config.OCTREE_REGISTRATION_METHOD == "parent_cube":
         mesh_octree_cells = extract_octree_cells_parent_cube(
             node_positions, connectivity, tolerance=1e-6, verbose=True,
             orphan_fallback=not args.no_orphan_fallback,
@@ -1989,8 +2010,13 @@ def main():
 
     mesh_gpu = upload_mesh_to_gpu(connectivity, node_positions, element_neighbors, verbose=False)
     morton_gpu = upload_global_morton_to_gpu(octree_struct, connectivity, node_positions)
+    # verbose=True so the anisotropy report and the low-dominant-share warning
+    # from the per-level pitch selection are visible in tracking logs. Those
+    # two lines are the only way a user learns that their mesh has cuboid cells
+    # and whether one pitch per level is a good fit for it; with verbose=False
+    # they were dead code. The cost is a handful of lines printed once at build.
     mesh_aligned_octree_multi_gpu = upload_mesh_aligned_octree_to_gpu(
-        connectivity, node_positions, mesh_octree_cells, verbose=False,
+        connectivity, node_positions, mesh_octree_cells, verbose=True,
     )
 
     aa_metadata_gpu = AxisAlignedMetadata(
