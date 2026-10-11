@@ -146,16 +146,37 @@ def main():
         print(line, flush=True)
         L.append(line)
 
-    steps = list_steps(args.run)
-    if not steps:
-        sys.exit(f"ERROR: no particle files under {args.run}")
-    pF, eF = read_particles(steps[-1][1])
+    # Accept either per-step VTUs or a final_state.npz. The workstation run
+    # script inherits EXPORT_FORMAT=vtkhdf from the cylA template, which writes
+    # one archive plus final_state.npz instead of numbered VTUs; the npz holds
+    # positions / element_ids / escaped_ever, which is all this test needs.
+    npz = None
+    if args.run.suffix == ".npz" and args.run.is_file():
+        npz = args.run
+    else:
+        cand = sorted(args.run.glob("**/final_state.npz"))
+        steps = list_steps(args.run) if args.run.is_dir() else []
+        if not steps and cand:
+            npz = cand[0]
+
+    if npz is not None:
+        d = np.load(npz)
+        pF = d["positions"].astype(np.float64)
+        eF = d["element_ids"].astype(np.int64)
+        print(f"reading final state from `{npz.name}` ({len(pF):,} particles)")
+        last_step = "final"
+    else:
+        steps = list_steps(args.run)
+        if not steps:
+            sys.exit(f"ERROR: no particle files or final_state.npz under {args.run}")
+        pF, eF = read_particles(steps[-1][1])
+        last_step = steps[-1][0]
     if eF is None:
         sys.exit("ERROR: no ElementID array; re-run with --export-element-ids")
 
     say(f"# Index-mismatch test — `{args.run.name}` (`{args.registration}`)")
     say()
-    say(f"Final step {steps[-1][0]}; {len(pF):,} particles, "
+    say(f"Final step {last_step}; {len(pF):,} particles, "
         f"{int((eF < 0).sum()):,} with `ElementID < 0`.")
     say()
 
