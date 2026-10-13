@@ -104,7 +104,9 @@ print(f"mesh: {pv.name}  (VEL_START={vs})")
 npos_raw, conn_raw, vel_raw = load_velocity_sequence_from_pvtu(
     base_path=post, file_pattern=pattern, timestep_range=(vs, vs),
     field_name="Displacement", verbose=False)
-npos, conn, vel_seq, _ = deduplicate_nodes(
+# deduplicate_nodes returns (positions, connectivity, n_duplicates, velocity)
+# -- the duplicate COUNT is third, not the velocity.
+npos, conn, _n_dup, vel_seq = deduplicate_nodes(
     npos_raw, conn_raw, velocity_sequence=vel_raw, verbose=False)
 conn = conn.astype(np.int32)
 print(f"  nodes {len(npos):,}  elements {len(conn):,}")
