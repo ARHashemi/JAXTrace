@@ -210,6 +210,35 @@ def extract_octree_cells_parent_cube(
     n_non_kuhn_dropped = 0
     n_non_kuhn_cell_entries = 0
 
+    # ------------------------------------------------------------------
+    # LOOKUP LATTICE, per level.
+    #
+    # The search computes its cell index as
+    #     floor(pos / level_cell_sizes[level])
+    # where upload_mesh_aligned_octree_to_gpu sets level_cell_sizes[level] to
+    # the per-axis MEDIAN of every cell size at that level. Registration must
+    # use the SAME lattice or an element is filed under one grid and looked up
+    # on another.
+    #
+    # It previously used `nbr_size`, the borrowed Kuhn neighbour's own size.
+    # On an anisotropic mesh those sizes form a continuum (D2 level 14 carries
+    # 3.5753e-05, 3.5839e-05, 3.6146e-05 ... against a median of 5.6117e-05),
+    # so 18.2% of cells ended up on a different lattice from the lookup. At a
+    # particle position that disagreement yields an index error of 2 (median 2,
+    # p90 2), and the 3x3x3 neighbourhood reaches only +-1, so the host cell is
+    # never tested and the particle is reported lost. Measured on D2: 666 of
+    # 666 reproducible search failures sat on a mismatched cell and 0 on a
+    # matching one.
+    #
+    # Deriving the pitch the same way the GPU upload does makes the two agree
+    # by construction, costs nothing at query time, and is a no-op on meshes
+    # whose levels already hold a single size (A/B/C).
+    _level_sizes = {}
+    for _cs, _lv in kuhn_element_info.values():
+        _level_sizes.setdefault(int(_lv), []).append(_cs)
+    lookup_pitch = {lv: np.median(np.asarray(v), axis=0)
+                    for lv, v in _level_sizes.items()}
+
     # Precompute a global fallback (cell_size, level) from the median
     # Kuhn element. We DO NOT compute orphan levels from the orphan's
     # own AABB — the kernel only searches a fixed range of levels (7..14
@@ -309,12 +338,15 @@ def extract_octree_cells_parent_cube(
                 # vertices that centroid-only registration would miss.
                 lo = vertices.min(axis=0)
                 hi = vertices.max(axis=0)
-                i_lo = int(np.floor(lo[0] / nbr_size[0]))
-                j_lo = int(np.floor(lo[1] / nbr_size[1]))
-                k_lo = int(np.floor(lo[2] / nbr_size[2]))
-                i_hi = int(np.floor(hi[0] / nbr_size[0]))
-                j_hi = int(np.floor(hi[1] / nbr_size[1]))
-                k_hi = int(np.floor(hi[2] / nbr_size[2]))
+                # Enumerate on the LOOKUP lattice for this level, not on the
+                # borrowed neighbour's size, so registration and search agree.
+                reg_size = lookup_pitch.get(int(nbr_level), nbr_size)
+                i_lo = int(np.floor(lo[0] / reg_size[0]))
+                j_lo = int(np.floor(lo[1] / reg_size[1]))
+                k_lo = int(np.floor(lo[2] / reg_size[2]))
+                i_hi = int(np.floor(hi[0] / reg_size[0]))
+                j_hi = int(np.floor(hi[1] / reg_size[1]))
+                k_hi = int(np.floor(hi[2] / reg_size[2]))
                 for i in range(i_lo, i_hi + 1):
                     for j in range(j_lo, j_hi + 1):
                         for k in range(k_lo, k_hi + 1):
@@ -328,7 +360,7 @@ def extract_octree_cells_parent_cube(
                             cell_to_elements_dict[cell_key].append(elem_id)
                             if cell_key not in cell_metadata:
                                 cell_metadata[cell_key] = (
-                                    nbr_size.copy(), (i, j, k),
+                                    np.asarray(reg_size).copy(), (i, j, k),
                                 )
                             n_non_kuhn_cell_entries += 1
             else:
