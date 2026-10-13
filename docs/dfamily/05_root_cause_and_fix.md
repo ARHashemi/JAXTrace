@@ -1,6 +1,16 @@
 # D-family lost particles: root cause and fix
 
-**Status: root cause identified and fixed. Full-length verification in progress.**
+> **PARTLY SUPERSEDED — see [`07_root_cause.md`](07_root_cause.md).**
+>
+> The mechanism described below (a wrong per-level pitch) is real but turned
+> out to be the **minority** cause. Measuring the actual failures showed that
+> 64% of lost particles had the *correct* cell index, and that the dominant
+> cause is a lattice disagreement between how elements are **registered** and
+> how cells are **looked up**. The per-level pitch is one symptom of that
+> larger issue. Section 5's claim that the median pitch was "the fix" is
+> therefore too strong.
+
+**Status: superseded in part. Retained as the record of the investigation.**
 
 This document supersedes the hypotheses in [`01_diagnosis.md`](01_diagnosis.md).
 That file is kept as the record of how the investigation started, but two of its
