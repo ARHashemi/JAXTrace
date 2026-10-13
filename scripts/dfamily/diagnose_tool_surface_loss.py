@@ -276,6 +276,8 @@ if len(work) == 0:
 banner("T2  what element contains them, and what is it like?")
 # ============================================================================
 hosts, props, minbary = [], [], []
+near_props, near_dist, near_z, _near_ids = [], [], [], []
+_cent = None
 for i in work:
     h = find_host(pos_all[i])
     hosts.append(h)
@@ -283,11 +285,96 @@ for i in work:
         props.append(tet_props(h))
         b = bary(pos_all[i], V[h])
         minbary.append(b.min())
+    else:
+        # No host: profile the element whose AABB is nearest. This is the
+        # "real failed element" -- the one the particle was leaving or
+        # should have entered. Without it, a 100%-unhosted sample tells us
+        # nothing about local mesh structure.
+        if _cent is None:
+            _cent = 0.25 * V.sum(axis=1)
+            _ctree = cKDTree(_cent)
+        dd, nn = _ctree.query(pos_all[i], k=1)
+        _near_ids.append(int(nn))
+        near_props.append(tet_props(int(nn)))
+        near_dist.append(float(dd))
+        near_z.append(float(pos_all[i][2]))
 hosts = np.array(hosts)
 nohost = int((hosts < 0).sum())
 print(f"  no containing element : {nohost:,} / {len(work)} "
       f"(outside the mesh volume -- not a defect)")
 print(f"  HAVE a host           : {(hosts >= 0).sum():,}  <- these are the bug")
+
+if near_props:
+    print(f"\n  --- profile of the NEAREST element to each unhosted failure "
+          f"({len(near_props)}) ---")
+
+    def nstat(k):
+        v = np.array([p[k] for p in near_props], dtype=float)
+        return (f"min {v.min():.3e}  median {np.median(v):.3e}  "
+                f"max {v.max():.3e}")
+    print(f"    distance to it: median "
+          f"{np.median(near_dist) * 1000:.4f} mm   "
+          f"max {np.max(near_dist) * 1000:.4f} mm")
+    for k in ("vol", "Lmin", "Lmax", "aspect", "sliver"):
+        print(f"    {k:9}: {nstat(k)}")
+    nk = sum(1 for p in near_props if not p["kuhn"])
+    print(f"    non-Kuhn : {nk:,} / {len(near_props)} "
+          f"({100 * nk / len(near_props):.1f}%)")
+    print(f"    levels   : {dict(Counter(p['level'] for p in near_props))}")
+    # ---- HOW/WHERE are these elements registered? ----
+    # For each nearest element: how many cells hold it, at which levels, and
+    # does the lattice the search divides by reproduce the cell's own index?
+    # This distinguishes "registered somewhere the search cannot reach" from
+    # "registered correctly but the particle is simply outside the mesh".
+    print(f"\n    registration of those nearest elements:")
+    ncells_per, reg_levels, lat_ok, reach = [], [], 0, 0
+    _dists = []
+    for p_, nnid in zip(near_props, _near_ids):
+        cl = cells_of_element(int(nnid))
+        ncells_per.append(len(cl))
+        for ci in cl:
+            reg_levels.append(int(cell_lev[ci]))
+    for i, nnid in zip(work[hosts < 0], _near_ids):
+        cl = cells_of_element(int(nnid))
+        if len(cl) == 0:
+            continue
+        best = 99
+        for ci in cl:
+            lv = int(cell_lev[ci])
+            want = np.floor(pos_all[i] / lcs[lv]).astype(np.int64)
+            best = min(best, int(np.max(np.abs(want - cell_gidx[ci]))))
+            if np.allclose(cell_sz[ci], lcs[lv], rtol=1e-6):
+                lat_ok += 1
+        _dists.append(best)
+        if best <= 1:
+            reach += 1
+    nc = np.array(ncells_per)
+    print(f"      cells per element : min {nc.min()}  median "
+          f"{int(np.median(nc))}  max {nc.max()}   "
+          f"(1 = parent_cube, >1 = AABB/multi)")
+    print(f"      levels registered : {dict(Counter(reg_levels))}")
+    print(f"      cell size == lookup pitch: {lat_ok:,} / "
+          f"{len(reg_levels):,} cell entries "
+          f"({100 * lat_ok / max(len(reg_levels), 1):.1f}%)")
+    if _dists:
+        dd = np.array(_dists)
+        print(f"      index delta from the particle to the nearest cell "
+              f"holding it:")
+        print(f"        median {int(np.median(dd))}  p90 "
+              f"{int(np.percentile(dd, 90))}  max {int(dd.max())}   "
+              f"reachable (<=1): {100 * (dd <= 1).mean():.1f}%")
+        print(f"      -> a high reachable% with no host means the mesh simply "
+              f"ends there;\n         a low reachable% would mean a "
+              f"registration/lattice problem.")
+
+    zz = np.array(near_z) * 1000
+    print(f"\n    particle z (mm): min {zz.min():.3f}  median "
+          f"{np.median(zz):.3f}  max {zz.max():.3f}")
+    for a, b in ((-6, -4), (-4, -2), (-2, -1), (-1, -0.001),
+                 (-0.001, 0.001), (0.001, 1.4)):
+        m = (zz >= a) & (zz < b)
+        print(f"      z {a:7.3f}..{b:7.3f}: {m.sum():4,} "
+              f"({100 * m.mean():5.1f}%)")
 
 if props:
     def stat(k):

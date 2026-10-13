@@ -363,6 +363,16 @@ def parse_args():
                              "(used when --track-max-temperature or --export-temperature is set).")
 
     # --- Tolerances ---
+    parser.add_argument("--trace-substages", type=str, default="",
+                        metavar="PATH",
+                        help="Diagnostic: write the k1..k4 RK4 substage "
+                             "positions and element ids to PATH.npz. Off by "
+                             "default and compiled out when off, so the "
+                             "production kernel is unaffected. Intended for "
+                             "short runs -- the arrays are "
+                             "n_particles x 4 x 3 per logged step.")
+    parser.add_argument("--trace-substages-every", type=int, default=50,
+                        help="With --trace-substages, log every Nth step.")
     parser.add_argument("--point-in-tet-tol", type=float, default=1e-6,
                         help="Point-in-tet containment tolerance")
     parser.add_argument("--interpolation-det-min", type=float, default=None,
@@ -2416,6 +2426,7 @@ def main():
         node_gradient_gpu=node_gradient_gpu,
         hct_bernstein_gpu=hct_bernstein_gpu,
         return_search_closures=args.hit_stats_log,
+        trace_substages=bool(args.trace_substages),
         damage_scalars_gpu=damage_scalars_gpu,
         damage_order=args.damage_order,
     )
@@ -2427,6 +2438,24 @@ def main():
     else:
         rk4_step = _rk4_build
         _hit_probe_closures = None
+
+    # Substage tracing: the traced kernel returns two extra arrays. Rather
+    # than teach every call site a second unpacking, keep rk4_step's contract
+    # identical and stash the extras where the step loop can pick them up.
+    # Wrapping only happens when tracing is requested, so the production call
+    # path is untouched.
+    _substage_sink = {}
+    if args.trace_substages:
+        _traced_step = rk4_step
+
+        def rk4_step(*a, **kw):            # noqa: F811 - deliberate shadow
+            out = _traced_step(*a, **kw)
+            _substage_sink['sub_pos'] = out[-2]
+            _substage_sink['sub_elem'] = out[-1]
+            return out[:-2]
+
+        print(f"  [trace] substage logging ON -> {args.trace_substages}.npz "
+              f"(every {args.trace_substages_every} steps)")
 
     # Per-step inlet drift helper. Drifts only particles whose
     # pending_entry bit is set. The bit is one-shot: cleared by
@@ -2963,6 +2992,7 @@ def main():
     print("=" * 80)
     t_start = time.time()
     prev_lost = 0
+    _substage_records = []
     for step in range(1, N_STEPS + 1):
         if apply_inlet_drift is not None:
             # Drift pending-entry particles by dt * drift_vel. The
@@ -2991,6 +3021,25 @@ def main():
             positions_gpu, element_ids_gpu = rk4_step(
                 positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu, step - 1
             )
+        # Substage trace: keep only the particles that actually lost a
+        # substage, so the record stays small on a long run. Each entry is
+        # (step, particle, which stages failed, the four substage positions).
+        if args.trace_substages and _substage_sink:
+            if step % args.trace_substages_every == 0 or step == 1:
+                _se = np.asarray(_substage_sink['sub_elem'])    # (n, 4)
+                _sp = np.asarray(_substage_sink['sub_pos'])     # (n, 4, 3)
+                _bad = np.flatnonzero((_se < 0).any(axis=1))
+                if len(_bad):
+                    _substage_records.append({
+                        'step': np.full(len(_bad), step, dtype=np.int32),
+                        'particle': _bad.astype(np.int32),
+                        'sub_elem': _se[_bad],
+                        'sub_pos': _sp[_bad],
+                        'elem_final': np.asarray(element_ids_gpu)[_bad],
+                        'pos_final': np.asarray(positions_gpu)[_bad],
+                    })
+                _substage_sink.clear()
+
         if suppress_pending_recovery is not None:
             positions_gpu, element_ids_gpu, drift_vel_gpu, pending_entry_gpu = \
                 suppress_pending_recovery(
@@ -3249,6 +3298,36 @@ def main():
     print(f"  Particles: {n_particles:,}")
     print(f"  Final active: {n_active_final:,} ({100*n_active_final/n_particles:.2f}%)")
     print(f"  Final lost:   {n_lost_final:,} ({100*n_lost_final/n_particles:.2f}%)")
+
+    if args.trace_substages:
+        _out = args.trace_substages
+        if not _out.endswith('.npz'):
+            _out += '.npz'
+        if _substage_records:
+            _cat = {k: np.concatenate([r[k] for r in _substage_records])
+                    for k in _substage_records[0]}
+            np.savez_compressed(_out, **_cat)
+            _se = _cat['sub_elem']
+            n = len(_se)
+            print(f"  [trace] {n:,} particle-steps with a failed substage "
+                  f"-> {_out}")
+            for s in range(4):
+                c = int((_se[:, s] < 0).sum())
+                print(f"    k{s + 1} failed: {c:,} ({100.0 * c / max(n, 1):.1f}%)")
+            _single = (_se < 0).sum(axis=1) == 1
+            _only = [int((_single & (_se[:, s] < 0)).sum())
+                     for s in range(4)]
+            print(f"    exactly one stage failed, by stage: "
+                  f"k1={_only[0]:,} k2={_only[1]:,} k3={_only[2]:,} "
+                  f"k4={_only[3]:,}")
+            print(f"    all four failed: "
+                  f"{int(((_se < 0).sum(axis=1) == 4).sum()):,}")
+            _ff = np.asarray(_cat['elem_final'])
+            print(f"    of these, final search ALSO failed: "
+                  f"{int((_ff < 0).sum()):,} / {n:,}")
+        else:
+            print(f"  [trace] no substage failures recorded "
+                  f"(nothing written to {_out})")
     print(f"  Steps:        {N_STEPS}")
     print(f"  Wall time:    {t_elapsed:.1f}s ({n_particles*N_STEPS/t_elapsed:,.0f} p·step/s)")
     print(f"  Output:       {output_subdir}")

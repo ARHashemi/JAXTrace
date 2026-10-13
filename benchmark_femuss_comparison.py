@@ -734,6 +734,7 @@ def create_rk4_comparison(
     # --hit-stats-log path (paper Section 7 diagnostic).  Kernel behaviour
     # is unchanged when this is False (default).
     return_search_closures: bool = False,
+    trace_substages: bool = False,
 ):
     """Create RK4 step function. Reads policies from config at creation time."""
     # Capture all config at creation time (Python-level, resolved before JIT)
@@ -1636,6 +1637,11 @@ def create_rk4_comparison(
                 if use_skip_step_on_tool:
                     dmg_new = jnp.where(any_inside, dmg, dmg_new)
 
+                if trace_substages:
+                    return (pos_final, elem_final, dmg_new,
+                            jnp.stack([pos, pos_k1, pos_k2, pos_k3]),
+                            jnp.stack([elem_k1, elem_k2, elem_k3,
+                                       elem_k4]).astype(jnp.int32))
                 return pos_final, elem_final, dmg_new
 
             if use_damage:
@@ -1644,6 +1650,15 @@ def create_rk4_comparison(
                 )
                 # Damage appended LAST so existing 2-tuple unpacking is unaffected.
                 return positions_final, element_ids_final, damage_final
+
+            if trace_substages:
+                # Substage positions/ids appended LAST, so every existing
+                # 2-tuple unpacking site is unaffected when tracing is off.
+                (positions_final, element_ids_final, _dmg_unused,
+                 sub_pos, sub_elem) = jax.vmap(
+                    rk4_single, in_axes=(0, 0, None))(
+                    positions_gpu, element_ids_gpu, None)
+                return positions_final, element_ids_final, sub_pos, sub_elem
 
             positions_final, element_ids_final = jax.vmap(rk4_single, in_axes=(0, 0, None))(
                 positions_gpu, element_ids_gpu, None
