@@ -308,6 +308,15 @@ MAX_ELEMS_PER_CELL = 32
 """
 Maximum elements per cell for the static-bound inner search loop.
 
+NOTE: run_tracking.py OVERRIDES this at startup with the built octree's own
+max_elements_per_cell, so the value here is only a fallback for callers that
+do not. A fixed constant has now failed twice on real meshes -- 8 was too
+small for cylA (max 24), and 32 was too small for the D family (D2 max 79,
+D1 max 115) -- so deriving it from the mesh is the only reliable approach.
+See docs/dfamily/11_max_elems_per_cell.md for the D-family measurement:
+13.45% of D2 cells exceeded 32, 12,661,126 element entries were unreachable,
+and 508 of 600 known-failing queries were recovered by the bound alone.
+
 Only used when OCTREE_REGISTRATION_METHOD = "parent_cube".
 The inner fori_loop in the 3x3x3 search uses this as a compile-time
 constant upper bound, enabling XLA to unroll the loop.

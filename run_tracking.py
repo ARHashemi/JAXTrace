@@ -2003,6 +2003,32 @@ def main():
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell, "
               f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
 
+    # ---- Static inner-loop bound for the parent_cube L2 search ----
+    # search_mesh_aligned_octree_static_where runs fori_loop(0, bound), a
+    # STATIC Python limit so XLA can unroll it. The inner guard stops a short
+    # cell early but never extends the loop, so any element at index >= bound
+    # in its cell is NEVER TESTED.
+    #
+    # The historical constant was 32. Measured on D2: max occupancy 79, with
+    # 804,653 of 5,982,836 cells (13.45%) over 32 and 12,661,126 element
+    # entries unreachable. Searching 600 known-failing positions found 55
+    # (9.2%) at bound 32 against 563 (93.8%) at bound 128 -- 508 recovered by
+    # the bound alone, and 128 matched the dynamically bounded variant exactly.
+    #
+    # A/B/C never hit this: their max occupancy is 30-31, just under 32, which
+    # is why the defect was invisible on three families and persistent on D.
+    #
+    # Deriving the bound from the octree that was actually built is correct on
+    # any mesh and no larger than necessary (79 on D2, 31 on A1), rather than a
+    # flat bump that would lengthen every A/B/C query for no benefit.
+    _occ = int(getattr(mesh_octree_cells, 'max_elements_per_cell', 0) or 0)
+    if _occ > 0 and _occ != config.MAX_ELEMS_PER_CELL:
+        print(f"  [search] static per-cell loop bound: "
+              f"{config.MAX_ELEMS_PER_CELL} -> {_occ} "
+              f"(mesh max occupancy; elements beyond the bound are never "
+              f"tested)")
+        config.MAX_ELEMS_PER_CELL = _occ
+
     element_neighbors_face = build_element_neighbors_array(
         connectivity, method='face', verbose=False)
     use_enhanced_band = (ENHANCED_SEARCH_BAND > 0 and levelset_cpu is not None)
