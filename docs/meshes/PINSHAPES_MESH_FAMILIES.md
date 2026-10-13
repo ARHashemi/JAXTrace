@@ -44,14 +44,18 @@ These are production meshes, not test fixtures.
 *through* it. Only the velocity field and the level-set field change from
 timestep to timestep. The node coordinates never move.
 
-Measured, not assumed — LUMI job 22775342, 13 Oct 2026, 1 min 44 s:
+Measured — LUMI job 22775342, 13 Oct 2026, 1 min 44 s. This is a **5-sample
+screen**; an exhaustive every-step/every-piece certification (job 22776651) is
+running to replace it, because the screen can miss motion confined to one piece
+at one step (see [Method](#method)):
 
 | | |
 |---|---|
 | cases checked | **20** |
-| static | **20** |
+| static | **20** (by the 5-sample screen) |
 | moving | **0** |
 | inconclusive | **0** |
+| exhaustive re-check | job 22776651, in progress |
 
 ### Consequence
 
@@ -98,24 +102,40 @@ timesteps were compared.
 loading, not GPU work, sets the wall clock on LUMI, so B2 costs ~20% more time
 in the loading phase than its siblings.
 
-### Method, and why the sampled timesteps are enough
+### Method
 
 For each case the survey reads `VEL_START` and `VEL_END` from the case's own
-`run_jaxtrace.sh`, then hashes the `Points` array of **the same mesh piece** at
-five timesteps spanning that range — `{start, start+1, midpoint, end-1, end}`.
-Identical MD5 hashes across all five mean the coordinates are byte-identical.
+`run_jaxtrace.sh`, then hashes the `Points` array of a mesh piece at timesteps
+spanning that range. Identical MD5 hashes for the same piece across time mean
+the coordinates are byte-identical.
 
-The sample includes two adjacent steps (`start`, `start+1`) and the two ends,
-so it would catch both a slow drift and a per-step jitter. A full revolution
-spans far fewer than 166 steps, so the midpoint and end samples are many
-revolutions apart; if the mesh followed the tool at all, these hashes could not
-agree. For D2 specifically, an earlier check compared **all 166 timesteps** and
-found them byte-identical, which is consistent with the 5-sample result.
+The table above is the **5-sample screen**: timesteps
+`{start, start+1, midpoint, end-1, end}`, one piece each.
 
-Script: [`scripts/dfamily/mesh_survey.py`](../../scripts/dfamily/mesh_survey.py),
+**The screen alone is not a certification.** Hashing one piece per timestep
+proves only that *that* piece is static at *those* steps; motion confined to
+one piece at one step is invisible to it. This was verified rather than
+assumed — on a synthetic case tree containing a mesh that displaces a single
+node in piece 3 at one timestep, the screen reports `STATIC (4 comparisons)`,
+a false negative, while the exhaustive mode reports `MOVES at ts17/piece3`.
+
+So the screen's verdict above is being replaced by an exhaustive run:
+
+```
+scripts/dfamily/sbatch_mesh_survey_allsteps.sh      # LUMI job 22776651
+  -> mesh_survey.py --all-steps --pieces=0
+```
+
+which hashes **every piece at every loaded timestep** for all 20 cases, so
+nothing is inferred from a sample. D2 already has an independent exhaustive
+result from earlier work: all 166 timesteps byte-identical.
+
+Scripts: [`scripts/dfamily/mesh_survey.py`](../../scripts/dfamily/mesh_survey.py),
 submitted with
-[`scripts/dfamily/sbatch_mesh_survey.sh`](../../scripts/dfamily/sbatch_mesh_survey.sh).
-It is read-only — no writes to any case folder.
+[`sbatch_mesh_survey.sh`](../../scripts/dfamily/sbatch_mesh_survey.sh) (screen)
+or
+[`sbatch_mesh_survey_allsteps.sh`](../../scripts/dfamily/sbatch_mesh_survey_allsteps.sh)
+(exhaustive). Both are read-only — no writes to any case folder.
 
 ### The bug that made the first attempt lie, and the guard against it
 

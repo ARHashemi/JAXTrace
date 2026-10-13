@@ -15,6 +15,13 @@ the D-family fix has to be deployed.
 
 ## The answer
 
+**Caveat on strength of evidence:** the numbers below come from a **5-sample
+screen** (5 timesteps, 1 piece each). That is a screen, not a certification —
+it cannot see motion confined to one piece at one step, verified on a synthetic
+case where it returns a false negative. An exhaustive every-step/every-piece
+run (**LUMI job 22776651**) is replacing it. D2 independently has an exhaustive
+result already: all 166 timesteps byte-identical.
+
 | | |
 |---|---|
 | cases checked | **20** |
@@ -68,6 +75,8 @@ GPU, sets the wall clock.
 The survey reads each case's `run_jaxtrace.sh` for its `MESH_DIR`, file
 pattern and velocity range, then loads the mesh geometry at several timesteps
 spread across that range and compares node coordinates byte-for-byte.
+`--all-steps --pieces=0` does this for every timestep and every piece; the
+table above used the 5-sample default.
 
 **The first submission (job 22775201) reported "ALL cases static" with
 `piece 0p/0c` — zero points and zero cells read.** It was deriving each piece's
