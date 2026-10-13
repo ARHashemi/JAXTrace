@@ -1,5 +1,9 @@
 # All 20 PinShapes cases have a static mesh
 
+> Full mesh-family reference, including this survey in context:
+> [`docs/meshes/PINSHAPES_MESH_FAMILIES.md`](../meshes/PINSHAPES_MESH_FAMILIES.md).
+> This file records the survey as it bears on the octree build.
+
 **Measured, not assumed.** LUMI job 22775342, 13 Oct 2026, 1 min 44 s.
 
 ## The question
@@ -56,7 +60,7 @@ size of one mesh piece, and how many timesteps were compared.
 
 **B2 is the one case that loads a different velocity range** (2..201, 200
 steps, not 34..199/166). Worth remembering when sizing a B2 run — see
-[`lumi-mesh-loading-dominates`] in the project notes: snapshot loading, not the
+the project notes on LUMI mesh loading: snapshot loading, not the
 GPU, sets the wall clock.
 
 ## How it was checked, and the bug that made the first attempt lie

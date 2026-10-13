@@ -1,9 +1,11 @@
 # The origin of the D-family lost-particle issue
 
-**Status: root cause identified, measured, and fixed at its origin.** Both
-registration passes and the search now share one lattice by construction
-(§5). Verification on the real D2 mesh is the remaining step; §5.2 states the
-expected result so the run either confirms or refutes it.
+**Status: root cause identified, measured, fixed at its origin, and the fix
+verified on the real D2 mesh.** Both registration passes and the search now
+share one lattice by construction (§5). All three lattice-mismatch failure
+categories measure **zero** after the fix; the only particles still unhosted
+are the 192 that have no containing element anywhere in the mesh, which is not
+a defect (§5.2).
 
 Supersedes the causal account in [`05_root_cause_and_fix.md`](05_root_cause_and_fix.md),
 which attributed the losses to the per-level pitch alone. That was a real but
@@ -172,24 +174,46 @@ That isolated the remainder to `parent_cube.py` Pass 1, which recorded each
 kept that element's size. Kuhn sizes also vary at a level on an anisotropic
 mesh, so the disagreement was inherent to Pass 1.
 
-### 5.2 Step two — one lattice for both passes
+### 5.2 Step two — one lattice for both passes, and the verification
 
-Hence pass 0. The expected effect is to remove the 644, leaving the 192
-particles with no containing element — those are outside the mesh and are not a
-defect.
+Hence pass 0. Re-running the same 2,000 previously-lost particles against the
+fully-fixed octree on the real D2 mesh (10,807,677 elements, 2,802,871 nodes):
+
+```
+RESULT: of 2,000 previously-lost particles, the FIXED octree
+  finds a host for : 1,808 (90.4%)
+  still loses      :   192 ( 9.6%)
+
+of the 192 still lost:
+  no containing element            : 192
+  host on MISMATCHED cell, KUHN    : 0   <- Pass 1 origin
+  host on MISMATCHED cell, non-Kuhn: 0   <- Pass 2 origin
+  host on MATCHING cell            : 0
+
+VERDICT: residual failures are NOT lattice-related.
+```
+
+**The lattice defect is eliminated.** Recovery went 58.2% → **90.4%**, the 644
+Pass-1 failures went to **0**, and all three mismatch categories are now zero.
+The 192 that remain are exactly the particles that have no containing element
+anywhere in the mesh — they are outside the domain, which is the expected and
+correct outcome, not a search failure. This is the predicted result in §5.1
+confirmed on real data.
 
 ### 5.3 Cost
 
 Measured on the same mesh, after step one:
 
-| | before | after | change |
+| | before | after step one | after step two |
 |---|---:|---:|---:|
-| cells | 5,986,798 | 5,984,124 | −0.04% |
-| elements/cell (mean) | 14.2 | 14.22 | ~same |
-| **max occupancy** | **95** | **79** | **−17%** |
-| CSR entries | 85,087,578 | 85,078,209 | −0.01% |
+| cells | 5,986,798 | 5,984,124 | 5,982,836 |
+| elements/cell (mean) | 14.2 | 14.22 | 14.22 |
+| **max occupancy** | **95** | **79** | **79** |
+| CSR entries | 85,087,578 | 85,078,209 | — |
 
-Worst-case per-query work *improves*. Step two adds one extra sweep over the
+Worst-case per-query work *improves* and step two costs nothing further: cells
+move by 0.02%, mean load and max occupancy are unchanged. Step two adds one
+extra sweep over the
 elements at build time and nothing at query time: no per-step branch, no kernel
 change, and a no-op on meshes whose levels hold a single size, where the median
 *is* each element's own size (A/B/C). Compare widening the search to 5×5×5,
