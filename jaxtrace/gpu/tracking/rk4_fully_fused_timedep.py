@@ -687,8 +687,20 @@ def _create_rk4_fully_fused_timedep_impl(
     # The `collect_stats` bool is resolved at JIT trace time, so when False
     # the level-tracking code is completely eliminated from the compiled kernel.
 
-    def _build_rk4_step(collect_stats: bool):
-        """Build a JIT-compiled RK4 step function with or without stats."""
+    def _build_rk4_step(collect_stats: bool, trace_substages: bool = False):
+        """Build a JIT-compiled RK4 step function with or without stats.
+
+        ``trace_substages`` additionally returns the four substage positions
+        and their element ids. Like ``collect_stats`` it is a PYTHON bool read
+        at trace time, so when False not one extra array, gather or select
+        appears in the compiled kernel -- the production step function is
+        built with both flags False and is unchanged by this feature.
+
+        It exists because 82.8% of the particles the D2 run reported lost are
+        findable at their exported final position: the failure happens at one
+        of the k1..k4 substage positions, which are otherwise never observable
+        from outside the fused kernel.
+        """
 
         search_fn = search_l0_l1_l2_with_level if collect_stats else search_l0_l1_l2_single
 
@@ -843,10 +855,23 @@ def _create_rk4_fully_fused_timedep_impl(
                 else:
                     dmg_new = dmg
 
+                if trace_substages:
+                    # Substage positions and their element ids, in order.
+                    # Shapes (4,3) and (4,) per particle.
+                    sub_pos = jnp.stack([pos, pos_k1, pos_k2, pos_k3])
+                    sub_elem = jnp.stack([elem_k1, elem_k2, elem_k3,
+                                          elem_k4]).astype(jnp.int32)
+
                 if collect_stats:
                     hit_levels = jnp.array([lvl_k1, lvl_k2, lvl_k3, lvl_k4, lvl_final], dtype=jnp.int8)
+                    if trace_substages:
+                        return (pos_final, elem_final, hit_levels, vel_out,
+                                dmg_new, sub_pos, sub_elem)
                     return pos_final, elem_final, hit_levels, vel_out, dmg_new
                 else:
+                    if trace_substages:
+                        return (pos_final, elem_final, vel_out, dmg_new,
+                                sub_pos, sub_elem)
                     return pos_final, elem_final, vel_out, dmg_new
 
             # Provide zero velocities if not passed (non-extended mode)
@@ -866,9 +891,15 @@ def _create_rk4_fully_fused_timedep_impl(
                                    dtype=config.FLOAT_DTYPE_JNP)
 
             if collect_stats:
-                positions_final, element_ids_final, all_hit_levels, vels_out, dmg_out = jax.vmap(
-                    rk4_single_particle
-                )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
+                if trace_substages:
+                    (positions_final, element_ids_final, all_hit_levels,
+                     vels_out, dmg_out, sub_pos, sub_elem) = jax.vmap(
+                        rk4_single_particle
+                    )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
+                else:
+                    positions_final, element_ids_final, all_hit_levels, vels_out, dmg_out = jax.vmap(
+                        rk4_single_particle
+                    )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
 
                 # Aggregate counts across all particles and all 5 sub-steps
                 l0_hits = jnp.sum(all_hit_levels == 0).astype(jnp.int32)
@@ -884,22 +915,53 @@ def _create_rk4_fully_fused_timedep_impl(
                 else:
                     out = (positions_final, element_ids_final,
                            (l0_hits, l1_hits, l2_hits, misses))
-                return out + (dmg_out,) if use_damage else out
+                if use_damage:
+                    out = out + (dmg_out,)
+                if trace_substages:
+                    out = out + (sub_pos, sub_elem)
+                return out
             else:
-                positions_final, element_ids_final, vels_out, dmg_out = jax.vmap(
-                    rk4_single_particle
-                )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
+                if trace_substages:
+                    (positions_final, element_ids_final, vels_out, dmg_out,
+                     sub_pos, sub_elem) = jax.vmap(
+                        rk4_single_particle
+                    )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
+                else:
+                    positions_final, element_ids_final, vels_out, dmg_out = jax.vmap(
+                        rk4_single_particle
+                    )(positions_gpu, element_ids_gpu, vels_in, dmg_in)
 
                 if use_extended_domain:
                     out = (positions_final, element_ids_final, vels_out)
                 else:
                     out = (positions_final, element_ids_final)
-                return out + (dmg_out,) if use_damage else out
+                if use_damage:
+                    out = out + (dmg_out,)
+                # Substage arrays go LAST so every existing unpacking site is
+                # unaffected when tracing is off.
+                if trace_substages:
+                    out = out + (sub_pos, sub_elem)
+                return out
 
         return rk4_step
 
     rk4_fully_fused_step_timedep = _build_rk4_step(collect_stats=False)
     rk4_fully_fused_step_timedep_with_stats = _build_rk4_step(collect_stats=True)
+
+    # Built lazily and attached as an attribute rather than returned, so the
+    # function's signature and both existing step functions are untouched.
+    # Callers that want substage traces ask for it explicitly:
+    #     step, step_stats = create_rk4_fully_fused_timedep_with_stats(...)
+    #     traced = step.build_substage_tracer()
+    def _build_substage_tracer():
+        """A separate kernel that also returns the k1..k4 substage positions
+        and element ids. Compiled on first request only, so a run that never
+        calls this pays nothing -- not even compile time."""
+        return _build_rk4_step(collect_stats=False, trace_substages=True)
+
+    rk4_fully_fused_step_timedep.build_substage_tracer = _build_substage_tracer
+    rk4_fully_fused_step_timedep_with_stats.build_substage_tracer = (
+        _build_substage_tracer)
 
     return rk4_fully_fused_step_timedep, rk4_fully_fused_step_timedep_with_stats
 
