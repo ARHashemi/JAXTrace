@@ -160,25 +160,83 @@ def extract_octree_cells_parent_cube(
     non_kuhn_ids = []
 
     # ------------------------------------------------------------------
-    # Pass 1: Kuhn elements — centroid → parent cube
+    # Pass 0: classify every element and derive the per-level lookup
+    # lattice BEFORE anything registers.
+    #
+    # Registration and lookup must divide by the same number. The search
+    # computes its index as floor(pos / level_cell_sizes[level]), where
+    # upload_mesh_aligned_octree_to_gpu sets level_cell_sizes[level] to
+    # the per-axis MEDIAN of the sizes at that level. Any element filed
+    # under its own cell_size instead is filed on a different grid than
+    # the one it is later looked up on.
+    #
+    # On an isotropic mesh every size at a level is identical, so the
+    # median IS each element's own size and this is a no-op (A/B/C).
+    # On an anisotropic mesh the sizes form a continuum (D2 level 14
+    # carries 3.5753e-05, 3.5839e-05, 3.6146e-05 ... against a median of
+    # 5.6117e-05) and the two grids drift apart. At a particle position
+    # the disagreement is an index error of 2 (median 2, p90 2) while the
+    # 3x3x3 neighbourhood reaches only +-1, so the host cell is never
+    # tested and the particle is reported lost with element_id=-1.
+    #
+    # Measured on D2: registering Pass 2 on the shared pitch recovered
+    # 1,164 of 2,000 previously-lost particles, and every one of the 644
+    # remaining reproducible failures sat on a mismatched PASS 1 (Kuhn)
+    # cell — 0 on a non-Kuhn cell, 0 on a matching cell. Hence the pitch
+    # is derived here, once, and both passes register on it.
     # ------------------------------------------------------------------
     if verbose:
-        print(f"\n[1/3] Pass 1: Kuhn elements → parent cube...")
+        print(f"\n[1/4] Pass 0: classify elements, derive lookup lattice...")
+
+    element_size_level = {}   # elem_id → (cell_size, level)  Kuhn only
+    _level_sizes = {}
 
     for elem_id in range(n_elements):
-        node_ids = connectivity[elem_id]
-        vertices = node_positions[node_ids]
-
+        vertices = node_positions[connectivity[elem_id]]
         cell_size, level = find_axis_aligned_edges_single(vertices, tolerance)
 
         if np.any(cell_size == 0):
             non_kuhn_ids.append(elem_id)
             continue
 
+        element_size_level[elem_id] = (cell_size, level)
+        _level_sizes.setdefault(int(level), []).append(cell_size)
+
+        if verbose and (elem_id + 1) % 500000 == 0:
+            print(f"    Classified {elem_id + 1:,}/{n_elements:,} elements...")
+
+    # The one lattice shared by Pass 1, Pass 2 and the GPU search.
+    lookup_pitch = {lv: np.median(np.asarray(v), axis=0)
+                    for lv, v in _level_sizes.items()}
+
+    if verbose and lookup_pitch:
+        print(f"  Lookup lattice: {len(lookup_pitch)} level(s)")
+        for lv in sorted(lookup_pitch):
+            _p = lookup_pitch[lv]
+            _n = len(_level_sizes[lv])
+            _own = np.asarray(_level_sizes[lv])
+            _agree = int(np.sum(np.all(np.isclose(_own, _p, rtol=1e-6), axis=1)))
+            print(f"    level {lv:2d}: pitch {_p[0]:.6e} {_p[1]:.6e} "
+                  f"{_p[2]:.6e}  ({_agree:,}/{_n:,} elements match it "
+                  f"exactly = {100.0 * _agree / max(_n, 1):.2f}%)")
+
+    # ------------------------------------------------------------------
+    # Pass 1: Kuhn elements — centroid → parent cube ON THE SHARED PITCH
+    # ------------------------------------------------------------------
+    if verbose:
+        print(f"\n[2/4] Pass 1: Kuhn elements → parent cube...")
+
+    for elem_id, (cell_size, level) in element_size_level.items():
+        vertices = node_positions[connectivity[elem_id]]
+
+        # Register on the level's lookup pitch, not on this element's own
+        # size, so floor(pos/pitch) in the search reproduces (i, j, k).
+        reg_size = lookup_pitch[int(level)]
+
         kuhn_element_info[elem_id] = (cell_size.copy(), level)
 
-        # Parent cube via centroid
-        _, _, i, j, k = find_parent_cube(vertices, cell_size, tolerance)
+        # Parent cube via centroid, measured on the lookup lattice.
+        _, _, i, j, k = find_parent_cube(vertices, reg_size, tolerance)
 
         offset = (1 << 19)
         max_coord = (1 << 20)
@@ -192,10 +250,9 @@ def extract_octree_cells_parent_cube(
         cell_to_elements_dict[cell_key].append(elem_id)
 
         if cell_key not in cell_metadata:
-            cell_metadata[cell_key] = (cell_size.copy(), (i, j, k))
+            cell_metadata[cell_key] = (np.asarray(reg_size).copy(), (i, j, k))
 
-        if verbose and (elem_id + 1) % 500000 == 0:
-            print(f"    Processed {elem_id + 1:,}/{n_elements:,} elements...")
+    del element_size_level
 
     n_kuhn = n_elements - len(non_kuhn_ids)
     if verbose:
@@ -209,35 +266,6 @@ def extract_octree_cells_parent_cube(
     n_non_kuhn_orphan_fallback = 0
     n_non_kuhn_dropped = 0
     n_non_kuhn_cell_entries = 0
-
-    # ------------------------------------------------------------------
-    # LOOKUP LATTICE, per level.
-    #
-    # The search computes its cell index as
-    #     floor(pos / level_cell_sizes[level])
-    # where upload_mesh_aligned_octree_to_gpu sets level_cell_sizes[level] to
-    # the per-axis MEDIAN of every cell size at that level. Registration must
-    # use the SAME lattice or an element is filed under one grid and looked up
-    # on another.
-    #
-    # It previously used `nbr_size`, the borrowed Kuhn neighbour's own size.
-    # On an anisotropic mesh those sizes form a continuum (D2 level 14 carries
-    # 3.5753e-05, 3.5839e-05, 3.6146e-05 ... against a median of 5.6117e-05),
-    # so 18.2% of cells ended up on a different lattice from the lookup. At a
-    # particle position that disagreement yields an index error of 2 (median 2,
-    # p90 2), and the 3x3x3 neighbourhood reaches only +-1, so the host cell is
-    # never tested and the particle is reported lost. Measured on D2: 666 of
-    # 666 reproducible search failures sat on a mismatched cell and 0 on a
-    # matching one.
-    #
-    # Deriving the pitch the same way the GPU upload does makes the two agree
-    # by construction, costs nothing at query time, and is a no-op on meshes
-    # whose levels already hold a single size (A/B/C).
-    _level_sizes = {}
-    for _cs, _lv in kuhn_element_info.values():
-        _level_sizes.setdefault(int(_lv), []).append(_cs)
-    lookup_pitch = {lv: np.median(np.asarray(v), axis=0)
-                    for lv, v in _level_sizes.items()}
 
     # Precompute a global fallback (cell_size, level) from the median
     # Kuhn element. We DO NOT compute orphan levels from the orphan's
@@ -294,7 +322,7 @@ def extract_octree_cells_parent_cube(
 
     if non_kuhn_ids:
         if verbose:
-            print(f"\n[2/3] Pass 2: Non-Kuhn elements → neighbour's grid...")
+            print(f"\n[3/4] Pass 2: Non-Kuhn elements → neighbour's grid...")
 
         node_to_elements = build_node_to_elements(connectivity)
 
@@ -364,11 +392,13 @@ def extract_octree_cells_parent_cube(
                                 )
                             n_non_kuhn_cell_entries += 1
             else:
-                # Centroid-only registration (legacy).
+                # Centroid-only registration (legacy). Same lattice rule
+                # as every other path: index on the level's lookup pitch.
+                reg_size = lookup_pitch.get(int(nbr_level), nbr_size)
                 centroid = vertices.mean(axis=0)
-                i = int(np.floor(centroid[0] / nbr_size[0]))
-                j = int(np.floor(centroid[1] / nbr_size[1]))
-                k = int(np.floor(centroid[2] / nbr_size[2]))
+                i = int(np.floor(centroid[0] / reg_size[0]))
+                j = int(np.floor(centroid[1] / reg_size[1]))
+                k = int(np.floor(centroid[2] / reg_size[2]))
                 i_m = int(np.clip(i + offset, 0, max_coord - 1))
                 j_m = int(np.clip(j + offset, 0, max_coord - 1))
                 k_m = int(np.clip(k + offset, 0, max_coord - 1))
@@ -376,7 +406,9 @@ def extract_octree_cells_parent_cube(
                 cell_key = (morton, nbr_level)
                 cell_to_elements_dict[cell_key].append(elem_id)
                 if cell_key not in cell_metadata:
-                    cell_metadata[cell_key] = (nbr_size.copy(), (i, j, k))
+                    cell_metadata[cell_key] = (
+                        np.asarray(reg_size).copy(), (i, j, k),
+                    )
                 n_non_kuhn_cell_entries += 1
 
             n_non_kuhn_registered += 1
@@ -398,13 +430,13 @@ def extract_octree_cells_parent_cube(
                       f"{n_non_kuhn_dropped:,}")
     else:
         if verbose:
-            print(f"\n[2/3] Pass 2: No non-Kuhn elements — skipped")
+            print(f"\n[3/4] Pass 2: No non-Kuhn elements — skipped")
 
     # ------------------------------------------------------------------
     # Build CSR
     # ------------------------------------------------------------------
     if verbose:
-        print(f"\n[3/3] Building CSR structure...")
+        print(f"\n[4/4] Building CSR structure...")
 
     sorted_cell_keys = sorted(cell_to_elements_dict.keys())
     n_cells = len(sorted_cell_keys)
