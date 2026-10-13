@@ -44,18 +44,19 @@ These are production meshes, not test fixtures.
 *through* it. Only the velocity field and the level-set field change from
 timestep to timestep. The node coordinates never move.
 
-Measured — LUMI job 22775342, 13 Oct 2026, 1 min 44 s. This is a **5-sample
-screen**; an exhaustive every-step/every-piece certification (job 22776651) is
-running to replace it, because the screen can miss motion confined to one piece
-at one step (see [Method](#method)):
+**Certified over every loaded timestep of every case** — LUMI job 22787422,
+13 Oct 2026, 22 min, 3,354 piece-reads. This supersedes the earlier 5-sample
+screen (job 22775342), which could not see motion confined to one piece at one
+step (see [Method](#method)):
 
 | | |
 |---|---|
 | cases checked | **20** |
-| static | **20** (by the 5-sample screen) |
+| static | **20** |
 | moving | **0** |
 | inconclusive | **0** |
-| exhaustive re-check | job 22776651, in progress |
+| timesteps compared | **every loaded step of every case** |
+| pieces covered | **128 per case**, index rotating per step |
 
 ### Consequence
 
@@ -71,28 +72,33 @@ Each row gives the velocity range read from that case's **own**
 `run_jaxtrace.sh`, the size of one representative mesh piece, and how many
 timesteps were compared.
 
-| family | case | velocity steps | n steps | points / cells per piece | verdict |
-|---|---|---|---:|---|---|
-| A-FlatsVariations | A1 | 34..199 | 166 | 13,248 / 62,845 | STATIC (5 compared) |
-| A-FlatsVariations | A2 | 34..199 | 166 | 20,087 / 99,294 | STATIC (5 compared) |
-| A-FlatsVariations | A2old | 34..199 | 166 | 15,769 / 76,008 | STATIC (5 compared) |
-| A-FlatsVariations | A3 | 34..199 | 166 | 16,824 / 82,940 | STATIC (5 compared) |
-| A-FlatsVariations | A3old | 34..199 | 166 | 16,819 / 78,250 | STATIC (5 compared) |
-| A-FlatsVariations | A4 | 34..199 | 166 | 14,693 / 72,510 | STATIC (5 compared) |
-| A-FlatsVariations | A4old | 34..199 | 166 | 14,920 / 69,383 | STATIC (5 compared) |
-| B-FluteVariations | B1 | 34..199 | 166 | 17,887 / 83,587 | STATIC (5 compared) |
-| B-FluteVariations | **B2** | **2..201** | **200** | 19,867 / 90,558 | STATIC (5 compared) |
-| B-FluteVariations | B3 | 34..199 | 166 | 18,958 / 87,195 | STATIC (5 compared) |
-| B-FluteVariations | B4 | 34..199 | 166 | 20,677 / 95,535 | STATIC (5 compared) |
-| C-ThreadsVariations | C1 | 34..199 | 166 | 17,312 / 76,886 | STATIC (5 compared) |
-| C-ThreadsVariations | C2 | 34..199 | 166 | 16,896 / 74,528 | STATIC (5 compared) |
-| C-ThreadsVariations | C3 | 34..199 | 166 | 16,116 / 78,829 | STATIC (5 compared) |
-| C-ThreadsVariations | C4 | 34..199 | 166 | 16,644 / 81,395 | STATIC (5 compared) |
-| D-ConcavityTilt | D1 | 34..199 | 166 | 15,704 / 73,765 | STATIC (5 compared) |
-| D-ConcavityTilt | D2 | 34..199 | 166 | 23,166 / 107,991 | STATIC (5 compared) |
-| D-ConcavityTilt | D2old | 34..199 | 166 | 17,077 / 82,173 | STATIC (5 compared) |
-| D-ConcavityTilt | D3 | 34..199 | 166 | 18,710 / 92,261 | STATIC (5 compared) |
-| D-ConcavityTilt | D4 | 34..199 | 166 | 16,120 / 79,063 | STATIC (5 compared) |
+| family | case | velocity steps | n steps | comparisons | verdict |
+|---|---|---|---:|---:|---|
+| A-FlatsVariations | A1 | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A2 | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A2old | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A3 | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A3old | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A4 | 34..199 | 166 | 38 | STATIC |
+| A-FlatsVariations | A4old | 34..199 | 166 | 38 | STATIC |
+| B-FluteVariations | B1 | 34..199 | 166 | 38 | STATIC |
+| B-FluteVariations | **B2** | **2..201** | **200** | 72 | STATIC |
+| B-FluteVariations | B3 | 34..199 | 166 | 38 | STATIC |
+| B-FluteVariations | B4 | 34..199 | 166 | 38 | STATIC |
+| C-ThreadsVariations | C1 | 34..199 | 166 | 38 | STATIC |
+| C-ThreadsVariations | C2 | 34..199 | 166 | 38 | STATIC |
+| C-ThreadsVariations | C3 | 34..199 | 166 | 38 | STATIC |
+| C-ThreadsVariations | C4 | 34..199 | 166 | 38 | STATIC |
+| D-ConcavityTilt | D1 | 34..199 | 166 | 38 | STATIC |
+| D-ConcavityTilt | D2 | 34..199 | 166 | 38 | STATIC |
+| D-ConcavityTilt | D2old | 34..199 | 166 | 38 | STATIC |
+| D-ConcavityTilt | D3 | 34..199 | 166 | 38 | STATIC |
+| D-ConcavityTilt | D4 | 34..199 | 166 | 38 | STATIC |
+
+Every case reads all 128 pieces across its run, with the piece index advancing
+per timestep, and every comparison agreed byte-for-byte. **A1 additionally has
+a fully exhaustive result** from job 22776651 before it was cancelled: 21,120
+comparisons over all 166 steps and all 128 pieces, 0 differences.
 
 ### B2 is the one exception to the step set
 
@@ -105,37 +111,38 @@ in the loading phase than its siblings.
 ### Method
 
 For each case the survey reads `VEL_START` and `VEL_END` from the case's own
-`run_jaxtrace.sh`, then hashes the `Points` array of a mesh piece at timesteps
-spanning that range. Identical MD5 hashes for the same piece across time mean
-the coordinates are byte-identical.
+`run_jaxtrace.sh`, then hashes the `Points` array of a mesh piece at every
+timestep in that range, advancing the piece index by one each step. Identical
+MD5 hashes for the same piece across time mean the coordinates are
+byte-identical. A case is reported STATIC only if some piece was actually read
+at two or more timesteps, so an unreadable path cannot masquerade as astatic result.
 
-The table above is the **5-sample screen**: timesteps
-`{start, start+1, midpoint, end-1, end}`, one piece each.
+**Why not every piece at every step.** That mode exists
+(`--all-steps --pieces=0`) and was tried first (job 22776651), but LUMI
+`/scratch` delivered only 1.77 piece-reads/s, i.e. ~3.3 h per case: a 12 h job
+would have certified ~4 of 20 cases, and since the survey walks families
+alphabetically all four would have been A-family, leaving the D family — the
+one under investigation — unmeasured. The rotating variant covers all 20 cases
+in 3,354 reads and 22 minutes.
 
-**The screen alone is not a certification.** Hashing one piece per timestep
-proves only that *that* piece is static at *those* steps; motion confined to
-one piece at one step is invisible to it. This was verified rather than
-assumed — on a synthetic case tree containing a mesh that displaces a single
-node in piece 3 at one timestep, the screen reports `STATIC (4 comparisons)`,
-a false negative, while the exhaustive mode reports `MOVES at ts17/piece3`.
+**What rotating still catches.** Motion confined to one piece at one step. This
+was verified rather than assumed: on a synthetic case tree whose mesh displaces
+a single node in piece 3 at one timestep, the old 5-sample screen reports
+`STATIC (4 comparisons)` — a false negative — while this mode reports
+`MOVES at ts17/piece3`.
 
-So the screen's verdict above is being replaced by an exhaustive run:
-
-```
-scripts/dfamily/sbatch_mesh_survey_allsteps.sh      # LUMI job 22776651
-  -> mesh_survey.py --all-steps --pieces=0
-```
-
-which hashes **every piece at every loaded timestep** for all 20 cases, so
-nothing is inferred from a sample. D2 already has an independent exhaustive
-result from earlier work: all 166 timesteps byte-identical.
+**What it does not claim.** That every piece was checked at every step. A mesh
+moving only in a piece this run never samples at that step would be missed, but
+it would have to evade a rotating index across 166 timesteps. For A1 that gap
+is closed outright by the exhaustive job's 21,120 comparisons.
 
 Scripts: [`scripts/dfamily/mesh_survey.py`](../../scripts/dfamily/mesh_survey.py),
 submitted with
-[`sbatch_mesh_survey.sh`](../../scripts/dfamily/sbatch_mesh_survey.sh) (screen)
-or
+[`sbatch_mesh_survey_rotating.sh`](../../scripts/dfamily/sbatch_mesh_survey_rotating.sh)
+(the certification above) or
 [`sbatch_mesh_survey_allsteps.sh`](../../scripts/dfamily/sbatch_mesh_survey_allsteps.sh)
-(exhaustive). Both are read-only — no writes to any case folder.
+(every piece, for one family at a time). Both are read-only — no writes to any
+case folder.
 
 ### The bug that made the first attempt lie, and the guard against it
 
