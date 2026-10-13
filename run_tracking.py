@@ -373,6 +373,14 @@ def parse_args():
                              "n_particles x 4 x 3 per logged step.")
     parser.add_argument("--trace-substages-every", type=int, default=50,
                         help="With --trace-substages, log every Nth step.")
+    parser.add_argument("--max-elems-per-cell", type=int, default=0,
+                        help="Override the static per-cell loop bound for the "
+                             "parent_cube L2 search. 0 (default) derives it "
+                             "from the built octree's max occupancy, which is "
+                             "correct on any mesh; set a value only to "
+                             "reproduce a historical result, since a bound "
+                             "below the mesh's max occupancy silently leaves "
+                             "elements untested.")
     parser.add_argument("--point-in-tet-tol", type=float, default=1e-6,
                         help="Point-in-tet containment tolerance")
     parser.add_argument("--interpolation-det-min", type=float, default=None,
@@ -2021,7 +2029,16 @@ def main():
     # Deriving the bound from the octree that was actually built is correct on
     # any mesh and no larger than necessary (79 on D2, 31 on A1), rather than a
     # flat bump that would lengthen every A/B/C query for no benefit.
-    _occ = int(getattr(mesh_octree_cells, 'max_elements_per_cell', 0) or 0)
+    if args.max_elems_per_cell > 0:
+        print(f"  [search] static per-cell loop bound FORCED to "
+              f"{args.max_elems_per_cell} "
+              f"(mesh max occupancy is "
+              f"{getattr(mesh_octree_cells, 'max_elements_per_cell', '?')}; "
+              f"a bound below it leaves elements untested)")
+        config.MAX_ELEMS_PER_CELL = args.max_elems_per_cell
+        _occ = 0
+    else:
+        _occ = int(getattr(mesh_octree_cells, 'max_elements_per_cell', 0) or 0)
     if _occ > 0 and _occ != config.MAX_ELEMS_PER_CELL:
         print(f"  [search] static per-cell loop bound: "
               f"{config.MAX_ELEMS_PER_CELL} -> {_occ} "
