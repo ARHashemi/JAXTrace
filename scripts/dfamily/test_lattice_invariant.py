@@ -33,6 +33,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import (  # noqa: E402
     extract_octree_cells_parent_cube,
 )
+from jaxtrace.gpu.search.mesh_aligned_octree_gpu import (  # noqa: E402
+    upload_mesh_aligned_octree_to_gpu,
+)
 
 
 def kuhn_box(origin, size):
@@ -115,6 +118,21 @@ def check(name, node_positions, connectivity):
         if d > 1:
             bad += 1
 
+    # Second check, end to end: the pitch the GPU actually receives must equal
+    # the size every cell was registered with. upload_...() takes the median of
+    # cell_sizes, and registration writes the shared pitch into cell_sizes, so
+    # each level should hold exactly ONE size and the upload should return it
+    # unchanged. This closes the loop that the bug opened.
+    gpu = upload_mesh_aligned_octree_to_gpu(
+        connectivity.astype(np.int32), node_positions, cells, verbose=False,
+    )
+    lcs = np.asarray(gpu.level_cell_sizes)
+    roundtrip_ok = True
+    for lv in np.unique(levels):
+        uniq = np.unique(sizes[levels == lv], axis=0)
+        if len(uniq) != 1 or not np.allclose(uniq, lcs[lv], rtol=1e-6):
+            roundtrip_ok = False
+
     n = len(levels)
     print(f"{name}")
     print(f"  cells                     : {n:,}")
@@ -123,7 +141,9 @@ def check(name, node_positions, connectivity):
     print(f"  max |index error|         : {worst}")
     print(f"  cells unreachable (err>1) : {bad:,} "
           f"({100.0 * bad / max(n, 1):.2f}%)")
-    ok = bad == 0
+    print(f"  uploaded pitch == registered size: "
+          f"{'yes' if roundtrip_ok else 'NO'}")
+    ok = bad == 0 and roundtrip_ok
     print(f"  -> {'PASS' if ok else 'FAIL'}")
     print()
     return ok

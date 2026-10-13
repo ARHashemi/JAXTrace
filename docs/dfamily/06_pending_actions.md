@@ -45,12 +45,25 @@ Only `skip_step` ever freezes a particle: it discards the whole step when
 - All cases on LUMI: apply when the LUMI repo is updated with the fixed code.
   **Needs the user's permission first** — LUMI is copy-only until then.
 
-## 2. Registration-lattice fix (implemented, pending confirmation)
+## 2. Registration-lattice fix (implemented in full, pending confirmation)
 
-`mesh_aligned_octree_parent_cube.py` now enumerates a non-Kuhn element's AABB
-on the **lookup lattice** — `median(cell sizes at that level)`, derived exactly
-as `upload_mesh_aligned_octree_to_gpu` derives `level_cell_sizes` — instead of
-`nbr_size`, the borrowed Kuhn neighbour's own size.
+`mesh_aligned_octree_parent_cube.py` now derives the per-level lookup pitch in
+a classification sweep that runs **before either pass registers anything**, and
+Pass 1, the Pass 2 AABB path and the legacy centroid path all index on it. The
+pitch is `median(cell sizes at that level)`, derived exactly as
+`upload_mesh_aligned_octree_to_gpu` derives `level_cell_sizes`, so registration
+and lookup agree by construction.
+
+This took two steps. Aligning Pass 2 alone (the first version of this fix)
+recovered 1,164 of 2,000 previously-lost particles, and all 644 reproducible
+failures that remained sat on mismatched **Pass 1 (Kuhn)** cells — 0 on
+non-Kuhn, 0 on matching — which is what localised the remainder and prompted
+the pass-0 restructure. Full account in
+[`07_root_cause.md`](07_root_cause.md) §5.
+
+Regression guard: `scripts/dfamily/test_lattice_invariant.py`, no case data
+needed, FAILs on the pre-fix code (66.67% of cells unreachable, max index error
+32) and PASSes after, while the isotropic mesh passes either way.
 
 Evidence it is the root cause, measured on D2 (job 22661472 output, 2,000
 sampled lost particles, real search re-run to confirm reproducibility):
@@ -80,7 +93,7 @@ export. Worth revisiting only if losses persist after the fix.
 
 | candidate | finding |
 |---|---|
-| mesh changes during tool revolution | all 166 timesteps byte-identical; the mesh is Eulerian, so octree-once is valid |
+| mesh changes during tool revolution | all 166 timesteps byte-identical; the mesh is Eulerian, so octree-once is valid. Extended to **all 20 cases** by LUMI job 22775342 — see [`08_mesh_is_static_all_cases.md`](08_mesh_is_static_all_cases.md) |
 | Morton mis-mapping to far cells | 0 of 2,000 codes inconsistent with the stored grid index |
 | unregistered hosts | 0 — the orphan-drop problem is fixed in the dev repo |
 | levels outside the walked range | 0 |
