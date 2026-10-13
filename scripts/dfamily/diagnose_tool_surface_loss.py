@@ -151,14 +151,12 @@ lcs = np.asarray(oct_gpu.level_cell_sizes).astype(np.float64)
 # ~85M int objects (several GB) on top of the mesh, which risks OOM. Instead
 # expand the CSR to a flat (element, cell) pair array once and sort by element,
 # then answer each query with a binary search.
-csr_starts = np.asarray(oct_gpu.cell_element_starts).astype(np.int64)
-csr_counts = np.asarray(oct_gpu.cell_element_counts).astype(np.int64)
-csr_elems = np.asarray(oct_gpu.cell_elements).astype(np.int64)
-_cell_of_entry = np.repeat(np.arange(len(csr_counts), dtype=np.int64),
-                           csr_counts)
-_entry_elem = np.concatenate([csr_elems[s:s + c]
-                              for s, c in zip(csr_starts, csr_counts)]) \
-    if len(csr_counts) else np.empty(0, dtype=np.int64)
+# Field names per the MeshAlignedOctreeGPU docstring: an offsets CSR, where
+# cell i owns entries [offsets[i], offsets[i+1]).
+_off = np.asarray(oct_gpu.cell_to_elements_offsets).astype(np.int64)
+_entry_elem = np.asarray(oct_gpu.cell_to_elements_data).astype(np.int64)
+_counts = np.diff(_off)
+_cell_of_entry = np.repeat(np.arange(len(_counts), dtype=np.int64), _counts)
 _order = np.argsort(_entry_elem, kind="stable")
 _sorted_elem = _entry_elem[_order]
 _sorted_cell = _cell_of_entry[_order]
