@@ -88,9 +88,20 @@ for fam in sorted(ROOT.iterdir()):
         # Keyed per piece because different pieces legitimately hold different
         # coordinates; only the SAME piece across time must agree.
         ref = {}; diffs = []; npts = ncell = 0; nread = 0; npieces_seen = set()
+        # Announce the case BEFORE reading anything. With --pieces=0 a single
+        # case is ~166 steps x 64 pieces, so without this the log is silent
+        # for thousands of reads and a working job is indistinguishable from a
+        # stalled one.
+        if ALL_STEPS:
+            print(f"  [{fam.name}/{name}] starting: {len(samples)} steps, "
+                  f"vel {vs}..{ve}", flush=True)
         _t0 = time.time()
+        _last_beat = time.time()
         for si, ts in enumerate(samples):
-            if ALL_STEPS and si and si % 25 == 0:
+            # Heartbeat on elapsed time, not step count: one step can itself
+            # be 64 piece reads on a slow filesystem.
+            if ALL_STEPS and time.time() - _last_beat > 60:
+                _last_beat = time.time()
                 print(f"    [{fam.name}/{name}] {si}/{len(samples)} steps, "
                       f"{nread} reads, {len(diffs)} diffs, "
                       f"{time.time() - _t0:.0f}s", flush=True)
