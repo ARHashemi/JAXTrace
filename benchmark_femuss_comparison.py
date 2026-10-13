@@ -1522,6 +1522,11 @@ def create_rk4_comparison(
                     elem_final = jnp.where(lost, elem_recovered, elem_final)
 
                 if not use_damage:
+                    if trace_substages:
+                        return (pos_final, elem_final,
+                                jnp.stack([pos, pos_k1, pos_k2, pos_k3]),
+                                jnp.stack([elem_k1, elem_k2, elem_k3,
+                                           elem_k4]).astype(jnp.int32))
                     return pos_final, elem_final
 
                 # ---- Damage quadrature: Euler (order 1) or RK4 (order 4) ----
@@ -1654,7 +1659,9 @@ def create_rk4_comparison(
             if trace_substages:
                 # Substage positions/ids appended LAST, so every existing
                 # 2-tuple unpacking site is unaffected when tracing is off.
-                (positions_final, element_ids_final, _dmg_unused,
+                # rk4_single returns 4 here (no damage accumulator on this
+                # branch), which is the path production runs.
+                (positions_final, element_ids_final,
                  sub_pos, sub_elem) = jax.vmap(
                     rk4_single, in_axes=(0, 0, None))(
                     positions_gpu, element_ids_gpu, None)
