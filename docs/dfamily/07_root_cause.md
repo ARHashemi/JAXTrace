@@ -1,7 +1,9 @@
 # The origin of the D-family lost-particle issue
 
-**Status: root cause identified and measured. A partial fix is in; it is
-confirmed incomplete and the residual is characterised below.**
+**Status: root cause identified, measured, and fixed at its origin.** Both
+registration passes and the search now share one lattice by construction
+(§5). Verification on the real D2 mesh is the remaining step; §5.2 states the
+expected result so the run either confirms or refutes it.
 
 Supersedes the causal account in [`05_root_cause_and_fix.md`](05_root_cause_and_fix.md),
 which attributed the losses to the per-level pitch alone. That was a real but
@@ -45,10 +47,14 @@ refinement, but a structurally different mesh.
 ## 3. The two lattices
 
 **Registration**, `mesh_aligned_octree_parent_cube.py`:
-- Pass 1, Kuhn elements (line 195): records each element's **own** `cell_size`.
-- Pass 2, non-Kuhn elements (lines ~311-333): enumerates the element's AABB and
-  files it under a key computed from a cell size. *Originally* `nbr_size`, the
-  borrowed neighbour's size; now the level's lookup pitch (§5).
+- Pass 1, Kuhn elements: *originally* recorded each element's **own**
+  `cell_size`; now the level's lookup pitch (§5).
+- Pass 2, non-Kuhn elements: enumerates the element's AABB and files it under a
+  key computed from a cell size. *Originally* `nbr_size`, the borrowed
+  neighbour's size; now the level's lookup pitch (§5).
+
+Both are described as they *were* below, since that is what the measurements in
+§4 were taken against.
 
 **Lookup**, `mesh_aligned_octree_gpu.py:452-487` and
 `mesh_aligned_point_location.py:548-553`:
@@ -117,13 +123,64 @@ appeared to contradict each other.
 
 ---
 
-## 5. The fix, and what it does *not* yet cover
+## 5. The fix
 
-Pass 2 now enumerates each non-Kuhn AABB on the **lookup lattice** —
-`median(cell sizes at that level)`, derived exactly as the GPU upload derives
-`level_cell_sizes` — instead of `nbr_size`.
+**Every registration path now files elements on the one lattice the search
+divides by.** The pitch is derived in a classification sweep that runs *before*
+either pass registers anything:
 
-**Cost: none.** Measured on the same mesh:
+```python
+# pass 0: classify, then derive the lattice both passes will register on
+for elem_id in range(n_elements):
+    cell_size, level = find_axis_aligned_edges_single(...)
+    if np.any(cell_size == 0):
+        non_kuhn_ids.append(elem_id); continue
+    _level_sizes.setdefault(int(level), []).append(cell_size)
+
+lookup_pitch = {lv: np.median(np.asarray(v), axis=0)
+                for lv, v in _level_sizes.items()}
+```
+
+derived exactly as `upload_mesh_aligned_octree_to_gpu` derives
+`level_cell_sizes`, so the two agree **by construction** rather than by
+coincidence. Pass 1, the Pass 2 AABB path and the legacy centroid path all
+index on `lookup_pitch[level]`.
+
+This arrived in two steps, and the intermediate measurement is what proved
+where the remainder lived.
+
+### 5.1 Step one — Pass 2 only
+
+Aligning the non-Kuhn AABB enumeration alone cut the cell mismatch 18.2% →
+16.43% and recovered **1,164 of 2,000** previously-lost particles (58.2%). The
+836 that remained separated perfectly:
+
+| residual failure | n |
+|---|---:|
+| no containing element | 192 |
+| host on **mismatched** cell, **Kuhn** (Pass 1) | **644** |
+| host on mismatched cell, non-Kuhn (Pass 2) | **0** |
+| host on matching cell | **0** |
+
+Zero residual failures on a Pass-2 cell — the Pass-2 fix was complete on its
+own terms — and zero on a matching cell, reproducing §4.1's separation. The
+index error kept the same signature: median 2, p90 2, Δ ≤ 1 = 0.0%.
+
+That isolated the remainder to `parent_cube.py` Pass 1, which recorded each
+**Kuhn** element's own `cell_size` and wrote `cell_metadata` only
+`if cell_key not in cell_metadata`, so a cell first created by a Kuhn element
+kept that element's size. Kuhn sizes also vary at a level on an anisotropic
+mesh, so the disagreement was inherent to Pass 1.
+
+### 5.2 Step two — one lattice for both passes
+
+Hence pass 0. The expected effect is to remove the 644, leaving the 192
+particles with no containing element — those are outside the mesh and are not a
+defect.
+
+### 5.3 Cost
+
+Measured on the same mesh, after step one:
 
 | | before | after | change |
 |---|---:|---:|---:|
@@ -132,25 +189,28 @@ Pass 2 now enumerates each non-Kuhn AABB on the **lookup lattice** —
 | **max occupancy** | **95** | **79** | **−17%** |
 | CSR entries | 85,087,578 | 85,078,209 | −0.01% |
 
-Worst-case per-query work *improves*. It is build-time only: no per-step
-branch, no kernel change, and a no-op on meshes whose levels hold a single size
-(A/B/C). Compare 5×5×5, which would recover the same 98.6% at **4.6× the cost
-of every query**.
+Worst-case per-query work *improves*. Step two adds one extra sweep over the
+elements at build time and nothing at query time: no per-step branch, no kernel
+change, and a no-op on meshes whose levels hold a single size, where the median
+*is* each element's own size (A/B/C). Compare widening the search to 5×5×5,
+which would recover the same 98.6% at **4.6× the cost of every query**.
 
-**But the mismatch did not go to zero: 18.2% → 16.43%.**
+### 5.4 Regression guard
 
-The reason is `parent_cube.py:195`: Pass 1 records each **Kuhn** element's own
-`cell_size`, and `cell_metadata` is written only `if cell_key not in
-cell_metadata`. A cell first created by a Kuhn element keeps that element's
-size. Since Kuhn elements at a level also vary in size on an anisotropic mesh,
-the residual disagreement is inherent to Pass 1 and my Pass 2 change could not
-address it.
+`scripts/dfamily/test_lattice_invariant.py` needs no case data and runs in a
+second. It builds a synthetic isotropic mesh and a synthetic anisotropic one,
+and asserts that every registered cell is reachable from the lattice the search
+divides by. The anisotropic mesh is placed ~128 cells from the origin, because
+a pitch disagreement is a *relative* error whose absolute index error grows
+with distance — at the origin it is 0 and only far out does it exceed ±1.
 
-**Open question:** whether the residual 16.43% includes the cells that actually
-lose particles. The verification run decides it. If losses persist, the same
-treatment must be applied to Pass 1 — or, more robustly, the lookup pitch
-should be fixed per level *before* either pass registers anything, so both
-passes and the search share one lattice by construction.
+| mesh | without the fix | with the fix |
+|---|---|---|
+| isotropic cubic (A/B/C-like) | PASS, 0 unreachable | PASS, 0 unreachable |
+| anisotropic cuboid (D-like) | **FAIL, 66.67% unreachable, max Δ 32** | **PASS, 0 unreachable** |
+
+The isotropic row passing either way is the direct confirmation that A/B/C are
+unaffected.
 
 ---
 

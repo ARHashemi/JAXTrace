@@ -34,7 +34,7 @@ output_test/
 # old files (but not archive/old_examples/)
 *.bak
 *.old
-*old.py
+*_old.py
 /old*/
 
 # databases
