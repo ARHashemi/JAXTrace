@@ -378,6 +378,10 @@ Options:
 
     'last_valid_vel'  - Reuse the previous substage's velocity.
                         k2 falls back to k1, k3→k2, k4→k3.
+                        k1 has no predecessor inside the step, so by default it
+                        still falls back to ZERO; set
+                        RK4_CARRY_LAST_VALID_VEL = True to chain it to the
+                        previous step's velocity instead.
                         JAXTrace extension, NOT FEMUSS behavior.
                         Prevents velocity "holes" when particles temporarily
                         overshoot the mesh boundary during RK4 substages.
@@ -391,6 +395,28 @@ runs before the search; this policy handles what happens when the search STILL
 fails after clamping (or when clamping is disabled).
 
 Default: 'zero_vel' (FEMUSS-equivalent)
+"""
+
+RK4_CARRY_LAST_VALID_VEL = False
+"""
+Carry the last valid velocity ACROSS steps so stage k1 can fall back to it.
+
+Only has an effect when RK4_FAILED_SUBSTAGE_POLICY = 'last_valid_vel'.
+
+Why it is separate: within a step the fallback chain is k2→k1, k3→k2, k4→k3,
+but k1 has no predecessor, so a failed k1 falls back to zero -- which is a
+stall, not a "last valid velocity". Enabling this carries each step's k1
+velocity forward (keeping the previous one whenever k1 itself failed, so a run
+of failures cannot decay the carried value to zero) and lets k1 fall back to
+it, completing the chain:
+
+    last_vel -> k1 -> k2 -> k3 -> k4
+
+Cost: one extra (n_particles, 3) array carried between steps, which is already
+allocated and passed whenever extended-domain walls are in use. The guard is
+read at JIT trace time, so when False no extra select appears in the kernel.
+
+Default: False (preserves the historical zero fallback for k1)
 """
 
 RK4_SUBSTEP_LAST_VALID_VEL = False

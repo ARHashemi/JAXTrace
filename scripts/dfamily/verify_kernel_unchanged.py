@@ -64,6 +64,9 @@ norm = re.sub(r'metadata=\{[^}]*\}', '', txt)
 norm = re.sub(r'(end_)?line=\d+', 'L', norm)
 norm = re.sub(r'(end_)?column=\d+', 'C', norm)
 norm = re.sub(r'source_file="[^"]*"', 'F', norm)
+# This harness's own path appears in the HLO; normalise it so running the
+# script from two different locations does not look like a kernel change.
+norm = re.sub(r'"[^"]*(hlo_keep|verify_kernel_unchanged)\.py"', 'HARNESS', norm)
 norm = re.sub(r'\s+', ' ', norm)
 open(os.environ.get("HLO_OUT","/tmp/hlo_dump.txt"),"w").write(norm)
 print("HLO_SHA256", hashlib.sha256(norm.encode()).hexdigest())

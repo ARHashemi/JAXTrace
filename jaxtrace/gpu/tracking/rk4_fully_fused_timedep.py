@@ -146,6 +146,11 @@ def _create_rk4_fully_fused_timedep_impl(
     if config.RK4_SUBSTEP_LAST_VALID_VEL:
         failed_substage_policy = 'last_valid_vel'
     use_last_valid_vel = (failed_substage_policy == 'last_valid_vel')
+    # When last_valid_vel is in force we must actually CARRY a velocity between
+    # steps, otherwise k1's fallback reads the zeros dummy that is passed when
+    # extended-domain mode is off and the fallback silently does nothing.
+    carry_last_vel = (failed_substage_policy == 'last_valid_vel'
+                      and config.RK4_CARRY_LAST_VALID_VEL)
     use_skip_step_on_fail = (failed_substage_policy == 'skip_step')
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
@@ -739,6 +744,13 @@ def _create_rk4_fully_fused_timedep_impl(
                 else:
                     elem_k1 = search_result_k1
                 vel_k1 = interpolate_velocity_single(pos, elem_k1, velocity_field)
+                if use_last_valid_vel and carry_last_vel:
+                    # k1 has no predecessor WITHIN the step, so without this it
+                    # falls back to zero -- which is not "last valid velocity",
+                    # it is a stall. last_vel carries the previous step's k1,
+                    # so the chain becomes last_vel -> k1 -> k2 -> k3 -> k4 and
+                    # a failed k1 preserves continuity like the other stages.
+                    vel_k1 = jnp.where(elem_k1 >= 0, vel_k1, last_vel)
                 pos_k1 = pos + 0.5 * dt * vel_k1
 
                 # Stage 2: k2 = f(t + dt/2, y + dt/2 * k1)
@@ -833,6 +845,11 @@ def _create_rk4_fully_fused_timedep_impl(
                     vel_out = jnp.where(already_exited, last_vel, vel_k1)
                     if collect_stats:
                         lvl_final = jnp.where(already_exited, jnp.int8(-1), lvl_final)
+                elif carry_last_vel:
+                    # Carry this step's k1 forward, but only if it was valid --
+                    # otherwise keep the previous one so a run of failures does
+                    # not decay the carried velocity to zero.
+                    vel_out = jnp.where(elem_k1 >= 0, vel_k1, last_vel)
                 else:
                     vel_out = last_vel  # pass-through (unused when extended domain off)
 
@@ -875,7 +892,7 @@ def _create_rk4_fully_fused_timedep_impl(
                     return pos_final, elem_final, vel_out, dmg_new
 
             # Provide zero velocities if not passed (non-extended mode)
-            if use_extended_domain:
+            if use_extended_domain or carry_last_vel:
                 # last_valid_velocities must be provided by caller
                 vels_in = last_valid_velocities
             else:
