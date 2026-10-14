@@ -140,12 +140,43 @@ reintroduce the symptom just fixed.
 
 ---
 
-## 4. Identified but UNMEASURED — the larger prize
+## 4. Early exit under `vmap` — MEASURED, AND IT DOES NOT WORK
 
-### 4.1 Early exit / reordering of the level loop — potential ~4×
+This section replaces an earlier draft that listed level-loop and element-loop
+early exit as promising. **They cannot work**, and the measurement is
+unambiguous.
 
-The loop walks `level = max_level - level_idx`, i.e. **15, 14, 13, 12, 11, 10,
-9, 8** — all eight, every query. But the level population is extremely skewed:
+`jax.vmap` has no per-lane control flow: a `lax.while_loop` becomes one batched
+loop whose predicate is reduced across the batch, so it runs until the **last**
+lane finishes. Measured, 200,000 lanes, per-lane trip-count targets:
+
+| batch composition | mean trips | max trips | time |
+|---|---:|---:|---:|
+| all lanes 1 | 1.0 | 1 | **0.18 ms** |
+| **1 lane 64, rest 1** | **1.0** | **64** | **3.83 ms** |
+| half 1, half 64 | 32.5 | 64 | 3.84 ms |
+| all lanes 64 | 64.0 | 64 | 3.70 ms |
+
+**Cost tracks the maximum, not the mean.** One slow lane in 200,000 costs the
+same as all lanes being slow — a 21× penalty for 0.0005% of the work.
+
+Worse, the `while_loop` is **~4× slower than the equivalent `fori_loop`** at
+the same trip count (3.70 ms vs 0.91 ms at 64 iterations), because it loses
+unrolling and adds a batch-wide predicate evaluation per iteration.
+
+So both of the following are rejected:
+
+- **level-loop early exit** — cannot work; only the *reorder* below is real;
+- **element-loop early exit** — cannot work, and would be slower than the
+  current masked `fori_loop`.
+
+This matches the long-standing JAX position on data-dependent control flow
+under `vmap`; nothing has changed to enable it.
+
+### 4.1 What does work instead: reorder the level loop — ~1.14×, trivial effort
+
+The loop walks `level = max_level - level_idx`, i.e. **15, 14, 13, …, 8**. The
+population is extremely skewed:
 
 | level | cells | share |
 |---:|---:|---:|
@@ -154,65 +185,63 @@ The loop walks `level = max_level - level_idx`, i.e. **15, 14, 13, 12, 11, 10,
 | 13 | 81,899 | 1.37% |
 | 8–12 | 25,031 | 0.42% |
 
-For almost every particle the host is found on **iteration 2 of 8**, and the
-remaining six iterations are masked but still execute their full
-`27 × bound` point-in-tet arithmetic. That is ~75% of the level loop wasted on
-a typical particle.
+Level 15 holds 0.01% of cells but is tried **first**, so essentially every
+query wastes one full `27 × bound` iteration before reaching the level that
+hosts it. Visiting levels in descending population order (14 first) removes
+exactly that one wasted iteration: **8 → 7 effective iterations ≈ 1.14×**.
 
-Options, in increasing ambition:
-- **reorder** so the most populated level is tried first (14 before 15) — a
-  one-line change, saves one wasted iteration;
-- **true early exit**, e.g. `lax.while_loop` over levels with a found
-  predicate. Under `vmap` this collapses to the batch maximum (see §2.2), so
-  the gain depends on how uniform the batch is — particles in the refined
-  region are nearly all at level 14, so a batch may genuinely exit early;
-- **skip levels a position cannot be in**, computed from the position and the
-  per-level grid extents before entering the loop.
+It cannot do better than that, because the remaining iterations still execute
+under masking. But it is a **one-line change** to the loop's level mapping,
+with no correctness risk — the same levels are visited, only the order changes.
 
-**Potential up to ~4×, and it stacks with §3.1** (they are independent
-factors). Combined ceiling ≈ 5.6×. **Unmeasured — this is the first thing to
-test when resuming.**
+### 4.2 What else works: sort particles into homogeneous batches — ~1.35×
 
-### 4.2 Early exit inside the element loop — potential unclear
+If per-lane exit is impossible, the GPU answer is to **regroup rather than
+branch**: sort particles so each batch contains lanes with similar work, which
+lowers each batch's maximum toward its own mean.
 
-`point_in_tet` is computed unconditionally and masked, so short cells pay the
-full bound. Skipping the arithmetic when `~valid` would make cost scale with
-actual occupancy (mean 14.22) rather than the bound (79) — potentially ~5×.
+Measured on a realistic skew (98% of particles need 2 levels, 2% need 3–8):
 
-**But it may already happen.** XLA may predicate the masked work away, and
-under `vmap` a lane that could exit early still waits for its batch. Needs an
-HLO inspection plus a microbenchmark before any estimate is credible.
+| batching | time | gain |
+|---|---:|---:|
+| unsorted, one batch of 200,000 | 0.61 ms | — |
+| **sorted into 2 chunks** (maxes 2, 8) | **0.45 ms** | **1.35×** |
+| sorted into 4 chunks | 0.51 ms | 1.20× |
+| sorted into 8 chunks | 0.87 ms | 0.70× |
 
-### 4.3 Reduce the 3×3×3 neighbourhood — potential large, risk high
+Two chunks is the optimum; beyond that, per-chunk kernel-launch overhead
+dominates. Note this was measured on a synthetic `while_loop`; applying it to
+the real search means sorting by *predicted* level, which is itself an extra
+pass, so the realised gain would be smaller. **Worth measuring on the real
+kernel before committing to it.**
 
-27 cells are walked because an element can straddle a cell boundary. With
-**exact** registration an element is in every cell it genuinely touches, so the
-base cell alone might suffice — up to ~27×.
+### 4.3 Shrinking the 3×3×3 neighbourhood — ALREADY REJECTED for the paper
 
-**High risk**: this is exactly the search reach whose absence caused the
-original lattice bug. It must not be attempted before §3.1 ships and is
-verified, and any trial needs the full loss-measurement harness, not just a
-throughput number.
-
----
+Removed from the candidate list. This was tested for the MALMO paper on both
+timing and coverage: a 1×1×1 (base-cell-only) search gave **no significant
+timing gain and failed to locate more than 40% of elements**. The 3×3×3
+neighbourhood is required because an element can straddle a cell boundary, and
+the cost is dominated by the element loop rather than the cell walk.
 
 ## 5. Comparison table
 
 Baseline = the shipped correct configuration (bound 79): **17,064 tests per
 query**, loss 0.20%.
 
-| # | candidate | measured gain | memory | effort | risk | status |
+| # | candidate | gain | memory | effort | risk | status |
 |---|---|---|---|---|---|---|
-| 2.1 | split cells one level finer | **0.91×** (9% faster) | **+12.3× CSR** | ~1 day | low | **REJECTED** — memory |
-| 2.2 | dynamic per-cell trip count | **~1.0×** (no gain) | none | ~1 h | low | **REJECTED** — `vmap` batches the trip count |
-| 3.1 | exact tet-vs-box registration | **1.41×** | **−28% CSR** | ~4–8 h | low (test validated) | **VIABLE** — ready to implement |
-| 4.1 | level-loop early exit / reorder | *up to ~4×* | none | ~1 h reorder, ~1 day exit | medium | **UNMEASURED** — test first |
-| 4.2 | element-loop early exit | *up to ~5×, may be 1×* | none | ~2 h to measure | low | **UNMEASURED** — may already be done by XLA |
-| 4.3 | shrink 3×3×3 → base cell | *up to ~27×* | none | ~2 days + loss harness | **high** | **UNMEASURED** — only after 3.1 ships |
+| 3.1 | **exact tet-vs-box registration** | **1.41× measured** | **−28% CSR** | ~4–8 h | low | **VIABLE — best option** |
+| 4.1 | **reorder the level loop** (14 first) | **~1.14× expected** | none | **~15 min** | none | **VIABLE — do first** |
+| 4.2 | sort particles into homogeneous batches | ~1.35× on a synthetic proxy | none | ~1 day | medium | **NEEDS REAL MEASUREMENT** |
+| 2.1 | split cells one level finer | 0.91× | **+12.3× CSR** | ~1 day | low | **REJECTED** — memory |
+| 2.2 | dynamic per-cell trip count | ~1.0× | none | ~1 h | low | **REJECTED** — `vmap` batches the trip count |
+| 4.0a | level-loop **early exit** | **cannot work** | none | — | — | **REJECTED** — `vmap` has no per-lane control flow |
+| 4.0b | element-loop **early exit** | **cannot work, ~4× slower** | none | — | — | **REJECTED** — same, plus loses unrolling |
+| 4.3 | shrink 3×3×3 → 1×1×1 | no timing gain | none | — | — | **REJECTED** — paper tests: >40% location failures |
 
-Stacking: 3.1 and 4.1 are independent factors of the same product, so they
-multiply — **~5.6× if both land**. 4.3 would multiply again but carries the
-correctness risk that caused the original bug.
+**Realistic combined ceiling: ~1.6×** (3.1 × 4.1 = 1.41 × 1.14), rising to
+~2.2× if 4.2 proves out on the real kernel. The earlier draft of this document
+claimed ~5.6× by assuming early exit was available; that was wrong.
 
 ### Cost context
 
@@ -230,21 +259,23 @@ about half of that; the level loop could recover all of it and more.
 
 ## 6. Recommended order when resuming
 
-1. **Measure 4.1 first** (level-loop reorder, one line). Highest ratio of
-   potential gain to effort, and the measurement is cheap.
-2. **Measure 4.2** (HLO inspection + microbenchmark). Could be free, could be
-   nothing — knowing which costs two hours.
-3. **Implement 3.1** if 1–2 fall short. 1.41× is banked and low-risk, but it is
-   the most work of the three.
-4. **Do not attempt 4.3** until 3.1 is shipped and verified, and then only with
-   a loss-measurement harness attached.
+1. **Reorder the level loop** (§4.1). ~15 minutes, no risk, ~1.14×. Visit
+   levels in descending population order so the 98.2%-populated level 14 is
+   tried before the 0.01% level 15. Verify with
+   `verify_kernel_unchanged.py`-style HLO comparison plus a loss check.
+2. **Implement exact tet-box registration** (§3.1). The real prize at 1.41×
+   and −28% CSR. Vectorise the SAT test first; it is already written and
+   validated.
+3. **Measure particle sorting on the real kernel** (§4.2) only if 1–2 are
+   insufficient. The synthetic 1.35× will not transfer fully, because sorting
+   by predicted level costs an extra pass.
+4. **Do not revisit** early exit, dynamic trip counts, cell splitting, or a
+   1×1×1 neighbourhood. All four are measured dead ends, documented above.
 
 Decide against the LUMI baseline (job 22815786) rather than the workstation
-numbers: on LUMI the snapshot loading is ~2 h of a ~10 h run, so a 1.41× gain
-on the tracking phase alone moves total wall time much less than it does on the
-workstation.
-
----
+numbers: on LUMI snapshot loading is ~2 h of a ~10 h run, so a 1.6× gain on the
+tracking phase alone moves total wall time by much less than it does on the
+workstation. **If the LUMI run is acceptable as-is, none of this is needed.**
 
 ## 7. Reproducing any of these
 
@@ -253,6 +284,8 @@ workstation.
 | `scripts/dfamily/eval_cell_splitting.py` | §2.1 — occupancy composition and a direct re-registration one level finer |
 | `scripts/dfamily/eval_tet_box_registration.py` | §3.1 — per-element AABB waste (note: uses the `level=14` default, so its headline figure overstates the saving; the production-CSR re-test is the trustworthy one) |
 | `scripts/dfamily/verify_kernel_unchanged.py` | guards that any kernel edit leaves the production step bit-identical when the new path is off |
+| `scripts/dfamily/bench_vmap_early_exit.py` | §4 — proves `while_loop` under `vmap` costs the batch maximum, and is ~4× slower than `fori_loop`. Runs in seconds, needs no case data |
+| `scripts/dfamily/bench_batch_sorting.py` | §4.2 — the sorted-batch proxy measurement. Runs in seconds, needs no case data |
 
 All are read-only and take a case `.gid` path. Each needs a ~16–25 min octree
 build on D2 before it reports.
