@@ -145,6 +145,7 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
 | [`11_max_elems_per_cell.md`](11_max_elems_per_cell.md) | **defect 2**: cell-overflow truncation |
 | [`12_occupancy_optimization.md`](12_occupancy_optimization.md) | occupancy experiments in detail |
 | [`13_throughput_roadmap.md`](13_throughput_roadmap.md) | **throughput roadmap**: every candidate, measured gain, effort, risk |
+| [`14_concepts_explained.md`](14_concepts_explained.md) | **plain-language explanation** of the static trip count and exact tet-box registration, with what is and is not proven |
 
 ---
 

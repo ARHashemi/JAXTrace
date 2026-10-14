@@ -12,6 +12,10 @@ walked.
 
 ---
 
+> **New to these terms?** [`14_concepts_explained.md`](14_concepts_explained.md)
+> explains *reducing the static trip count* and *exact tet-vs-box
+> registration* from scratch, including the coverage question.
+
 ## 1. The cost model — and why it has three independent factors
 
 ```
