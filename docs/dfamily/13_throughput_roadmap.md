@@ -173,26 +173,65 @@ So both of the following are rejected:
 This matches the long-standing JAX position on data-dependent control flow
 under `vmap`; nothing has changed to enable it.
 
-### 4.1 What does work instead: reorder the level loop — ~1.14×, trivial effort
+### 4.1 Reordering the level loop alone — NO GAIN, measured
 
-The loop walks `level = max_level - level_idx`, i.e. **15, 14, 13, …, 8**. The
-population is extremely skewed:
+Reordering was proposed on the assumption that masked iterations are cheap.
+**They are not.** Same trip count, varying where the host is found:
 
-| level | cells | share |
-|---:|---:|---:|
-| 15 | 580 | 0.01% |
-| **14** | **5,875,326** | **98.2%** |
-| 13 | 81,899 | 1.37% |
-| 8–12 | 25,031 | 0.42% |
+| | time | vs always-work |
+|---|---:|---:|
+| all 8 iterations do real work | 0.476 ms | — |
+| masked, host found on iteration 0 | 0.455 ms | 1.05× |
+| masked, host found on iteration 1 | 0.500 ms | 0.95× |
+| masked, host found on iteration 7 | 0.534 ms | 0.89× |
 
-Level 15 holds 0.01% of cells but is tried **first**, so essentially every
-query wastes one full `27 × bound` iteration before reaching the level that
-hosts it. Visiting levels in descending population order (14 first) removes
-exactly that one wasted iteration: **8 → 7 effective iterations ≈ 1.14×**.
+All within noise. `jnp.where` masks the **result**, not the work, so the
+arithmetic for every level executes regardless. Changing the order changes
+nothing. `lax.cond` is not an escape either — measured identical to `where`
+(0.648 vs 0.645 ms at 8 iterations), confirming it lowers to a select under
+`vmap`.
 
-It cannot do better than that, because the remaining iterations still execute
-under masking. But it is a **one-line change** to the loop's level mapping,
-with no correctness risk — the same levels are visited, only the order changes.
+**The only mechanism that removes work is reducing the STATIC trip count:**
+
+| trip count | time | |
+|---:|---:|---|
+| 8 (current) | 0.645 ms | — |
+| 2 | 0.202 ms | **3.20×** |
+
+Those iterations genuinely do not exist, so the saving is real.
+
+### 4.1b Where particles actually are — the surprise that makes this tractable
+
+Cell counts and *particle* counts are different populations, and the
+difference is extreme. Probing 20,000 positions from the **production seed
+grid** against the real octree:
+
+```
+levels walked by the kernel, in order: [15, 14, 13, 12, 11, 10, 9, 8]
+host LEVEL distribution : level 8 -> 20,000 (100.00%)
+ITERATION found at      : iteration 7 -> 20,000 (100.00%)
+```
+
+**100% of seeded particles are hosted at level 8 — the last of the eight
+levels walked.** Every particle pays all eight iterations to find a host it
+would have found immediately.
+
+This is not a probe artefact. The production seed box is
+`x −19.9 … −11.1 mm`, i.e. entirely **behind** the tool: 0% of seeds fall
+within r ≤ 9 mm, so none start in the refined region. Level 8 (pitch 3.9 mm,
+460 cells) tiles the coarse background that fills most of the domain *volume*,
+while level 14 (pitch 0.061 mm, 5.88M cells) tiles only the small refined
+region near the tool. Cell count is dominated by refinement; volume is not.
+
+**Implication: a one-level fast tier could be ~8× for the coarse-region
+majority**, with the full eight-level kernel as a second pass for the rest —
+better than the 3.2× that an 8→2 reduction gives.
+
+**Caveat that must be measured first.** These are *seed* positions. The
+particles that matter are those that reach the tool, and they sit at fine
+levels — a fast tier tuned for the coarse region would route exactly the
+interesting particles to the slow path. The level distribution is needed
+**during** a run, not only at seeding, before this is worth building.
 
 ### 4.2 What else works: sort particles into homogeneous batches — ~1.35×
 
@@ -231,7 +270,8 @@ query**, loss 0.20%.
 | # | candidate | gain | memory | effort | risk | status |
 |---|---|---|---|---|---|---|
 | 3.1 | **exact tet-vs-box registration** | **1.41× measured** | **−28% CSR** | ~4–8 h | low | **VIABLE — best option** |
-| 4.1 | **reorder the level loop** (14 first) | **~1.14× expected** | none | **~15 min** | none | **VIABLE — do first** |
+| 4.1 | reorder the level loop | **no gain** | none | — | — | **REJECTED** — masked iterations cost full price |
+| 4.1b | **two-tier kernel: 1-level fast path + full fallback** | *up to ~8×* on coarse-region particles | none | ~1–2 days | medium | **MOST PROMISING** — needs in-run level distribution first |
 | 4.2 | sort particles into homogeneous batches | ~1.35× on a synthetic proxy | none | ~1 day | medium | **NEEDS REAL MEASUREMENT** |
 | 2.1 | split cells one level finer | 0.91× | **+12.3× CSR** | ~1 day | low | **REJECTED** — memory |
 | 2.2 | dynamic per-cell trip count | ~1.0× | none | ~1 h | low | **REJECTED** — `vmap` batches the trip count |
@@ -239,9 +279,10 @@ query**, loss 0.20%.
 | 4.0b | element-loop **early exit** | **cannot work, ~4× slower** | none | — | — | **REJECTED** — same, plus loses unrolling |
 | 4.3 | shrink 3×3×3 → 1×1×1 | no timing gain | none | — | — | **REJECTED** — paper tests: >40% location failures |
 
-**Realistic combined ceiling: ~1.6×** (3.1 × 4.1 = 1.41 × 1.14), rising to
-~2.2× if 4.2 proves out on the real kernel. The earlier draft of this document
-claimed ~5.6× by assuming early exit was available; that was wrong.
+**Realistic ceiling: 1.41× banked** (3.1), with 4.1b the only candidate that
+could go materially beyond it. Two earlier drafts of this table were wrong:
+one claimed ~5.6× by assuming per-lane early exit was available, the other
+~1.14× from reordering. Both are now measured and rejected.
 
 ### Cost context
 
@@ -259,18 +300,20 @@ about half of that; the level loop could recover all of it and more.
 
 ## 6. Recommended order when resuming
 
-1. **Reorder the level loop** (§4.1). ~15 minutes, no risk, ~1.14×. Visit
-   levels in descending population order so the 98.2%-populated level 14 is
-   tried before the 0.01% level 15. Verify with
-   `verify_kernel_unchanged.py`-style HLO comparison plus a loss check.
-2. **Implement exact tet-box registration** (§3.1). The real prize at 1.41×
-   and −28% CSR. Vectorise the SAT test first; it is already written and
-   validated.
-3. **Measure particle sorting on the real kernel** (§4.2) only if 1–2 are
-   insufficient. The synthetic 1.35× will not transfer fully, because sorting
-   by predicted level costs an extra pass.
-4. **Do not revisit** early exit, dynamic trip counts, cell splitting, or a
-   1×1×1 neighbourhood. All four are measured dead ends, documented above.
+1. **Measure the in-run host-level distribution** (§4.1b). Cheap — add a
+   level histogram to a short tracking run. It decides whether the two-tier
+   kernel is worth 1–2 days: if most particle-steps are hosted at one or two
+   levels throughout the run, it is the biggest available win; if the
+   distribution spreads once particles reach the tool, it is not.
+2. **Implement exact tet-box registration** (§3.1). 1.41× and −28% CSR,
+   low-risk, independent of 4.1b so the two multiply. The SAT test is written
+   and validated; it needs vectorising.
+3. **Build the two-tier kernel** (§4.1b) only if step 1 supports it.
+4. **Measure particle sorting** (§4.2) last; the synthetic 1.35× will not
+   transfer fully, since sorting by predicted level costs an extra pass.
+5. **Do not revisit** per-lane early exit, `lax.cond`, level reordering,
+   dynamic trip counts, cell splitting, or a 1×1×1 neighbourhood. All six are
+   measured dead ends, documented above with the numbers.
 
 Decide against the LUMI baseline (job 22815786) rather than the workstation
 numbers: on LUMI snapshot loading is ~2 h of a ~10 h run, so a 1.6× gain on the
@@ -286,6 +329,9 @@ workstation. **If the LUMI run is acceptable as-is, none of this is needed.**
 | `scripts/dfamily/verify_kernel_unchanged.py` | guards that any kernel edit leaves the production step bit-identical when the new path is off |
 | `scripts/dfamily/bench_vmap_early_exit.py` | §4 — proves `while_loop` under `vmap` costs the batch maximum, and is ~4× slower than `fori_loop`. Runs in seconds, needs no case data |
 | `scripts/dfamily/bench_batch_sorting.py` | §4.2 — the sorted-batch proxy measurement. Runs in seconds, needs no case data |
+| `scripts/dfamily/bench_mask_cost.py` | §4.1 — proves a masked `fori_loop` iteration costs full price, so reordering gains nothing. Seconds, no case data |
+| `scripts/dfamily/bench_trip_count.py` | §4.1 — `lax.cond` vs `jnp.where` (identical), and the 8→2 trip-count reduction (3.2×). Seconds, no case data |
+| `scripts/dfamily/probe_host_levels.py` | §4.1b — at which level and iteration production seeds actually find their host |
 
 All are read-only and take a case `.gid` path. Each needs a ~16–25 min octree
 build on D2 before it reports.
