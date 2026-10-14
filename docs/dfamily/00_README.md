@@ -143,17 +143,18 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
 | [`09_d2_full_run_residual.md`](09_d2_full_run_residual.md) | the full run that exposed defect 2 |
 | [`10_substage_trace_mechanism.md`](10_substage_trace_mechanism.md) | the latched dead state |
 | [`11_max_elems_per_cell.md`](11_max_elems_per_cell.md) | **defect 2**: cell-overflow truncation |
+| [`12_occupancy_optimization.md`](12_occupancy_optimization.md) | occupancy experiments in detail |
+| [`13_throughput_roadmap.md`](13_throughput_roadmap.md) | **throughput roadmap**: every candidate, measured gain, effort, risk |
 
 ---
 
 ## Open items
 
-1. **Throughput**: the derived bound costs ~1.7× per step on D2 and would be
-   worse on D1 (bound 115). The inner loop computes `point_in_tet`
-   unconditionally and masks the result, so cost is `bound × 27` tests
-   regardless of actual occupancy. Reducing occupancy at build time is the only
-   fix that makes the search structurally cheaper; a dynamic trip count does
-   **not** help, because `vmap` lowers it to one batched while-loop whose trip
-   count is the maximum across the batch.
+1. **Throughput**: the derived bound costs ~1.7× per step on D2. Fully mapped
+   in [`13_throughput_roadmap.md`](13_throughput_roadmap.md): splitting cells
+   and dynamic trip counts are rejected by measurement, exact tet-box
+   registration is viable at a measured 1.41×, and the **level loop is the
+   larger untouched prize** (potential ~4×, unmeasured — walks all 8 levels
+   every query while 98.2% of cells are at one level).
 2. **`RK4_CARRY_LAST_VALID_VEL`** is off by default; enable it for production.
 3. **LUMI** has not been updated with any of this.
