@@ -92,52 +92,76 @@ at all:
 
 This is real, because nothing is masked — there is simply less program.
 
-## 1.5 The catch, and why it is not a free win
+## 1.5 How a smaller number could be used — and why it fails
 
-Levels cannot just be dropped. All eight are populated on D2, and a particle
-whose host sits at a level the kernel never visits is **lost** — precisely the
-class of bug this whole investigation was about.
+A reasonable objection: *you cannot put a condition between two loops, because
+on a GPU both branches execute anyway.* That is correct for the obvious
+design, and it is worth being precise about why.
 
-So a smaller trip count is only safe as a **two-tier search**:
+**Design A — masked branch inside one kernel. Does not work.**
 
-1. a **fast kernel** compiled with few levels, run on all particles;
-2. a **full kernel** with all 8 levels, run only on the particles the fast
-   kernel failed to locate.
-
-Correctness is preserved because tier 2 is the current kernel, unchanged. The
-gain depends entirely on how many particles tier 1 resolves: if 99% are
-handled by a 1-level kernel, the average cost approaches one level instead of
-eight.
-
-## 1.6 Is it viable? Promising, not yet proven
-
-Measuring 20,000 positions from the **production seed grid** against the real
-D2 octree:
-
-```
-levels walked, in order : [15, 14, 13, 12, 11, 10, 9, 8]
-host level              : level 8 -> 100.00%
-iteration found at      : iteration 7 of 8 -> 100.00%
+```python
+fast = fori_loop(0, 1, body, pos)      # level 8 only
+full = fori_loop(0, 8, body, pos)      # all levels
+out  = jnp.where(fast_found, fast, full)
 ```
 
-Every seeded particle is hosted at level 8 — the **last** level tried. So a
-1-level fast kernel at level 8 would resolve all of them in one iteration
-instead of eight.
+Every lane runs *both* loops, so the cost is 1 + 8 = **9**, worse than the 8
+it replaces. This is the same masking problem as §1.3.
 
-That looks like ~8×, but one honest caveat stands in the way. The seed box is
-`x = −19.9 … −11.1 mm`, entirely **behind** the tool: no seed starts within
-r ≤ 9 mm. Level 8 (3.9 mm cells) tiles the coarse background filling most of
-the domain *volume*; level 14 (5.88 M cells) tiles only the small refined
-region near the tool. So the measurement describes particles **at seeding**,
-and the particles that matter are the ones that later reach the tool — where
-hosts sit at fine levels, and a level-8 fast tier would miss them, pushing
-exactly the interesting particles onto the slow path.
+**Design B — two separate kernel launches with compaction between.**
 
-**Verdict: viable in principle, decided by one cheap measurement** — the host-
-level histogram *during* a run rather than at seeding. If most particle-steps
-stay coarse, this is the largest available win (up to ~8×). If the
-distribution spreads once particles enter the refined zone, the two-tier
-scheme mostly adds overhead. That measurement is step 1 of the roadmap.
+```python
+elem = fast_kernel(pos)                      # launch 1: 1 level, ALL N
+idx  = nonzero(elem < 0)                     # compaction, host-visible size
+elem = elem.at[idx].set(full_kernel(pos[idx]))   # launch 2: 8 levels, M << N
+```
+
+Here there is **no GPU branch at all**. Each kernel is straight-line code; the
+two differ only in how many particles they are launched over. Total work is
+`N×1 + M×8` instead of `N×8`, which on paper breaks even at a miss fraction of
+7/8 and wins below it.
+
+**Measured: Design B is also a dead end.**
+
+| miss fraction | one 8-level kernel | two-launch | speedup |
+|---:|---:|---:|---:|
+| 0% | 0.658 ms | 0.326 ms | 2.02× |
+| 1% | 0.477 ms | **2.154 ms** | **0.22×** |
+| 5% | 0.466 ms | 2.310 ms | 0.20× |
+| 20% | 0.469 ms | 2.246 ms | 0.21× |
+| 50% | 0.483 ms | 2.236 ms | 0.22× |
+| 100% | 0.480 ms | 2.310 ms | 0.21× |
+
+It wins only at a 0% miss fraction — the degenerate case where launch 2 never
+happens. At **any** non-zero miss rate it is ~**5× slower**, and the cost is
+*flat* from 1% to 100%, which identifies the culprit: not the extra level
+work, but the **compaction itself**. `nonzero` produces a dynamically shaped
+array, which cannot live inside a jitted function, so it forces a device-host
+synchronisation every time — about 1.8 ms, against the ~0.47 ms that the
+entire 8-level search costs.
+
+In a real run that sync would occur five times per RK4 step (k1–k4 plus the
+final assignment) across 8000 steps — 40,000 synchronisations. Impractical by
+a wide margin.
+
+## 1.6 Verdict: NOT viable
+
+| design | why it fails |
+|---|---|
+| stop the loop early | masking selects the result; the work runs anyway (§1.3) |
+| `lax.cond` per lane | lowers to a select under `vmap`; identical cost |
+| `lax.while_loop` | `vmap` runs it to the batch maximum; one slow lane costs as much as all of them |
+| masked two-loop branch | both loops execute: 1 + 8 > 8 |
+| **two separate launches** | **compaction sync (~1.8 ms) exceeds the entire search cost (~0.47 ms)** |
+
+Reducing the static trip count is the only mechanism that genuinely removes
+work, and there is no way to *select* a smaller trip count per particle
+without paying more than it saves. **This line of attack is closed.** The
+level loop stays at 8.
+
+The one thing that would help is making the mesh have fewer octree levels in
+the first place — a mesh-generation decision, outside this codebase.
 
 ---
 
@@ -258,7 +282,7 @@ zero, the 1.41× is bankable at low risk.
 
 | | status | gain | what is left to prove |
 |---|---|---|---|
-| **reduce the static trip count** (two-tier kernel) | promising | up to ~8× if the common case is one level | the in-run host-level histogram; seeding data alone is not enough |
+| **reduce the static trip count** (two-tier kernel) | **REJECTED** | — | nothing: measured 0.22× because the compaction sync costs ~4× the whole search |
 | **exact tet-vs-box registration** | viable | **1.41× measured**, −28% memory | the search-coverage test must report zero losses |
 
 Neither is a correctness fix; both are optimisations on top of the shipped

@@ -129,16 +129,49 @@ def bary_in(x, t, tol=1e-9):
     return (1.0 - b.sum() >= -tol) and bool((b >= -tol).all())
 
 
-# Sample positions INSIDE real elements: the barycentre of a random element,
-# which is guaranteed to have that element as its host.
+# Sampling matters here. A barycentre is the SAFEST possible point -- deep
+# inside its element, far from any face or cell boundary. The risk case is the
+# opposite: a point almost on a cell face, where float32 rounding can place it
+# in a different cell than the one used at build time. So three modes:
+#
+#   barycentre : interior control
+#   face       : pushed 99.9% of the way from the barycentre toward a random
+#                vertex, so it sits just inside an element face
+#   cellface   : nudged onto the nearest cell-boundary plane of its own level,
+#                then perturbed by one float32 epsilon either side
+MODE = os.environ.get("COVERAGE_MODE", "barycentre")
 rs = np.random.RandomState(0)
 pick = rs.choice(len(conn), N, replace=False)
-print(f"probing {N:,} positions (element barycentres, host known by "
-      f"construction)\n", flush=True)
+print(f"probing {N:,} positions, mode={MODE}\n", flush=True)
+
+
+def sample_point(e_true):
+    t = V[e_true]
+    c = t.mean(axis=0)
+    if MODE == "barycentre":
+        return c
+    if MODE == "face":
+        v = t[rs.randint(4)]
+        return c + 0.999 * (v - c)
+    if MODE == "cellface":
+        # snap toward the nearest level-14 cell plane, then step by 1 eps
+        p = lcs[int(g.max_level) - 1]
+        if not np.all(p > 0):
+            return c
+        axis = rs.randint(3)
+        plane = np.round(c[axis] / p[axis]) * p[axis]
+        q = c.copy()
+        # move to the plane but stay inside the element: clamp the step
+        step = plane - c[axis]
+        lim = 0.49 * (t[:, axis].max() - t[:, axis].min())
+        q[axis] = c[axis] + np.clip(step, -lim, lim)
+        q = np.float64(np.float32(q))      # force float32 representability
+        return q
+    raise SystemExit(f"unknown COVERAGE_MODE {MODE}")
 
 base_found = pruned_found = lost = 0
 for e_true in pick:
-    x = V[e_true].mean(axis=0)
+    x = sample_point(e_true)
     # emulate the search, both registrations at once
     hit_base = hit_pruned = False
     for L in levels:

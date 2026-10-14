@@ -275,7 +275,7 @@ query**, loss 0.20%.
 |---|---|---|---|---|---|---|
 | 3.1 | **exact tet-vs-box registration** | **1.41× measured** | **−28% CSR** | ~4–8 h | low | **VIABLE — best option** |
 | 4.1 | reorder the level loop | **no gain** | none | — | — | **REJECTED** — masked iterations cost full price |
-| 4.1b | **two-tier kernel: 1-level fast path + full fallback** | *up to ~8×* on coarse-region particles | none | ~1–2 days | medium | **MOST PROMISING** — needs in-run level distribution first |
+| 4.1b | two-tier kernel: fast path + full fallback | **0.22× (5× slower)** | none | — | — | **REJECTED** — the compaction sync costs ~1.8 ms against a ~0.47 ms search |
 | 4.2 | sort particles into homogeneous batches | ~1.35× on a synthetic proxy | none | ~1 day | medium | **NEEDS REAL MEASUREMENT** |
 | 2.1 | split cells one level finer | 0.91× | **+12.3× CSR** | ~1 day | low | **REJECTED** — memory |
 | 2.2 | dynamic per-cell trip count | ~1.0× | none | ~1 h | low | **REJECTED** — `vmap` batches the trip count |
@@ -283,10 +283,12 @@ query**, loss 0.20%.
 | 4.0b | element-loop **early exit** | **cannot work, ~4× slower** | none | — | — | **REJECTED** — same, plus loses unrolling |
 | 4.3 | shrink 3×3×3 → 1×1×1 | no timing gain | none | — | — | **REJECTED** — paper tests: >40% location failures |
 
-**Realistic ceiling: 1.41× banked** (3.1), with 4.1b the only candidate that
-could go materially beyond it. Two earlier drafts of this table were wrong:
-one claimed ~5.6× by assuming per-lane early exit was available, the other
-~1.14× from reordering. Both are now measured and rejected.
+**Realistic ceiling: 1.41×** (3.1), and that is now the whole of it. Every
+level-loop avenue is closed by measurement: per-lane early exit, `lax.cond`,
+`while_loop`, reordering, a masked two-loop branch, and a two-launch scheme
+with compaction. Three earlier drafts of this table overstated the ceiling
+(~5.6×, then ~1.14×, then ~8×); each claim is now replaced by a measurement.
+See [`14_concepts_explained.md`](14_concepts_explained.md) §1.5–1.6.
 
 ### Cost context
 
@@ -304,20 +306,17 @@ about half of that; the level loop could recover all of it and more.
 
 ## 6. Recommended order when resuming
 
-1. **Measure the in-run host-level distribution** (§4.1b). Cheap — add a
-   level histogram to a short tracking run. It decides whether the two-tier
-   kernel is worth 1–2 days: if most particle-steps are hosted at one or two
-   levels throughout the run, it is the biggest available win; if the
-   distribution spreads once particles reach the tool, it is not.
-2. **Implement exact tet-box registration** (§3.1). 1.41× and −28% CSR,
-   low-risk, independent of 4.1b so the two multiply. The SAT test is written
-   and validated; it needs vectorising.
-3. **Build the two-tier kernel** (§4.1b) only if step 1 supports it.
-4. **Measure particle sorting** (§4.2) last; the synthetic 1.35× will not
-   transfer fully, since sorting by predicted level costs an extra pass.
-5. **Do not revisit** per-lane early exit, `lax.cond`, level reordering,
-   dynamic trip counts, cell splitting, or a 1×1×1 neighbourhood. All six are
-   measured dead ends, documented above with the numbers.
+1. **Implement exact tet-box registration** (§3.1) — the only surviving
+   candidate. 1.41× and −28% CSR, pending the coverage test reporting zero
+   losses. The SAT test is written and validated; it needs vectorising.
+2. **Measure particle sorting** (§4.2) only if more is needed; the synthetic
+   1.35× will not transfer fully, since sorting by predicted level costs an
+   extra pass, and it shares the sync problem that killed the two-tier scheme.
+3. **Do not revisit** anything touching the level loop. Per-lane early exit,
+   `lax.cond`, `while_loop`, reordering, masked two-loop branches and
+   two-launch compaction are all measured dead ends, with numbers in
+   `14_concepts_explained.md`. Fewer octree levels would help, but that is a
+   mesh-generation decision outside this codebase.
 
 Decide against the LUMI baseline (job 22815786) rather than the workstation
 numbers: on LUMI snapshot loading is ~2 h of a ~10 h run, so a 1.6× gain on the
