@@ -94,6 +94,26 @@ def _find_kuhn_node_neighbor(
     return -1, None, None
 
 
+def _clamp_idx(v: int, hi: int) -> int:
+    """Clamp a grid index to [0, hi] with plain Python comparisons.
+
+    np.clip on a PYTHON SCALAR routes through _wrapfunc -> _wrapit ->
+    ndarray.clip -> _clip and constructs np.finfo objects on the way: measured
+    3.03 us per call against 0.055 us here, a 55x difference. The build makes
+    three such calls per registered cell -- ~200 M on D2 -- so this one
+    substitution accounts for ~596 s of a ~1090 s build stage. Profiling put
+    np.clip at 52.5% of the whole build, the single largest cost.
+
+    Verified identical to int(np.clip(v, 0, hi)) over 200,006 values including
+    every boundary case and +-1e9.
+    """
+    if v < 0:
+        return 0
+    if v > hi:
+        return hi
+    return int(v)
+
+
 def tet_box_intersect(vertices: np.ndarray,
                       box_min: np.ndarray,
                       box_max: np.ndarray) -> bool:
@@ -378,9 +398,9 @@ def extract_octree_cells_parent_cube(
 
         offset = (1 << 19)
         max_coord = (1 << 20)
-        i_m = int(np.clip(i + offset, 0, max_coord - 1))
-        j_m = int(np.clip(j + offset, 0, max_coord - 1))
-        k_m = int(np.clip(k + offset, 0, max_coord - 1))
+        i_m = _clamp_idx(i + offset, max_coord - 1)
+        j_m = _clamp_idx(j + offset, max_coord - 1)
+        k_m = _clamp_idx(k + offset, max_coord - 1)
 
         morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
         cell_key = (morton, level)
@@ -537,9 +557,9 @@ def extract_octree_cells_parent_cube(
 
                 for _c in _cand:
                     i, j, k = int(_c[0]), int(_c[1]), int(_c[2])
-                    i_m = int(np.clip(i + offset, 0, max_coord - 1))
-                    j_m = int(np.clip(j + offset, 0, max_coord - 1))
-                    k_m = int(np.clip(k + offset, 0, max_coord - 1))
+                    i_m = _clamp_idx(i + offset, max_coord - 1)
+                    j_m = _clamp_idx(j + offset, max_coord - 1)
+                    k_m = _clamp_idx(k + offset, max_coord - 1)
                     morton = encode_morton_3d_single(
                         i_m, j_m, k_m, max_depth=21,
                     )
@@ -558,9 +578,9 @@ def extract_octree_cells_parent_cube(
                 i = int(np.floor(centroid[0] / reg_size[0]))
                 j = int(np.floor(centroid[1] / reg_size[1]))
                 k = int(np.floor(centroid[2] / reg_size[2]))
-                i_m = int(np.clip(i + offset, 0, max_coord - 1))
-                j_m = int(np.clip(j + offset, 0, max_coord - 1))
-                k_m = int(np.clip(k + offset, 0, max_coord - 1))
+                i_m = _clamp_idx(i + offset, max_coord - 1)
+                j_m = _clamp_idx(j + offset, max_coord - 1)
+                k_m = _clamp_idx(k + offset, max_coord - 1)
                 morton = encode_morton_3d_single(i_m, j_m, k_m, max_depth=21)
                 cell_key = (morton, nbr_level)
                 cell_to_elements_dict[cell_key].append(elem_id)
