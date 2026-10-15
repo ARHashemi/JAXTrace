@@ -145,6 +145,35 @@ L0_SKIP_BAND=0.0              # 0 = mixed-sign only; e.g. 0.5e-3 for ±0.5mm
 ENHANCED_SEARCH_BAND=0.0      # 0 = off; e.g. 1e-3 for ±1mm node-L1+5x5x5
 REGISTRATION=""               # "" = default | vertex_multi | parent_cube
 
+# ── [6b] Build-stage options (octree cache + registration) ──────────────────
+# OCTREE_CACHE is set in section [1]. These control how it behaves and how the
+# octree is built. All were added after the D-family investigation.
+
+# NO_OCTREE_CACHE: 1 = ignore AND do not write the cache, forcing a full
+# rebuild even when OCTREE_CACHE points at a populated directory. The cache
+# key already hashes the mesh arrays, every build option and the build
+# modules' source, so a genuine change invalidates itself; use this only to
+# force a rebuild deliberately (e.g. to time the build).
+NO_OCTREE_CACHE=0
+
+# EXACT_TET_BOX: 1 = at build time, register each tetrahedron only in the
+# cells it GENUINELY reaches, instead of every cell its bounding box touches.
+# A tet fills at most ~1/6 of its AABB, so this lowers max cell occupancy and
+# with it the static search bound. Measured on D2: occupancy 79 -> 56, 1.41x
+# fewer tests per query, coverage preserved (registration remains complete).
+# Costs an exact tet/box test per candidate cell during the build and nothing
+# at run time. Left OFF here so this family matches the D2 reference run that
+# produced the 1.06% loss figure; turn it on for new work.
+EXACT_TET_BOX=0
+
+# MAX_ELEMS_PER_CELL: static per-cell loop bound for the parent_cube L2
+# search. 0 = derive it from the built octree's max occupancy, which is the
+# correct behaviour on any mesh and what fixed the D family: the old hardcoded
+# 32 silently truncated cells holding 79 (D2) and 115 (D1) elements, which was
+# the dominant cause of the 2.93% loss. Set a value only to reproduce a
+# historical result.
+MAX_ELEMS_PER_CELL=0
+
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
 # BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
 # where wall is one of {x_min, x_max, y_min, y_max, z_min, z_max} and mode
@@ -415,6 +444,9 @@ ARGS=(
 [ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
 [ -n "$OCTREE_CACHE" ]    && ARGS+=( --octree-cache "$OCTREE_CACHE" )
 [ -n "$MESH_LOAD_WORKERS" ] && ARGS+=( --mesh-load-workers "$MESH_LOAD_WORKERS" )
+[ "$NO_OCTREE_CACHE" = "1" ] && ARGS+=( --no-octree-cache )
+[ "$EXACT_TET_BOX" = "1" ]   && ARGS+=( --exact-tet-box )
+[ "${MAX_ELEMS_PER_CELL:-0}" != "0" ] && ARGS+=( --max-elems-per-cell "$MAX_ELEMS_PER_CELL" )
 [ -n "$MESH_PATTERN" ]    && ARGS+=( --mesh-pattern "$MESH_PATTERN" )
 [ -n "$FEMUSS_PATTERN" ]  && ARGS+=( --femuss-pattern "$FEMUSS_PATTERN" )
 [ -n "$MESH_DIR" ]        && ARGS+=( --mesh-dir "$MESH_DIR" )
