@@ -102,47 +102,57 @@ that some particle touches a 79-element cell is ≈1, so the dynamic loop runs
 
 ## 3. Measured and viable
 
-### 3.1 Exact tet-vs-box registration — 1.41×, VIABLE
+### 3.1 Exact tet-vs-box registration — IMPLEMENTED, measured 1.13× end to end
 
 AABB overlap is a loose proxy: a tet occupies at most ~1/6 of its AABB, so many
 cells it is registered in are never actually intersected.
 
-Measured on the **production CSR** by re-testing every element of 4,000 sampled
-over-full cells against that cell's real box with an exact 13-axis
-separating-axis test:
+Implemented behind `config.OCTREE_EXACT_TET_BOX` / `--exact-tet-box`, default
+off. Three arms on D2, 80,000 particles seeded in the measured loss band, 600
+steps, identical seeds, `FAILED_SUBSTAGE=last_valid_vel`:
 
-| | before | after |
-|---|---:|---:|
-| occupancy of over-full cells | mean 47.7, median 48, max 72 | **mean 34.0, median 35, max 56** |
-| registrations kept | — | **71.3%** |
-| cells dropping to ≤32 | — | 1,153 / 4,000 (28.8%) |
-| **static bound** | **79** | **56** |
-| tests per query | 17,064 | **12,096 → 1.41×** |
-| CSR entries | 85.1M | ~61M |
+| arm | bound | final lost | tracking | p·step/s |
+|---|---:|---:|---:|---:|
+| bound 32 (original) | 32 | 2,341 (2.93%) | 263.3 s | 182,268 |
+| bound 79 (shipped fix) | 79 | **157 (0.20%)** | 456.0 s | 105,252 |
+| **+ exact tet-box** | **65** | **157 (0.20%)** | **402.4 s** | **119,276** |
 
-**Why the win is bounded.** The 1,974 elements registered in >1000 cells each
-(11.2% of the whole CSR) are *genuinely large* non-Kuhn tetrahedra: median AABB
-diagonal **1.35 mm** against a mesh median of **0.0869 mm** (15.6×), sitting
-where the cell pitch is 0.0469 mm. Such a tet spans ~29 cells per axis, so its
-AABB covers ~24,000 cells and even an exact test leaves ~4,000. Their
-registered level (14) matches their own inferred level, so nothing is
-misplaced — the structure is correct, just expensive. No registration strategy
-removes them; only the AABB slack is recoverable.
+**Coverage preserved exactly — the same 157 particles**, on the population
+known to fail. That settles the coverage question end to end rather than by
+sampling.
 
-**The mesh is healthy**, so this is not a mesh-quality problem: AABB diagonal
-p50 0.0869 mm, p99 0.3465 mm, max 5.196 mm (60× median), and **zero** elements
-with volume < 1e-16.
+What the pruning did:
 
-**Effort: ~4–8 hours.** The SAT test must be vectorised (numpy over all
-candidate cells of an element at once) before it is practical: ~1.1 G axis
-projections across ~85 M candidate registrations would otherwise dominate a
-build already taking 16–25 minutes. The test is already written and validated
-against seven hand-checked cases, including the AABB corner a tet misses
-(correctly separate) and a box touching one vertex (correctly intersecting) —
-correctness dominates here, since dropping a cell a tet does touch would
-reintroduce the symptom just fixed.
+```
+kept   45,066,953 of 79,733,863 candidate cells (56.5%)
+pruned 34,666,910 the tetrahedron does not reach
+occupancy 14.22 -> 9.2 elem/cell  (-35%)
+bound     79 -> 65
+cells     5,982,836 -> 5,483,006
+```
 
----
+**Gain 1.13×, not the 1.41× projected.** The estimate came from sampling 4,000
+over-full cells and predicted the bound would fall to 56; the real build gives
+65. Sampled bound predictions deserve lower confidence.
+
+**It costs build time: 1086.8 s → 1603.2 s (+516 s, +47%).** On a 600-step run
+the *total* is therefore 22% slower. Break-even is **5,776 steps**.
+
+| scenario | verdict |
+|---|---|
+| short diagnostic run, no cache | **net loss** — leave it off |
+| production 8000 steps, no cache | saves 715 s tracking for 516 s build → **+199 s, marginal** |
+| **any run with `--octree-cache`** | build paid once per case → **1.13× is pure gain** |
+
+**Recommendation: enable it together with `--octree-cache`, not alone.** The
+build-stage work in [`15_build_stage_roadmap.md`](15_build_stage_roadmap.md)
+also pays the +516 s down: removing the `np.clip` and Morton hotspots saves
+~748 s, more than the pruning adds.
+
+The SAT test is vectorised over all candidate cells of an element
+(`tet_boxes_intersect`), without which the build would take ~7.6 h instead of
+~16 min.
+
 
 ## 4. Early exit under `vmap` — MEASURED, AND IT DOES NOT WORK
 
@@ -273,7 +283,7 @@ query**, loss 0.20%.
 
 | # | candidate | gain | memory | effort | risk | status |
 |---|---|---|---|---|---|---|
-| 3.1 | **exact tet-vs-box registration** | **1.41× measured** | **−28% CSR** | ~4–8 h | low | **VIABLE — best option** |
+| 3.1 | **exact tet-vs-box registration** | **1.13× measured end to end** | −8% cells, −35% occupancy | **done** | low | **IMPLEMENTED** — use with `--octree-cache` |
 | 4.1 | reorder the level loop | **no gain** | none | — | — | **REJECTED** — masked iterations cost full price |
 | 4.1b | two-tier kernel: fast path + full fallback | **0.22× (5× slower)** | none | — | — | **REJECTED** — the compaction sync costs ~1.8 ms against a ~0.47 ms search |
 | 4.2 | sort particles into homogeneous batches | ~1.35× on a synthetic proxy | none | ~1 day | medium | **NEEDS REAL MEASUREMENT** |
@@ -283,7 +293,7 @@ query**, loss 0.20%.
 | 4.0b | element-loop **early exit** | **cannot work, ~4× slower** | none | — | — | **REJECTED** — same, plus loses unrolling |
 | 4.3 | shrink 3×3×3 → 1×1×1 | no timing gain | none | — | — | **REJECTED** — paper tests: >40% location failures |
 
-**Realistic ceiling: 1.41×** (3.1), and that is now the whole of it. Every
+**Realistic ceiling: 1.13×** (3.1, measured end to end), and that is now the whole of it. Every
 level-loop avenue is closed by measurement: per-lane early exit, `lax.cond`,
 `while_loop`, reordering, a masked two-loop branch, and a two-launch scheme
 with compaction. Three earlier drafts of this table overstated the ceiling

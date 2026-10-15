@@ -67,7 +67,50 @@ tetrahedron is CPython function-call and attribute-lookup overhead; the actual
 float work is a few dozen operations. That is the single most important fact
 for choosing an option below.
 
+## 1b. The profile that overturned this ranking
+
+An earlier draft of this document ranked the options from the per-element
+timings above, and guessed that the ~726 s unaccounted for was mostly the
+non-Kuhn neighbour search and the dict accumulation. **cProfile on a
+1.2 M-element subset says otherwise:**
+
+| | cumulative | share | calls |
+|---|---:|---:|---:|
+| **`np.clip`** | **80.7 s** | **52.5%** | **22,278,630** |
+| `find_axis_aligned_edges_single` | 19.9 s | 13.0% | 1,200,000 |
+| `encode_morton_3d_single` | 17.7 s | 11.5% | 7,080,930 |
+| `np.finfo.__init__` | 10.6 s | 6.9% | 44,557,260 |
+| `find_parent_cube` | 5.0 s | 3.3% | 1,035,840 |
+| `find_kuhn_face_neighbor` | 4.3 s | **2.8%** | 164,160 |
+
+**`np.clip` alone was over half the build**, and the neighbour search — the
+option this document had flagged as the likely prize — was 2.8%.
+
+`np.clip` on a *Python scalar* routes through `_wrapfunc` → `_wrapit` →
+`ndarray.clip` → `_clip` and constructs `np.finfo` objects on the way: 3.03 µs
+per call for what is a pair of comparisons. The build makes three such calls
+per registered cell, ~200 M on D2.
+
+**Both are now fixed** (commit "np.clip on scalars was 52.5% of the octree
+build"):
+
+| change | measured | projected saving |
+|---|---|---:|
+| `_clamp_idx` instead of scalar `np.clip` | **55× faster**, identical over 200,006 values including every boundary | **~596 s** |
+| magic-number bit-spreading for Morton | **3.3× faster**, bit-exact over 50,006 triples | **~152 s** |
+| | | **~748 s of ~1090 s** |
+
+Verified as pure speedups: a strict identity test rebuilds the same mesh with
+the old and new implementations monkeypatched in, with and without
+`exact_tet_box`, and every field of the octree is byte-identical.
+
+**Lesson for the remaining options: profile before optimising.** Two of this
+document's estimates were wrong in the same direction — the cost was in
+incidental interpreter overhead, not in the algorithm that looked expensive.
+
 ## 2. Options
+
+
 
 ### 2.1 Vectorise the Kuhn classification — HIGH VALUE, MODERATE EFFORT
 
@@ -231,14 +274,34 @@ reads 166 PVTU files from Lustre. Two cheap levers:
 |---|---|---|---|---|---|
 | 2.6 | **cache the built octree on disk** | **~1090 s → ~10 s on repeat runs** | high | **~3 h** | none |
 | 2.1 | vectorise Kuhn classification | ~150 s (14%) | high | ~4 h | low |
-| 2.3 | array-based CSR accumulation | large: part of the ~726 s (75%) non-Kuhn + accumulation | high | ~1 day | low |
+| 2.0 | **`np.clip` → `_clamp_idx`** | **~596 s, 55× on the call** | certain | **done** | none |
+| 2.2 | **vectorise Morton encoding** | **~152 s, 3.3× on the call** | certain | **done** | none |
+| 2.3 | array-based CSR accumulation | unknown — profile first; dict ops were NOT the top cost | moderate | ~1 day | low |
 | 2.3b | vectorise face-adjacency build | **97.9 s measured** | high | ~4 h | low |
-| 2.2 | vectorise Morton encoding | ~37 s (3%), **48× measured** on the call | certain | ~1 h | none |
 | 2.7 | parallel snapshot loading | bounded by I/O; matters most on LUMI | moderate | ~4 h | none |
 | 2.4 | multiprocessing the classification | ≤ (cores−1)× of 158 s | moderate | ~1 day | low |
 | 2.5 | **GPU build** | potentially 10×+ | moderate | **1–2 weeks** | **high** |
 
-### Recommended order
+### Recommended order (updated after the profile and the cache)
+
+**Done:** the octree disk cache (2.6), `np.clip` → `_clamp_idx` (2.0, ~596 s)
+and vectorised Morton (2.2, ~152 s). Together those remove ~748 s of the
+~1090 s build *and* make it cacheable, so a repeat run pays ~10 s.
+
+**Next, in order:**
+
+1. **Re-profile.** The two fixes removed 69% of the build, so the ranking
+   below is stale — `find_axis_aligned_edges_single` (19.9 s, 13.0% in the old
+   profile) is probably now the top cost, and the non-Kuhn path's true share is
+   unknown. One cProfile run decides what is worth doing, and this document's
+   history shows guessing has a poor record here.
+2. **Vectorise the Kuhn classification** (2.1) if the re-profile confirms it.
+3. **Array-based CSR** (2.3) only if the dict operations actually surface. They
+   were *not* the top cost, contrary to the original estimate.
+4. **Do not pursue the GPU build** (2.5) unless the first-run build is still
+   binding after the above. The transfer it would avoid is 3.2 s.
+
+### Original order, before the profile
 
 1. **2.6, octree disk cache.** Best ratio in the table by a wide margin: three
    hours of work removes the entire 1090 s stage from every repeat run, with
