@@ -3,20 +3,25 @@
 # LUMI project ID and log directory before submitting. Override at submission
 # time with:
 #   sbatch --account=project_XXXXXXXXX --output=... --error=... run_lumi.sh
-#SBATCH --job-name=jt_D1
+#SBATCH --job-name=jaxtrace
 #SBATCH --partition=small-g
 #SBATCH --account=project_465002752
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=16   # proportional share for 1 of 8 GPUs on a
+                             # 128-core small-g node; LUMI-G bills
+                             # GPU-hours so this costs no extra alloc
 #SBATCH --mem=120G
-#SBATCH --time=36:00:00   # D2 took 13h22 at 288k particles; D1 has deeper cells
+#SBATCH --time=36:00:00   # D2 measured 13h22 at 288k particles; the
+                          # derived per-cell bound made stepping ~1.7x
+                          # slower than the 6h-era runs, and D1 has the
+                          # deeper cells (occupancy 115 vs D2 79).
 #SBATCH --signal=B:SIGTERM@120   # SIGTERM batch shell 120s before time limit
                                   # so run_tracking.py can flush its VTKHDF
                                   # archive before SLURM SIGKILLs everything
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%j.out
+#SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%j.err
 # =============================================================================
 # USER CONFIGURATION — edit these groups to control the production run.
 # Runs run_tracking.py (the general-purpose driver), not the FEMUSS benchmark.
@@ -32,29 +37,20 @@ SIF=/appl/local/containers/sif-images/lumi-jax-rocm-6.2.4-python-3.12-jax-commun
 
 # Per-user paths derived from $PROJECT and $USER. Override in a local config
 # (scripts/run_lumi.local.sh, untracked) if your layout differs.
-JAXTRACE="/projappl/${PROJECT}/hashemia/JAXTrace"   # dev repo, NOT the stable one:
-                                                   # the release repo DROPS non-Kuhn
-                                                   # octree elements, which is 50-59%
-                                                   # of a D-family mesh.
+JAXTRACE="/projappl/${PROJECT}/hashemia/JAXTrace"   # dev repo. The STABLE
+    # repo drops non-Kuhn octree elements, which is 50-59% of a D-family
+    # mesh, and lacks the derived per-cell search bound. Do not use it here.
 PKGS="/projappl/${PROJECT}/hashemia/required-packages"
 
 # INPUT: path to the case folder. Accepts either '<case>.gid' or
 # '<case>.gid/post'. Ignored when AUTO_DETECT_CASE=1.
-# This script lives inside D1.gid and runs that case. The mesh file stem
-# differs across the D family (D1=A1_, D2=A2_, D3=B4_, D4=C2_), so it is fixed
-# here rather than guessed from the folder name.
-_CASE_NAME=D1
-_MESH_STEM=A1
-_VEL_END=199
-# INPUT is the folder holding this script. Under SLURM, $0 points at a spool
-# copy, so use SLURM_SUBMIT_DIR -- which is where `sbatch` was invoked, i.e.
-# the case folder when you do `cd D1.gid && sbatch run_jaxtrace.sh`.
-if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
-  INPUT="$SLURM_SUBMIT_DIR"
-else
-  INPUT="$(cd "$(dirname "$0")" && pwd -P)"
-fi
-echo "[case] $_CASE_NAME (mesh stem ${_MESH_STEM}_) from '$INPUT'"
+OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"   # reuse the built
+    # octree across runs of the same case: the build is ~90% of the build
+    # stage and these meshes are static, so a repeat run loads it in
+    # seconds. The key hashes the mesh arrays, every build option and the
+    # build modules' source, so any change rebuilds automatically.
+
+INPUT="/scratch/project_465002752/lorenzgl/Cases/PinShapes/D-ConcavityTilt/D1.gid"
 
 # AUTO_DETECT_CASE: when 1, INPUT is replaced by the directory containing
 # this script at runtime. Use this when a copy of the script is placed
@@ -70,7 +66,7 @@ FEMUSS_SUBDIR=""              # FEMUSS particles subfolder name; "" if none
 # Auto-derivation overrides — leave blank to let the script infer them
 # from the case folder name (e.g. cylA.gid -> stem 'cylA').
 CASE_STEM=""                  # case-stem string used in file patterns
-MESH_PATTERN="${_MESH_STEM}_{timestep}.pvtu"     # per-case stem from the table above
+MESH_PATTERN="A1_{timestep}.pvtu"               # e.g. "cylA_{timestep}.pvtu"
 FEMUSS_PATTERN=""             # e.g. "cylA_pt_{timestep}.pvtu"
 
 # Absolute path overrides. When set, the corresponding *_SUBDIR is ignored
@@ -79,28 +75,20 @@ MESH_DIR=""                   # directory containing the mesh PVTU files
 FEMUSS_DIR=""                 # directory containing the FEMUSS particle files
 
 # Optional tag appended to the auto-generated output folder name.
-RUN_TAG="D1_new"
+RUN_TAG=""
 
 # OUTPUT_TARGET selects where JAXTrace results are written.
 #   scratch -- /flash/${PROJECT}/${USER}/run_<JOB_ID> during the run, then
 #              moved to /scratch/${PROJECT}/${USER}/outputs/<run_folder>.
 #   case    -- <case>.gid/<OUTPUT_CASE_SUBFOLDER>, written in place.
-# Reuse the built octree across runs of the same case. The octree build is
-# ~90% of the build stage and the mesh is static for every PinShapes case, so
-# a repeat run loads it in seconds. The key hashes the mesh arrays, every
-# build option and the build modules' source, so any change rebuilds.
-OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"   # key hashes mesh+options+build source, so all four cases share it safely
-
-#   case-flash -- write to /flash during the run (fast IO, not the shared
-#                 Lustre case tree), then MOVE into <case>.gid/<subfolder>
-#                 once tracking has finished.
-OUTPUT_TARGET=case-flash
-OUTPUT_CASE_SUBFOLDER=post_pt_new   # used when OUTPUT_TARGET=case or case-flash
+OUTPUT_TARGET=case-flash   # active IO on /flash, moved into the case
+                           # folder after tracking (see the resolver below)
+OUTPUT_CASE_SUBFOLDER=post_pt_new   # keeps the original post_pt intact
 
 # ── [2] Precision & velocity field ───────────────────────────────────────────
 PRECISION=float32             # float32 | float64
 VEL_START=34                 # velocity timestep cyclic start
-VEL_END="${_VEL_END:-199}"   # velocity timestep cyclic end (per-case table)
+VEL_END=199                   # velocity timestep cyclic end
 VELOCITY_FIELD=Displacement
 LEVELSET_FIELD=LEVEL
 
@@ -148,34 +136,38 @@ L0_SKIP_BAND=0.0              # 0 = mixed-sign only; e.g. 0.5e-3 for ±0.5mm
 ENHANCED_SEARCH_BAND=0.0      # 0 = off; e.g. 1e-3 for ±1mm node-L1+5x5x5
 REGISTRATION=""               # "" = default | vertex_multi | parent_cube
 
-# ── [6b] Build-stage options (octree cache + registration) ──────────────────
-# OCTREE_CACHE is set in section [1]. These control how it behaves and how the
-# octree is built. All were added after the D-family investigation.
-
-# NO_OCTREE_CACHE: 1 = ignore AND do not write the cache, forcing a full
-# rebuild even when OCTREE_CACHE points at a populated directory. The cache
-# key already hashes the mesh arrays, every build option and the build
-# modules' source, so a genuine change invalidates itself; use this only to
-# force a rebuild deliberately (e.g. to time the build).
+# ── [6b] Build-stage options (added after the D-family investigation) ────────
+# NO_OCTREE_CACHE: 1 = ignore AND do not write the octree cache, forcing a full
+# rebuild. The cache key hashes the mesh arrays, every build option and the
+# build modules' source, so a genuine change invalidates itself; use this only
+# to force a rebuild deliberately (e.g. to time the build).
 NO_OCTREE_CACHE=0
 
-# EXACT_TET_BOX: 1 = at build time, register each tetrahedron only in the
-# cells it GENUINELY reaches, instead of every cell its bounding box touches.
-# A tet fills at most ~1/6 of its AABB, so this lowers max cell occupancy and
-# with it the static search bound. Measured on D2: occupancy 79 -> 56, 1.41x
-# fewer tests per query, coverage preserved (registration remains complete).
-# Costs an exact tet/box test per candidate cell during the build and nothing
-# at run time. Left OFF here so this family matches the D2 reference run that
-# produced the 1.06% loss figure; turn it on for new work.
+# EXACT_TET_BOX: 1 = register each tetrahedron only in the cells it genuinely
+# reaches rather than every cell its AABB touches. A tet fills at most ~1/6 of
+# its AABB, so this lowers max cell occupancy and with it the static search
+# bound. Measured on D2: occupancy 79 -> 56, 1.41x fewer tests per query,
+# coverage preserved. Build-time cost only, nothing at run time. Left OFF so
+# results stay comparable with the reference runs in post_pt_new; enable it
+# for new work.
 EXACT_TET_BOX=0
 
 # MAX_ELEMS_PER_CELL: static per-cell loop bound for the parent_cube L2
-# search. 0 = derive it from the built octree's max occupancy, which is the
-# correct behaviour on any mesh and what fixed the D family: the old hardcoded
-# 32 silently truncated cells holding 79 (D2) and 115 (D1) elements, which was
-# the dominant cause of the 2.93% loss. Set a value only to reproduce a
-# historical result.
+# search. 0 = derive it from the built octree's max occupancy, which is what
+# fixed this family: the old hardcoded 32 silently truncated cells holding 79
+# (D2) and 115 (D1) elements, the dominant cause of the 2.93% loss. Set a
+# value only to reproduce a historical result.
 MAX_ELEMS_PER_CELL=0
+
+# MESH_LOAD_WORKERS: threads for parsing velocity snapshots. Loading is
+# CPU-bound VTK XML parsing (245x the raw read cost) and VTK releases the GIL,
+# so threads scale: measured 2.25x across snapshots on D2, byte-identical to
+# serial at every width. Note os.cpu_count() inside the container reports the
+# NODE's 128 cores, not this job's cgroup share, so the library's auto would
+# pick 8 regardless -- set it explicitly. small-g is 128 CPU / 8 GPU, so 16
+# CPU is the proportional share for one GPU and LUMI-G bills GPU-hours,
+# meaning 8 threads inside a 16-CPU request costs no extra allocation.
+MESH_LOAD_WORKERS=8
 
 # ── [7] Boundary / level-set behaviour ───────────────────────────────────────
 # BOUNDARY_WALLS: per-wall behaviour as comma-separated 'wall=mode' pairs,
@@ -227,18 +219,6 @@ TRACK_MAX_TEMPERATURE=1       # 1 = export running maximum of TEMPERATURE_FIELD
 EXPORT_TEMPERATURE=1          # 1 = export the instantaneous TEMPERATURE_FIELD at
                               # the current particle position as 'Temperature'
 TEMPERATURE_FIELD=Temperature # PVTU field name to read for the above flags
-
-# MESH_LOAD_WORKERS: threads for parsing velocity snapshots. Snapshot loading
-# is CPU-bound XML parsing (VTK releases the GIL), measured 2.25x at 8 threads
-# on the real multi-snapshot loader. Note that os.cpu_count() inside the
-# container reports the NODE's 128 cores, not this job's cgroup share, so the
-# library's "auto" would pick 8 whatever we request -- set it explicitly.
-#
-# Billing: small-g nodes are 128 CPU / 8 GPU, so 16 CPU is the proportional
-# share for --gpus-per-node=1, and LUMI-G bills GPU-hours. Using 8 threads
-# inside a 16-CPU request therefore costs no extra allocation. Loading is only
-# ~14% of wall clock, so there is nothing to gain from going wider.
-MESH_LOAD_WORKERS=8
 
 # ── [10] Performance / monitoring ────────────────────────────────────────────
 # BENCHMARK_MODE: 1 forces XLA_PREALLOC=1 and disables the background
@@ -319,13 +299,14 @@ case "${OUTPUT_TARGET:-scratch}" in
     ;;
   case-flash)
     # Active IO on /flash, final results in the case folder. FLASH_OUT stays
-    # distinct from SCRATCH_OUT, so the existing move step below relocates it.
+    # distinct from SCRATCH_OUT so the move step below relocates it.
     SUB="${OUTPUT_CASE_SUBFOLDER:-post_pt}"
     SCRATCH_OUT="${_CASE_DIR}/${SUB}"
     SCRATCH_BASE="$(dirname "$SCRATCH_OUT")"
     echo "[output] OUTPUT_TARGET=case-flash:"
     echo "           during run : $FLASH_OUT"
     echo "           final      : $SCRATCH_OUT"
+    echo "[output] OUTPUT_TARGET=case: writing to '$SCRATCH_OUT'"
     ;;
   scratch)
     SCRATCH_BASE="/scratch/${PROJECT}/${USER}/outputs"
@@ -445,16 +426,16 @@ ARGS=(
 
 # Optional / conditional flags
 [ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
-[ -n "$OCTREE_CACHE" ]    && ARGS+=( --octree-cache "$OCTREE_CACHE" )
-[ -n "$MESH_LOAD_WORKERS" ] && ARGS+=( --mesh-load-workers "$MESH_LOAD_WORKERS" )
-[ "$NO_OCTREE_CACHE" = "1" ] && ARGS+=( --no-octree-cache )
-[ "$EXACT_TET_BOX" = "1" ]   && ARGS+=( --exact-tet-box )
-[ "${MAX_ELEMS_PER_CELL:-0}" != "0" ] && ARGS+=( --max-elems-per-cell "$MAX_ELEMS_PER_CELL" )
 [ -n "$MESH_PATTERN" ]    && ARGS+=( --mesh-pattern "$MESH_PATTERN" )
 [ -n "$FEMUSS_PATTERN" ]  && ARGS+=( --femuss-pattern "$FEMUSS_PATTERN" )
 [ -n "$MESH_DIR" ]        && ARGS+=( --mesh-dir "$MESH_DIR" )
 [ -n "$FEMUSS_DIR" ]      && ARGS+=( --femuss-dir "$FEMUSS_DIR" )
 [ -n "$RUN_TAG" ]         && ARGS+=( --run-tag "$RUN_TAG" )
+[ -n "$OCTREE_CACHE" ]      && ARGS+=( --octree-cache "$OCTREE_CACHE" )
+[ -n "$MESH_LOAD_WORKERS" ] && ARGS+=( --mesh-load-workers "$MESH_LOAD_WORKERS" )
+[ "$NO_OCTREE_CACHE" = "1" ] && ARGS+=( --no-octree-cache )
+[ "$EXACT_TET_BOX" = "1" ]   && ARGS+=( --exact-tet-box )
+[ "${MAX_ELEMS_PER_CELL:-0}" != "0" ] && ARGS+=( --max-elems-per-cell "$MAX_ELEMS_PER_CELL" )
 [ -n "$BOUNDARY_WALLS" ]  && ARGS+=( --boundary-walls "$BOUNDARY_WALLS" )
 [ -n "$REGISTRATION" ]    && ARGS+=( --registration "$REGISTRATION" )
 [ "$NO_EXPORT" = "1" ]    && ARGS+=( --no-export )
@@ -558,15 +539,13 @@ echo "Simulation exited with code $SIM_EXIT at $(date)"
 # When OUTPUT_TARGET=case, FLASH_OUT == SCRATCH_OUT and there's nothing to
 # move; python wrote directly into the case folder.
 if [ "$FLASH_OUT" != "$SCRATCH_OUT" ]; then
-  _n_src=$(find "$FLASH_OUT" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
-  echo "Moving $_n_src entries from '$FLASH_OUT' to '$SCRATCH_OUT'..."
+  echo "Moving results from flash to scratch..."
   mkdir -p "$SCRATCH_OUT"
-  # No 2>/dev/null here: a failed move must be visible in the log, because on
-  # case-flash the destination is the shared case tree and /flash is purged.
+  # No 2>/dev/null: a failed move must be visible, because the destination is
+  # the shared case tree and /flash is purged.
   if mv "$FLASH_OUT"/* "$SCRATCH_OUT"/; then
     rmdir "$FLASH_OUT" 2>/dev/null
-    _n_dst=$(find "$SCRATCH_OUT" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
-    echo "Move OK: $_n_dst entries now in '$SCRATCH_OUT'"
+    echo "Move OK: $(find "$SCRATCH_OUT" -mindepth 1 -maxdepth 1 | wc -l) entries in '$SCRATCH_OUT'"
   else
     echo "ERROR: move failed; results are STILL ON FLASH at '$FLASH_OUT'" >&2
     echo "ERROR: retrieve them before /flash is purged." >&2
@@ -576,12 +555,8 @@ fi
 # Copy SLURM stdout/stderr and monitor log into the results folder. The
 # default --output / --error paths in the #SBATCH header are relative to
 # SLURM_SUBMIT_DIR (the directory `sbatch` was invoked from).
-# The #SBATCH header writes to an absolute logs dir with %x_%A_%a, so build
-# the same name here rather than guessing a path relative to the submit dir.
-_LOGDIR="${SLURM_SUBMIT_DIR:-.}"
-_LOGSTEM="${SLURM_JOB_NAME}_${SLURM_JOB_ID}"
-SLURM_OUT="${_LOGDIR}/${_LOGSTEM}.out"
-SLURM_ERR="${_LOGDIR}/${_LOGSTEM}.err"
+SLURM_OUT="${SLURM_SUBMIT_DIR:-.}/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out"
+SLURM_ERR="${SLURM_SUBMIT_DIR:-.}/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err"
 mkdir -p "$SCRATCH_OUT/logs"
 [ -f "$SLURM_OUT" ]   && cp "$SLURM_OUT" "$SCRATCH_OUT/logs/"
 [ -f "$SLURM_ERR" ]   && cp "$SLURM_ERR" "$SCRATCH_OUT/logs/"
