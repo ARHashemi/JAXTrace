@@ -144,7 +144,16 @@ the *total* is therefore 22% slower. Break-even is **5,776 steps**.
 | production 8000 steps, no cache | saves 715 s tracking for 516 s build → **+199 s, marginal** |
 | **any run with `--octree-cache`** | build paid once per case → **1.13× is pure gain** |
 
-**Recommendation: enable it together with `--octree-cache`, not alone.** The
+**UPDATE after the build optimisations: enable it unconditionally.** The
+build-stage work absorbed the +516 s penalty entirely — build 1086.8 s
+(shipped) vs 1070.1 s (all opts + tet-box) — so the break-even of 5,776 steps
+no longer applies. Measured totals on the 600-step run: 2018.6 s shipped vs
+**1904.7 s** with everything, a 1.06× overall and 1.13× on tracking, with
+**157 lost in both**. `--octree-cache` then removes the build entirely on
+repeat runs.
+
+**Original recommendation (superseded): enable it together with
+`--octree-cache`, not alone.** The
 build-stage work in [`15_build_stage_roadmap.md`](15_build_stage_roadmap.md)
 also pays the +516 s down: removing the `np.clip` and Morton hotspots saves
 ~748 s, more than the pruning adds.

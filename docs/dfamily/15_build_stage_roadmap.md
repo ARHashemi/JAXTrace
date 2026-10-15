@@ -67,6 +67,58 @@ tetrahedron is CPython function-call and attribute-lookup overhead; the actual
 float work is a few dozen operations. That is the single most important fact
 for choosing an option below.
 
+## 1a. Result after the optimisations (measured end to end)
+
+Four arms on D2, 80,000 particles seeded in the measured loss band, 600 steps,
+identical seeds and `FAILED_SUBSTAGE=last_valid_vel`:
+
+| arm | bound | lost | build | tracking | **total** |
+|---|---:|---:|---:|---:|---:|
+| bound 32 (original, broken) | 32 | 2,341 (2.93%) | 1094.4 s | 263.3 s | 1840.2 s |
+| bound 79 (shipped fix) | 79 | **157 (0.20%)** | 1086.8 s | 456.0 s | 2018.6 s |
+| + exact tet-box, unoptimised build | 65 | **157 (0.20%)** | 1603.2 s | 402.4 s | 2461.4 s |
+| **+ all build opts (final)** | **65** | **157 (0.20%)** | **1070.1 s** | **403.5 s** | **1904.7 s** |
+
+**Correctness: 157 lost in every correct arm**, identical step by step (19 and
+52 at steps 100 and 200 in both tet-box arms), with the octree byte-identical —
+same 45,066,953 kept of 79,733,863 candidates, 5,483,006 cells, 9.2 elem/cell,
+bound 65. Four independent rewrites of the per-element path, each 2–9× faster,
+producing bit-for-bit the original structure on 10.8 M real elements.
+
+**Against the shipped fix**, which is the baseline that matters:
+
+| | shipped | final | |
+|---|---:|---:|---|
+| build | 1086.8 s | **1070.1 s** | 1.02× |
+| tracking | 456.0 s | **403.5 s** | **1.13×** |
+| **total** | 2018.6 s | **1904.7 s** | **1.06×** |
+
+The build optimisations **fully absorbed exact tet-box's +516 s penalty** and
+came out 16.7 s ahead, so enabling it now costs nothing at build time. Its
+economics changed completely: break-even was 5,776 steps, and it is now free
+from step one.
+
+**An honest accounting of the shortfall.** The build saving is 533 s
+(1603.2 → 1070.1), against ~748 s projected. The projections were per-call
+savings scaled by call count, but all four hotspots sit inside the *same* loop
+iterations, so removing one reduces the cost attributable to the next — the
+naive sum (~909 s) overstates reality. Summing independent micro-benchmarks is
+the wrong model for nested hotspots.
+
+**Where the time is now:**
+
+| stage | time | share |
+|---|---:|---:|
+| 3_build_upload | 1070.1 s | 56.2% |
+| 7_tracking | 403.5 s | 21.2% |
+| 1_load_mesh | 262.0 s | 13.8% |
+| 2_precompute | 132.1 s | 6.9% |
+
+The build is still the largest stage — but it is now **cacheable** (449 MiB
+stored in 0.03 s, verified in this run), so on any repeat run it drops to
+~0 and **snapshot loading plus precompute become the dominant pre-tracking
+cost**. That is why §2.7 is the next item rather than more build work.
+
 ## 1b. The profile that overturned this ranking
 
 An earlier draft of this document ranked the options from the per-element
