@@ -236,45 +236,80 @@ real box:
 | tests per query | 17,064 | **12,096 → 1.41×** |
 | CSR entries | 85.1 M | ~61 M |
 
-## 2.5 The coverage worry — is it real?
+## 2.5 The coverage worry — resolved
 
-**The worry is exactly right to raise**, and it was the untested gap. Dropping
-a cell the tetrahedron *does* touch would make particles in that cell
-unfindable: the same failure mode as the cell-overflow bug.
+**The worry was right to raise**, and it was the untested gap. Dropping a cell
+the tetrahedron *does* touch would make particles there unfindable: the same
+failure mode as the cell-overflow bug.
 
-What had been tested before this document:
+### What is measured
 
-| check | result |
-|---|---|
-| SAT correctness on 7 hand-built cases | PASS, including the AABB corner a tet misses (correctly separate) and a box touching only one vertex (correctly intersecting) |
-| elements left with **zero** cells on real D2 | **0** |
-| occupancy reduction | mean 47.7 → 34.0 |
+`scripts/dfamily/test_tetbox_coverage.py` takes positions with a known host,
+emulates the real 3×3×3 search under **both** registrations, and counts
+positions found **before but not after**. Barycentres are the safest possible
+probe (deep inside an element, far from any boundary), so two adversarial
+modes were added: `face` pushes the point 99.9% of the way toward a vertex,
+and `cellface` snaps it onto a cell-boundary plane and forces it through
+float32 — the case where rounding could put it in a different cell than the
+build used.
 
-But "no element is orphaned" is **weaker** than "no particle becomes
-unfindable", and only the second matters. A test for the stronger property is
-`scripts/dfamily/test_tetbox_coverage.py`: for thousands of positions with a
-known host, it emulates the real search under both registrations and counts
-positions found **before but not after**. That number must be zero.
+| mode | n | current | pruned | **lost** |
+|---|---:|---:|---:|---:|
+| barycentre (interior) | 5,000 | 100.00% | 100.00% | **0** |
+| face (near element face) | 4,000 | 100.00% | 100.00% | **0** |
+| cellface (on a cell plane, float32) | 4,000 | 99.92% | 99.92% | **0** |
+| **total** | **13,000** | | | **0** |
 
-### Why it should be zero in principle
+The `cellface` row is the informative one: 3 of 4,000 fail under **both**
+registrations, so those are pre-existing search limits (a point nudged onto a
+cell plane can land outside its own element), **not** losses caused by
+pruning. Pruning tracked the baseline exactly, including on its failures.
 
-If a particle sits at position *p* inside element *e*, and the search finds it
-in cell *C*, then *p* is inside both *e* and *C* — so *e* genuinely intersects
-*C*. That is precisely the kind of pair the exact test **keeps**. Pruning only
-removes pairs where the tetrahedron never reaches the cell at all, and such a
-cell could never have held a particle hosted by that element.
+### Why it holds in general, not just on the sample
 
-The argument is sound, but two things could still break it in practice, which
-is why it is measured rather than asserted:
+Sampling 13,000 of 10.8M elements bounds the loss rate but does not prove
+zero. There is a stronger argument:
 
-1. the lattice the search divides by must match the lattice the cell was
-   registered on — the earlier D-family defect was exactly this mismatch;
-2. float32 rounding at a cell face could place *p* in a neighbouring cell from
-   the one used at build time.
+For the search to locate a particle at *p* via element *e*, *e* must be listed
+in some cell the 3×3×3 scan visits. Now, *p* lies in **some** cell `C₀` at
+*e*'s own level, and `base = floor(p / pitch)` **is** `C₀`'s grid index — so
+`C₀` is the *centre* cell of the neighbourhood, always scanned. And since *p*
+is inside both *e* and `C₀`, the tetrahedron genuinely intersects `C₀`, which
+is exactly the kind of pair the exact test **keeps**.
 
-**Verdict: viable, with the decisive coverage test now written and running.**
-If it reports any non-zero loss, the change must not be adopted. If it reports
-zero, the 1.41× is bankable at low risk.
+So whatever an offset cell would have found, the centre cell finds too. The
+26 offset cells are a bonus that pruning may thin, but they are never *needed*
+for a particle whose host is *e*.
+
+Two scope conditions make this sound rather than hand-waving:
+
+1. **It applies only to the AABB path**, which is exhaustive over intersected
+   cells — pruning keeps precisely the intersected ones. **Kuhn elements are
+   not pruned at all** (parent-cube registers one cell by centroid and is
+   untouched by this change), so their coverage is trivially unchanged. This
+   matters because for Kuhn elements the offset cells *are* load-bearing — the
+   centroid cell need not be *p*'s cell — which is why the 3×3×3 exists.
+2. **It requires the search lattice to match the registration lattice**,
+   i.e. `floor(p / pitch)` at search time equals the index `C₀` was registered
+   with. That is exactly the property the earlier lattice fix established, and
+   it is guarded by `scripts/dfamily/test_lattice_invariant.py`.
+
+### Verdict: coverage is intact; adopt it
+
+The argument covers the general case and 13,000 adversarial probes agree with
+it, including on the three positions the current search already cannot locate.
+
+**Residual gaps, for honesty rather than as blockers:**
+
+- all probes are on **D2**; D1 (max occupancy 115, different non-Kuhn mix) is
+  unmeasured, so run the coverage test there before a D1 production run;
+- the probes are **static**, whereas production advects particles over 8000
+  steps with a cached element hint feeding L0/L1. The argument above is
+  hint-independent (it concerns what is *listed* in a cell, not how the search
+  arrives), but an end-to-end loss comparison on a short run is the natural
+  final check;
+- the probe computes the SAT test in float64 and only the position in float32;
+  the production builder would run it in whatever precision the build uses.
 
 ---
 
@@ -283,7 +318,7 @@ zero, the 1.41× is bankable at low risk.
 | | status | gain | what is left to prove |
 |---|---|---|---|
 | **reduce the static trip count** (two-tier kernel) | **REJECTED** | — | nothing: measured 0.22× because the compaction sync costs ~4× the whole search |
-| **exact tet-vs-box registration** | viable | **1.41× measured**, −28% memory | the search-coverage test must report zero losses |
+| **exact tet-vs-box registration** | **VIABLE — adopt** | **1.41× measured**, −28% memory | nothing blocking: 0 losses over 13,000 adversarial probes, plus a general argument; re-run the coverage test on D1 before a D1 production run |
 
 Neither is a correctness fix; both are optimisations on top of the shipped
 cell-overflow fix, which already recovers 93% of the lost particles. If the
