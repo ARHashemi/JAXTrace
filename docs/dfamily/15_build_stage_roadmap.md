@@ -252,19 +252,67 @@ those inputs; load instead of rebuild when the hash matches.
 - **Caveat:** it does not speed up the *first* run of a case, which is what
   LUMI production pays. It transforms iteration speed, not production cost.
 
-### 2.7 Reduce `1_load_mesh` (307 s) — MODERATE VALUE, LOW EFFORT
+### 2.7 Parallelise snapshot loading — MEASURED 13.2×, HIGH VALUE, LOW EFFORT
 
-Snapshot loading is 16.7% here and ~2 h of the LUMI production run, where it
-reads 166 PVTU files from Lustre. Two cheap levers:
+Snapshot loading is 307.6 s (16.7%) on the workstation with 27 snapshots, and
+~2 h of a ~10 h LUMI production run with 166. After the build optimisations it
+is the **second largest stage**.
 
-- **load velocity snapshots in parallel** — they are independent files, and
-  the work is I/O-bound, so a thread pool would overlap the reads;
-- **cache the deduplicated mesh** alongside 2.6; `deduplicate_nodes` measured
-  11.9 s and the geometry is identical across timesteps.
+**First question: is it I/O-bound or CPU-bound?** That decides whether
+parallelism helps at all. Measured on one D2 snapshot (128 piece files,
+1130 MiB), page-cached so disk is removed from the picture:
 
-- **Effort: ~4 h** for the thread pool. **Gain: bounded by filesystem
-  bandwidth**, so it needs measuring on LUMI rather than the workstation,
-  where the mesh is on local NVMe.
+| | time | |
+|---|---:|---|
+| raw byte read | **0.03 s** | 39,309 MiB/s |
+| full VTK parse of the same files | **7.05 s** | 2,802,871 points |
+| **ratio** | **245×** | |
+
+**It is overwhelmingly CPU-bound XML parsing, not disk.** So more I/O threads
+alone would do nothing; what is needed is parallel *parsing*.
+
+**Second question: do threads work, or is the GIL in the way?** VTK releases
+the GIL during parsing, so they do — measured on the same snapshot:
+
+| | time | speedup | results identical |
+|---|---:|---:|---|
+| serial | 6.99 s | — | — |
+| threads = 4 | 1.79 s | **3.91×** | yes |
+| threads = 8 | 0.92 s | **7.62×** | yes |
+| threads = 16 | 0.53 s | **13.16×** | yes |
+
+Near-linear to 16 threads on a 32-core machine, with byte-identical results. A
+plain `ThreadPoolExecutor` suffices: no pickling, no process pool, and none of
+the forkserver trouble a `ProcessPoolExecutor` hit on Python 3.14 here.
+
+**Projected:**
+
+| | now | threads=8 | threads=16 |
+|---|---:|---:|---:|
+| workstation, 27 snapshots | 307.6 s | ~40 s | ~23 s |
+| LUMI, 166 snapshots (7 cores/task) | ~7200 s | ~1075 s | n/a |
+
+**Effort: ~4 h.** The loop over timesteps and pieces is already explicit in
+`load_velocity_sequence_from_pvtu`; the arrays are written into preallocated
+output by index, so there is no ordering hazard.
+
+**Caveat that must be measured on LUMI, not assumed.** The 245× ratio was
+measured *page-cached* on local NVMe. On cold Lustre the I/O share is much
+larger, so the speedup will be lower than 13×. Concurrent reads still help on
+a parallel filesystem, but the realistic LUMI figure is unknown until measured
+there — and LUMI allocates 7 cores per task, capping it near 6–7× even if
+parsing stays dominant.
+
+**Is the GPU relevant here? No.** The work is XML text parsing into arrays —
+branch-heavy, variable-length, string-to-float conversion. That is the
+opposite of what a GPU does well, and the arrays are needed on the host anyway
+for deduplication and the octree build. The 3.2 s host→device upload shows
+transfer was never the problem.
+
+**Does the octree cache make this redundant? No** — and this is the reason it
+is worth doing. The cache removes the *octree build*, not the snapshot load:
+velocity fields change every timestep and must be read every run. So after the
+cache lands, loading becomes the dominant remaining pre-tracking cost.
 
 ---
 
@@ -278,7 +326,7 @@ reads 166 PVTU files from Lustre. Two cheap levers:
 | 2.2 | **vectorise Morton encoding** | **~152 s, 3.3× on the call** | certain | **done** | none |
 | 2.3 | array-based CSR accumulation | unknown — profile first; dict ops were NOT the top cost | moderate | ~1 day | low |
 | 2.3b | vectorise face-adjacency build | **97.9 s measured** | high | ~4 h | low |
-| 2.7 | parallel snapshot loading | bounded by I/O; matters most on LUMI | moderate | ~4 h | none |
+| 2.7 | **parallel snapshot loading (threads)** | **13.2× measured** on the workstation; CPU-bound parse, not I/O | high | ~4 h | low |
 | 2.4 | multiprocessing the classification | ≤ (cores−1)× of 158 s | moderate | ~1 day | low |
 | 2.5 | **GPU build** | potentially 10×+ | moderate | **1–2 weeks** | **high** |
 
