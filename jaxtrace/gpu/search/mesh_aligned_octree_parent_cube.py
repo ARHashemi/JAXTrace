@@ -152,6 +152,68 @@ def tet_box_intersect(vertices: np.ndarray,
     return True
 
 
+def tet_boxes_intersect(vertices: np.ndarray,
+                        box_mins: np.ndarray,
+                        box_size: np.ndarray) -> np.ndarray:
+    """Vectorised tet/box overlap: one tetrahedron against MANY boxes.
+
+    Same 13-axis separating-axis test as tet_box_intersect, but evaluated for
+    every candidate box of an element at once. Scalar form measured at
+    ~228 us per call, which over D2's ~120 M candidate cells would be ~7.6
+    hours of build time; this form amortises the axis construction (which
+    depends only on the tetrahedron) over all boxes and runs the projections
+    as array operations.
+
+    Args:
+        vertices: (4, 3) the tetrahedron.
+        box_mins: (m, 3) lower corner of each candidate cell.
+        box_size: (3,) the cell size, identical for every box at a level.
+
+    Returns:
+        (m,) bool - True where the tetrahedron overlaps that box.
+    """
+    m = box_mins.shape[0]
+    if m == 0:
+        return np.zeros(0, dtype=bool)
+
+    # 13 candidate separating axes, built once per element.
+    eye = np.eye(3)
+    tet_edges = np.array([vertices[1] - vertices[0],
+                          vertices[2] - vertices[0],
+                          vertices[3] - vertices[0]])
+    faces = ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3))
+    axes = [eye[0], eye[1], eye[2]]
+    for a, b, c in faces:
+        axes.append(np.cross(vertices[b] - vertices[a],
+                             vertices[c] - vertices[a]))
+    for i in range(3):
+        for te in tet_edges:
+            axes.append(np.cross(eye[i], te))
+    A = np.asarray(axes, dtype=np.float64)              # (13+, 3)
+
+    # Drop degenerate axes: they separate nothing and would divide by ~0.
+    nrm = np.linalg.norm(A, axis=1)
+    keep = nrm > 1e-300
+    A = A[keep] / nrm[keep][:, None]                    # (k, 3)
+
+    # Tet projection interval on each axis.
+    pv = vertices @ A.T                                 # (4, k)
+    t_lo = pv.min(axis=0)                               # (k,)
+    t_hi = pv.max(axis=0)
+
+    # Box projection: centre varies per box, radius does not.
+    half = 0.5 * box_size
+    r = np.abs(A) @ half                                # (k,)
+    centres = box_mins + half                           # (m, 3)
+    pc = centres @ A.T                                  # (m, k)
+
+    # Separated on an axis iff the intervals miss each other. Overlap
+    # requires NO axis to separate, so AND the per-axis overlap tests.
+    overlap = (t_lo[None, :] <= pc + r[None, :]) & \
+              (t_hi[None, :] >= pc - r[None, :])        # (m, k)
+    return overlap.all(axis=1)
+
+
 def extract_octree_cells_parent_cube(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
@@ -452,34 +514,42 @@ def extract_octree_cells_parent_cube(
                 i_hi = int(np.floor(hi[0] / reg_size[0]))
                 j_hi = int(np.floor(hi[1] / reg_size[1]))
                 k_hi = int(np.floor(hi[2] / reg_size[2]))
+                # Candidate cells of this element's AABB, as one array so the
+                # exact test can be applied to all of them in a single call.
                 _rs = np.asarray(reg_size, dtype=np.float64)
-                for i in range(i_lo, i_hi + 1):
-                    for j in range(j_lo, j_hi + 1):
-                        for k in range(k_lo, k_hi + 1):
-                            if exact_tet_box:
-                                # Keep only cells the TET reaches, not every
-                                # cell its bounding box touches. The particle's
-                                # own cell is always intersected by its host,
-                                # so coverage is preserved.
-                                _bmin = np.array([i, j, k],
-                                                 dtype=np.float64) * _rs
-                                if not tet_box_intersect(vertices, _bmin,
-                                                         _bmin + _rs):
-                                    n_non_kuhn_cells_pruned += 1
-                                    continue
-                            i_m = int(np.clip(i + offset, 0, max_coord - 1))
-                            j_m = int(np.clip(j + offset, 0, max_coord - 1))
-                            k_m = int(np.clip(k + offset, 0, max_coord - 1))
-                            morton = encode_morton_3d_single(
-                                i_m, j_m, k_m, max_depth=21,
-                            )
-                            cell_key = (morton, nbr_level)
-                            cell_to_elements_dict[cell_key].append(elem_id)
-                            if cell_key not in cell_metadata:
-                                cell_metadata[cell_key] = (
-                                    np.asarray(reg_size).copy(), (i, j, k),
-                                )
-                            n_non_kuhn_cell_entries += 1
+                _ii, _jj, _kk = np.meshgrid(
+                    np.arange(i_lo, i_hi + 1),
+                    np.arange(j_lo, j_hi + 1),
+                    np.arange(k_lo, k_hi + 1), indexing="ij")
+                _cand = np.stack([_ii.ravel(), _jj.ravel(), _kk.ravel()],
+                                 axis=1)
+
+                if exact_tet_box:
+                    # Keep only the cells the TET reaches, not every cell its
+                    # bounding box touches. Vectorised over all candidates of
+                    # this element: the scalar form is ~228 us per cell, which
+                    # over D2's ~120M candidates would be ~7.6 h of build time
+                    # against ~16 min this way.
+                    _hit = tet_boxes_intersect(
+                        vertices, _cand.astype(np.float64) * _rs, _rs)
+                    n_non_kuhn_cells_pruned += int((~_hit).sum())
+                    _cand = _cand[_hit]
+
+                for _c in _cand:
+                    i, j, k = int(_c[0]), int(_c[1]), int(_c[2])
+                    i_m = int(np.clip(i + offset, 0, max_coord - 1))
+                    j_m = int(np.clip(j + offset, 0, max_coord - 1))
+                    k_m = int(np.clip(k + offset, 0, max_coord - 1))
+                    morton = encode_morton_3d_single(
+                        i_m, j_m, k_m, max_depth=21,
+                    )
+                    cell_key = (morton, nbr_level)
+                    cell_to_elements_dict[cell_key].append(elem_id)
+                    if cell_key not in cell_metadata:
+                        cell_metadata[cell_key] = (
+                            np.asarray(reg_size).copy(), (i, j, k),
+                        )
+                    n_non_kuhn_cell_entries += 1
             else:
                 # Centroid-only registration (legacy). Same lattice rule
                 # as every other path: index on the level's lookup pitch.
