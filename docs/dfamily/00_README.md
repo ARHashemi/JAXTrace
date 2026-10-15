@@ -147,6 +147,7 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
 | [`13_throughput_roadmap.md`](13_throughput_roadmap.md) | **throughput roadmap**: every candidate, measured gain, effort, risk |
 | [`14_concepts_explained.md`](14_concepts_explained.md) | **plain-language explanation** of the static trip count and exact tet-box registration, with what is and is not proven |
 | [`15_build_stage_roadmap.md`](15_build_stage_roadmap.md) | **build-stage roadmap**: why the build is 59.5% of a short run, and the options ranked by gain/effort/risk |
+| [`16_pin_wall_parked_particles.md`](16_pin_wall_parked_particles.md) | **the vertical lines of stopped particles on the pin wall**: not a search failure -- the level-set mask zeroes their velocity and they can never leave |
 
 ---
 
@@ -159,4 +160,9 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
    larger untouched prize** (potential ~4×, unmeasured — walks all 8 levels
    every query while 98.2% of cells are at one level).
 2. **`RK4_CARRY_LAST_VALID_VEL`** is off by default; enable it for production.
-3. **LUMI** has not been updated with any of this.
+3. **LUMI** is up to date as of 2026-10-15 (threaded loading `0611e5f`, both
+   test suites passing on the dev repo).
+4. **Pin-wall parked particles** are understood and documented in
+   [`16_pin_wall_parked_particles.md`](16_pin_wall_parked_particles.md). They are
+   FEMUSS-faithful, not a defect; the recommendation is to keep the default and
+   filter them in post-processing.
