@@ -26,6 +26,7 @@ This matches the actual mesh generation process:
 3. Each tet has 3 axis-aligned edges with length = 2^(-L)
 """
 
+import math
 import numpy as np
 from typing import Tuple, NamedTuple
 from collections import defaultdict
@@ -125,11 +126,17 @@ def find_axis_aligned_edges_single(
                     cell_size[axis] = abs(edge[axis])
                     break
 
-    # Infer level from average cell size
-    if np.all(cell_size > 0):
-        avg_size = np.mean(cell_size)
-        level = max(0, int(round(-np.log2(avg_size))))
-        level = np.clip(level, 0, 20)
+    # Infer level from average cell size.
+    # Plain Python arithmetic on the three components: np.mean and np.clip on
+    # objects this small are dominated by dispatch overhead, and this runs once
+    # per element (10.8 M times on D2). Measured at 2.07 M np.mean calls and
+    # 1.04 M np.clip calls in a 1.2 M-element profile.
+    if cell_size[0] > 0 and cell_size[1] > 0 and cell_size[2] > 0:
+        avg_size = (float(cell_size[0]) + float(cell_size[1])
+                    + float(cell_size[2])) / 3.0
+        level = max(0, int(round(-math.log2(avg_size))))
+        if level > 20:
+            level = 20
     else:
         level = 14  # Default
 
@@ -254,9 +261,13 @@ def extract_octree_cells_single(
         offset = (1 << 19)  # 2^19
         max_coord = (1 << 20)  # 2^20
 
-        i_morton = np.clip(i + offset, 0, max_coord - 1)
-        j_morton = np.clip(j + offset, 0, max_coord - 1)
-        k_morton = np.clip(k + offset, 0, max_coord - 1)
+        # Plain comparisons: np.clip on a Python scalar costs ~3 us through
+        # _wrapfunc/_wrapit/_clip, against ~0.06 us here. See _clamp_idx in
+        # mesh_aligned_octree_parent_cube.py for the measurement.
+        _hi = max_coord - 1
+        i_morton = 0 if i + offset < 0 else min(i + offset, _hi)
+        j_morton = 0 if j + offset < 0 else min(j + offset, _hi)
+        k_morton = 0 if k + offset < 0 else min(k + offset, _hi)
 
         morton = encode_morton_3d_single(i_morton, j_morton, k_morton, max_depth=21)
 
