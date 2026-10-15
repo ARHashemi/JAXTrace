@@ -29,29 +29,43 @@ pre-tracking work. On a full 8000-step production run tracking grows ~13× while
 the build stays constant, so the balance flips — but every diagnostic run pays
 the build in full, and this investigation ran dozens of them.
 
-### Inside the build
+### Inside the build — measured directly
 
-The hot loop is `for elem_id in range(n_elements)` in
-`extract_octree_cells_parent_cube`, calling per element:
+Each sub-step timed on the real D2 mesh:
+
+| sub-step | time | share of build |
+|---|---:|---:|
+| **`extract_octree_cells_parent_cube`** | **963.5 s** | **90.5%** |
+| `build_element_neighbors_array` | 97.9 s | 9.2% |
+| `upload_mesh_aligned_octree_to_gpu` | **3.2 s** | **0.3%** |
+| subtotal | 1064.6 s | |
+
+(plus `load 1 snapshot` 9.3 s and `deduplicate_nodes` 11.9 s; the run's 307.6 s
+load stage is 27 snapshots, so loading scales with snapshot count as expected.)
+
+**The host→device transfer is 3.2 s — 0.3%.** Data movement is a non-issue;
+every option below is about the CPU-side construction.
+
+### Inside the octree extract
+
+The hot loop is `for elem_id in range(n_elements)` calling per element:
 
 | call | measured per element | × 10.8 M elements |
 |---|---:|---:|
 | `find_axis_aligned_edges_single` | **14.65 µs** | **158.4 s** |
 | `find_parent_cube` | 4.47 µs | 48.3 s |
 | `encode_morton_3d_single` | 2.79 µs | 30.2 s |
-| **subtotal (Kuhn path)** | | **236.9 s — 22% of the stage** |
+| **subtotal** | | **236.9 s — 24.6% of the extract** |
 
-The remaining ~78% is the non-Kuhn path (50.6% of D2's elements): a face- and
-node-neighbour search over node adjacency per element, plus the AABB
-enumeration, plus `dict`/`list` insertion for every (cell, element) pair —
-85 M of them.
+So **~726 s (75%) of the extract is the non-Kuhn path and the accumulation**:
+the face/node neighbour search over node adjacency for 50.6% of D2's elements,
+the AABB cell enumeration, and `dict`/`list` insertion for every (cell,
+element) pair — 85 M of them.
 
 **Nothing here is arithmetic-bound.** 14.65 µs to examine six edges of a
 tetrahedron is CPython function-call and attribute-lookup overhead; the actual
 float work is a few dozen operations. That is the single most important fact
 for choosing an option below.
-
----
 
 ## 2. Options
 
@@ -98,11 +112,25 @@ keys. This is the same inversion already used in several diagnostic scripts in
 `scripts/dfamily/`, where it handled 85 M entries in seconds.
 
 - **Plausibility: high**, and it has a precedent in this codebase.
-- **Expected gain: large but unquantified** — probably the bulk of the
-  unaccounted 78%. Needs a profile of the dict operations in isolation to
-  size properly.
+- **Expected gain: large.** The non-Kuhn path plus accumulation is ~726 s of
+  the 963.5 s extract (75%), and the 85 M dict/list operations are the part of
+  it that array building removes outright. Sizing the split between the
+  neighbour search and the accumulation needs one more profile.
 - **Effort: ~1 day**, because the metadata bookkeeping (`cell_metadata`,
   first-writer-wins semantics) has to be preserved exactly.
+
+### 2.3b Vectorise `build_element_neighbors_array` — MEASURED 97.9 s, LOW RISK
+
+Not separately measured before this profile: the face-adjacency build is
+**97.9 s (9.2%)** of the build, and is another pure-Python pass over elements.
+Face adjacency is a classic sort-based operation — emit all 4 faces per element
+as sorted vertex triples, `lexsort`, and pair up adjacent duplicates — which is
+fully vectorisable in numpy.
+
+- **Plausibility: high**; standard technique, output verifiable against the
+  current function exactly.
+- **Expected gain: most of 97.9 s.**
+- **Effort: ~4 h.**
 
 ### 2.4 Multiprocessing over element blocks — MODERATE VALUE, MODERATE EFFORT
 
@@ -203,7 +231,8 @@ reads 166 PVTU files from Lustre. Two cheap levers:
 |---|---|---|---|---|---|
 | 2.6 | **cache the built octree on disk** | **~1090 s → ~10 s on repeat runs** | high | **~3 h** | none |
 | 2.1 | vectorise Kuhn classification | ~150 s (14%) | high | ~4 h | low |
-| 2.3 | array-based CSR accumulation | likely the bulk of the unaccounted 78% | high | ~1 day | low |
+| 2.3 | array-based CSR accumulation | large: part of the ~726 s (75%) non-Kuhn + accumulation | high | ~1 day | low |
+| 2.3b | vectorise face-adjacency build | **97.9 s measured** | high | ~4 h | low |
 | 2.2 | vectorise Morton encoding | ~37 s (3%), **48× measured** on the call | certain | ~1 h | none |
 | 2.7 | parallel snapshot loading | bounded by I/O; matters most on LUMI | moderate | ~4 h | none |
 | 2.4 | multiprocessing the classification | ≤ (cores−1)× of 158 s | moderate | ~1 day | low |
@@ -215,9 +244,9 @@ reads 166 PVTU files from Lustre. Two cheap levers:
    hours of work removes the entire 1090 s stage from every repeat run, with
    no algorithmic risk. It would have saved many hours across this
    investigation alone.
-2. **2.2 + 2.1 together.** Both are pure vectorisation of measured hotspots,
-   verifiable against the scalar versions element-by-element, ~5 h combined for
-   ~190 s.
+2. **2.2 + 2.1 + 2.3b together.** All three are pure vectorisation of measured
+   hotspots, verifiable against the scalar versions element-by-element: ~9 h
+   combined for ~290 s (Morton 37 s + classification 150 s + adjacency 98 s).
 3. **2.3** if the build still matters after 1–2. Profile the dict operations
    first to size it.
 4. **2.5 only if the first-run build becomes the binding constraint** on LUMI
@@ -244,8 +273,8 @@ work in numpy is ~0.1 µs on the CPU, before any GPU is involved.
 So the productive order is:
 
 1. **don't do the work at all** (2.6, cache it);
-2. **do it in array form on the CPU** (2.1, 2.2, 2.3) — this alone could take
-   the build from ~1090 s to low hundreds;
+2. **do it in array form on the CPU** (2.1, 2.2, 2.3, 2.3b) — this alone could
+   take the build from ~1090 s to low hundreds;
 3. **only then consider the GPU** (2.5), where the remaining win is real but
    the effort is 1–2 weeks and the risk is concentrated in exactly the code
    whose defects this investigation has spent weeks establishing.
@@ -260,6 +289,7 @@ reimplementing it twice.
 | what | how |
 |---|---|
 | stage times | any run prints them; see `/tmp/boundab_*.log` on the workstation |
+| build sub-step times | `scripts/dfamily/profile_build_stage.py` on a case `.gid` |
 | per-element function costs | the inline benchmark in §1, 20,000 synthetic level-14 tets |
 | Morton vectorisation 48× | the magic-number bit-spread benchmark in §2.2, results verified bit-exact against the scalar version |
 
