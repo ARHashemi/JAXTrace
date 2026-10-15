@@ -115,7 +115,8 @@ from jaxtrace.gpu.forest import build_element_neighbors_array
 from jaxtrace.gpu.search.morton_octree_builder import build_global_morton_octree
 from jaxtrace.gpu.search.morton_global_search import upload_global_morton_to_gpu
 from jaxtrace.gpu.search.mesh_aligned_octree_vertex_multi import extract_octree_cells_vertex_multi
-from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import extract_octree_cells_parent_cube
+from jaxtrace.gpu.search.mesh_aligned_octree_parent_cube import (
+    extract_octree_cells_parent_cube, OctreeCellDataParentCube)
 from jaxtrace.gpu.search.mesh_aligned_octree_aabb import extract_octree_cells_aabb
 from jaxtrace.gpu.search.mesh_aligned_octree_gpu import upload_mesh_aligned_octree_to_gpu
 from jaxtrace.gpu.tracking.initial_assignment_cascading import (
@@ -373,6 +374,21 @@ def parse_args():
                              "n_particles x 4 x 3 per logged step.")
     parser.add_argument("--trace-substages-every", type=int, default=50,
                         help="With --trace-substages, log every Nth step.")
+    parser.add_argument("--octree-cache", type=str, default="",
+                        metavar="DIR",
+                        help="Cache the built octree under DIR and reuse it "
+                             "when the mesh, the build options and the build "
+                             "source code are all unchanged. The octree build "
+                             "is ~90%% of the build stage (963s of 1064s on "
+                             "D2) and the mesh is static for every PinShapes "
+                             "case, so repeat runs load it in seconds. The "
+                             "key hashes the node/connectivity ARRAYS plus "
+                             "every build option plus the build modules' "
+                             "source, so any change rebuilds automatically.")
+    parser.add_argument("--no-octree-cache", action="store_true",
+                        help="Ignore and do not write the octree cache even "
+                             "if --octree-cache is set. Use to force a "
+                             "rebuild.")
     parser.add_argument("--exact-tet-box", action="store_true",
                         help="Build-time: prune AABB-overlap registrations to "
                              "the cells each tetrahedron genuinely reaches, "
@@ -2010,11 +2026,30 @@ def main():
               f"(max {mesh_octree_cells.max_elements_per_cell}), "
               f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
     elif config.OCTREE_REGISTRATION_METHOD == "parent_cube":
-        mesh_octree_cells = extract_octree_cells_parent_cube(
-            node_positions, connectivity, tolerance=1e-6, verbose=True,
+        _oc_opts = dict(
+            tolerance=1e-6,
             orphan_fallback=not args.no_orphan_fallback,
             hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
+            exact_tet_box=bool(config.OCTREE_EXACT_TET_BOX),
+            method="parent_cube",
         )
+        _oc_use = bool(args.octree_cache) and not args.no_octree_cache
+        _oc_key = None
+        mesh_octree_cells = None
+        if _oc_use:
+            from jaxtrace.gpu.search import octree_cache as _occ
+            _oc_key = _occ.compute_cache_key(node_positions, connectivity,
+                                             **_oc_opts)
+            mesh_octree_cells = _occ.load(args.octree_cache, _oc_key,
+                                          OctreeCellDataParentCube)
+        if mesh_octree_cells is None:
+            mesh_octree_cells = extract_octree_cells_parent_cube(
+                node_positions, connectivity, tolerance=1e-6, verbose=True,
+                orphan_fallback=not args.no_orphan_fallback,
+                hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
+            )
+            if _oc_use:
+                _occ.store(args.octree_cache, _oc_key, mesh_octree_cells)
         print(f"  Parent-cube octree: {mesh_octree_cells.n_cells:,} cells, "
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell "
               f"(max {mesh_octree_cells.max_elements_per_cell})")
