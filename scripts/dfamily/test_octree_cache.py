@@ -44,6 +44,46 @@ def check(label, cond):
         FAIL.append(label)
 
 
+def test_blind_to_structure():
+    """The payload must be agnostic: the module stores whatever fields the
+    structure has, without knowing what any of them mean. Verified on a
+    NamedTuple it has never seen, with invented names and four scalar types.
+    """
+    from typing import NamedTuple
+
+    class MadeUpStructure(NamedTuple):
+        some_codes: np.ndarray
+        weird_offsets: np.ndarray
+        a_label: str
+        a_count: int
+        a_ratio: float
+        a_flag: bool
+
+    obj = MadeUpStructure(
+        some_codes=np.arange(1000, dtype=np.uint64),
+        weird_offsets=np.arange(17, dtype=np.int32),
+        a_label="not-an-octree", a_count=42, a_ratio=3.25, a_flag=True)
+
+    print("\nblind to structure")
+    with tempfile.TemporaryDirectory() as d:
+        key = oc.compute_cache_key(np.zeros((3, 3)),
+                                   np.zeros((2, 4), dtype=np.int32),
+                                   whatever="x")
+        check("stores an unknown structure", oc.store(d, key, obj,
+                                                      verbose=False))
+        got = oc.load(d, key, MadeUpStructure, verbose=False)
+        check("loads it back", got is not None)
+        if got is not None:
+            check("all fields equal", all(
+                np.array_equal(np.asarray(getattr(obj, f)),
+                               np.asarray(getattr(got, f)))
+                for f in MadeUpStructure._fields))
+            check("str type preserved", isinstance(got.a_label, str))
+            check("int type preserved", isinstance(got.a_count, int))
+            check("float type preserved", isinstance(got.a_ratio, float))
+            check("bool type preserved", isinstance(got.a_flag, bool))
+
+
 def main():
     s = 1.0 / 16.0
     npos, conn = build_mesh([(s, s, s * 1.1972), (s, s, s)], z0=4 * s)
@@ -107,6 +147,8 @@ def main():
               key != oc.compute_cache_key(npos, conn2, **opts))
         check("build-source hash is 16 hex chars",
               len(oc._hash_build_sources()) == 16)
+
+    test_blind_to_structure()
 
     print()
     if FAIL:

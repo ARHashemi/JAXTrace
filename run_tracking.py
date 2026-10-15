@@ -2013,7 +2013,38 @@ def main():
         print("  [search] exact tet-box registration ENABLED "
               "(pruning AABB cells the tetrahedron does not reach)")
 
-    if config.OCTREE_REGISTRATION_METHOD == "aabb":
+    # ---- Octree build, with an optional disk cache ----------------------
+    # The cache wraps EVERY registration method, not just parent_cube: the
+    # method is part of the key, so each gets its own entry and none silently
+    # rebuilds. Hoisted above the branch so adding a method cannot bypass it.
+    _oc_opts = dict(
+        tolerance=1e-6,
+        orphan_fallback=not args.no_orphan_fallback,
+        hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
+        exact_tet_box=bool(config.OCTREE_EXACT_TET_BOX),
+        method=str(config.OCTREE_REGISTRATION_METHOD),
+    )
+    _oc_use = bool(args.octree_cache) and not args.no_octree_cache
+    _oc_key = None
+    mesh_octree_cells = None
+    if _oc_use:
+        from jaxtrace.gpu.search import octree_cache as _occ
+        _oc_cls = {
+            "parent_cube": OctreeCellDataParentCube,
+        }.get(str(config.OCTREE_REGISTRATION_METHOD))
+        if _oc_cls is None:
+            print(f"  [octree-cache] no serialiser for registration method "
+                  f"'{config.OCTREE_REGISTRATION_METHOD}'; building normally")
+            _oc_use = False
+        else:
+            _oc_key = _occ.compute_cache_key(node_positions, connectivity,
+                                             **_oc_opts)
+            mesh_octree_cells = _occ.load(args.octree_cache, _oc_key, _oc_cls)
+
+    _oc_hit = mesh_octree_cells is not None
+    if _oc_hit:
+        pass                      # loaded from cache; skip the build entirely
+    elif config.OCTREE_REGISTRATION_METHOD == "aabb":
         # AABB-overlap registration: each element is registered in EVERY cell
         # its bounding box overlaps, so a query cell can never miss an element
         # whose volume reaches into it. This is the coverage-complete option
@@ -2026,30 +2057,11 @@ def main():
               f"(max {mesh_octree_cells.max_elements_per_cell}), "
               f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
     elif config.OCTREE_REGISTRATION_METHOD == "parent_cube":
-        _oc_opts = dict(
-            tolerance=1e-6,
+        mesh_octree_cells = extract_octree_cells_parent_cube(
+            node_positions, connectivity, tolerance=1e-6, verbose=True,
             orphan_fallback=not args.no_orphan_fallback,
             hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
-            exact_tet_box=bool(config.OCTREE_EXACT_TET_BOX),
-            method="parent_cube",
         )
-        _oc_use = bool(args.octree_cache) and not args.no_octree_cache
-        _oc_key = None
-        mesh_octree_cells = None
-        if _oc_use:
-            from jaxtrace.gpu.search import octree_cache as _occ
-            _oc_key = _occ.compute_cache_key(node_positions, connectivity,
-                                             **_oc_opts)
-            mesh_octree_cells = _occ.load(args.octree_cache, _oc_key,
-                                          OctreeCellDataParentCube)
-        if mesh_octree_cells is None:
-            mesh_octree_cells = extract_octree_cells_parent_cube(
-                node_positions, connectivity, tolerance=1e-6, verbose=True,
-                orphan_fallback=not args.no_orphan_fallback,
-                hybrid_non_kuhn=not args.no_hybrid_non_kuhn,
-            )
-            if _oc_use:
-                _occ.store(args.octree_cache, _oc_key, mesh_octree_cells)
         print(f"  Parent-cube octree: {mesh_octree_cells.n_cells:,} cells, "
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell "
               f"(max {mesh_octree_cells.max_elements_per_cell})")
@@ -2060,6 +2072,11 @@ def main():
         print(f"  Vertex-multi octree: {mesh_octree_cells.n_cells:,} cells, "
               f"{mesh_octree_cells.elements_per_cell_mean:.1f} elem/cell, "
               f"{mesh_octree_cells.cells_per_element_mean:.1f} cells/elem")
+
+    # Store whatever was just BUILT, whichever branch produced it. Skipped on
+    # a cache hit, which would otherwise rewrite the same entry every run.
+    if _oc_use and _oc_key is not None and not _oc_hit:
+        _occ.store(args.octree_cache, _oc_key, mesh_octree_cells)
 
     # ---- Static inner-loop bound for the parent_cube L2 search ----
     # search_mesh_aligned_octree_static_where runs fori_loop(0, bound), a

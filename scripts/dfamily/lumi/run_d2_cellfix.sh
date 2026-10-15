@@ -68,6 +68,12 @@ RUN_TAG="D2_cellfix"
 #   scratch -- /flash/${PROJECT}/${USER}/run_<JOB_ID> during the run, then
 #              moved to /scratch/${PROJECT}/${USER}/outputs/<run_folder>.
 #   case    -- <case>.gid/<OUTPUT_CASE_SUBFOLDER>, written in place.
+# Reuse the built octree across runs of the same case. The octree build is
+# ~90% of the build stage and the mesh is static for every PinShapes case, so
+# a repeat run loads it in seconds. The key hashes the mesh arrays, every
+# build option and the build modules' source, so any change rebuilds.
+OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"
+
 OUTPUT_TARGET=scratch   # keep old results; never write into the shared case folder
 OUTPUT_CASE_SUBFOLDER=post_pt   # used when OUTPUT_TARGET=case
 
@@ -368,6 +374,7 @@ ARGS=(
 
 # Optional / conditional flags
 [ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
+[ -n "$OCTREE_CACHE" ]    && ARGS+=( --octree-cache "$OCTREE_CACHE" )
 [ -n "$MESH_PATTERN" ]    && ARGS+=( --mesh-pattern "$MESH_PATTERN" )
 [ -n "$FEMUSS_PATTERN" ]  && ARGS+=( --femuss-pattern "$FEMUSS_PATTERN" )
 [ -n "$MESH_DIR" ]        && ARGS+=( --mesh-dir "$MESH_DIR" )

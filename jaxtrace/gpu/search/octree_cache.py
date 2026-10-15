@@ -69,13 +69,17 @@ _BUILD_SOURCES = (
     "mesh_aligned_octree_aabb.py",
 )
 
-# Scalar (non-array) fields of the octree NamedTuple, stored alongside the
-# arrays and restored as Python scalars.
-_SCALARS = (
-    "n_cells", "n_elements", "cells_per_element_mean",
-    "elements_per_cell_mean", "max_elements_per_cell",
-    "n_non_kuhn", "n_non_kuhn_registered",
-)
+# Fields are classified by VALUE, not by name: anything that is not an array
+# is stored in meta.json with its Python type recorded, everything else as a
+# .npy. Nothing here knows what a field MEANS, so adding, renaming or removing
+# a field in the octree structure needs no change in this module -- and any
+# such edit changes the build-source hash anyway, so old entries are
+# invalidated rather than misread.
+_SCALAR_TYPES = {"int": int, "float": float, "bool": bool, "str": str}
+
+
+def _is_array(v) -> bool:
+    return isinstance(v, np.ndarray) or hasattr(v, "__array_interface__")
 
 
 def _hash_build_sources() -> str:
@@ -140,9 +144,11 @@ def load(cache_dir: str | os.PathLike, key: str, cls,
             raise ValueError("meta key does not match directory")
         fields = {}
         total = 0
+        scalars = meta.get("scalars", {})
         for name in cls._fields:
-            if name in _SCALARS:
-                fields[name] = meta["scalars"][name]
+            if name in scalars:
+                raw, tname = scalars[name]
+                fields[name] = _SCALAR_TYPES.get(tname, lambda x: x)(raw)
             else:
                 f = d / f"{name}.npy"
                 fields[name] = np.load(f, mmap_mode="r" if mmap else None,
@@ -183,12 +189,14 @@ def store(cache_dir: str | os.PathLike, key: str, octree,
         scalars = {}
         for name in octree._fields:
             v = getattr(octree, name)
-            if name in _SCALARS:
-                scalars[name] = (float(v) if "mean" in name else int(v))
-            else:
+            if _is_array(v):
                 f = tmp / f"{name}.npy"
                 np.save(f, np.ascontiguousarray(v), allow_pickle=False)
                 total += f.stat().st_size
+            else:
+                # Record the value AND its type, so it is restored as the same
+                # Python type without this module knowing the field's meaning.
+                scalars[name] = [v, type(v).__name__]
         # Last, so a partially written entry has no meta.json and is ignored.
         (tmp / "meta.json").write_text(json.dumps(
             {"key": key, "scalars": scalars,
