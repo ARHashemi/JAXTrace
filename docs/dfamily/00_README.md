@@ -166,3 +166,35 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
    [`16_pin_wall_parked_particles.md`](16_pin_wall_parked_particles.md). They are
    FEMUSS-faithful, not a defect; the recommendation is to keep the default and
    filter them in post-processing.
+
+---
+
+## Open: LUMI job logs stay silent during snapshot loading
+
+Observed on array 22874004 (D1/D3/D4), 2026-10-15: the SLURM .out froze at
+3,451 bytes -- the last line the *bash* wrapper printed -- for the whole first
+hour, while the job was demonstrably working (+446 MiB read per 25 s, 49 GB
+cumulative, 69 threads, 6 GB RSS, measured via /proc on the compute node).
+
+This is NOT the earlier false-hang: that one was a genuine buffering issue
+fixed by `python -u`. Here `python -u` and `PYTHONUNBUFFERED=1` are both set
+and confirmed in the process command line, yet `load_velocity_sequence_from_pvtu`
+has a `verbose` progress print every 10 timesteps
+(mesh_loader_timedep.py:179) that never reached the log either.
+
+Likely the srun/singularity stdout pipe buffers independently of Python. Worth
+testing `srun --unbuffered` next time -- it is the documented fix for exactly
+this and costs nothing.
+
+Practical consequence: during a long load there is no way to tell progress
+from the log alone. Use the /proc probe instead:
+
+    srun --jobid=<id> --overlap -w <node> bash -c '
+      p=$(ps -u $USER -o pid,args --no-headers | grep "bin/python -u" | awk "{print \$1}" | head -1)
+      r1=$(awk "/^read_bytes/{print \$2}" /proc/$p/io); sleep 25
+      r2=$(awk "/^read_bytes/{print \$2}" /proc/$p/io)
+      echo "read +$(( (r2-r1)/1048576 ))MiB in 25s, total $(( r2/1073741824 ))GB"'
+
+Note the pgrep trap: `pgrep -f run_tracking.py` matches the *srun wrapper*
+first, which sits in futex_wait at 0% CPU and looks like a hang. Match on the
+interpreter path instead.
