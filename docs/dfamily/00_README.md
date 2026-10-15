@@ -146,6 +146,7 @@ also why standalone replays kept reporting 94–95% while the fused kernel found
 | [`12_occupancy_optimization.md`](12_occupancy_optimization.md) | occupancy experiments in detail |
 | [`13_throughput_roadmap.md`](13_throughput_roadmap.md) | **throughput roadmap**: every candidate, measured gain, effort, risk |
 | [`14_concepts_explained.md`](14_concepts_explained.md) | **plain-language explanation** of the static trip count and exact tet-box registration, with what is and is not proven |
+| [`15_build_stage_roadmap.md`](15_build_stage_roadmap.md) | **build-stage roadmap**: why the build is 59.5% of a short run, and the options ranked by gain/effort/risk |
 
 ---
 
