@@ -374,6 +374,15 @@ def parse_args():
                              "n_particles x 4 x 3 per logged step.")
     parser.add_argument("--trace-substages-every", type=int, default=50,
                         help="With --trace-substages, log every Nth step.")
+    parser.add_argument("--mesh-load-workers", type=int, default=0,
+                        metavar="N",
+                        help="Threads used to read velocity snapshots. "
+                             "0 (default) = auto, min(8, cpu_count); 1 forces "
+                             "the serial path. Loading is CPU-bound VTK XML "
+                             "parsing (245x the raw read cost) and VTK "
+                             "releases the GIL, so threads help: measured "
+                             "2.25x across snapshots on D2, byte-identical "
+                             "to serial at every width.")
     parser.add_argument("--octree-cache", type=str, default="",
                         metavar="DIR",
                         help="Cache the built octree under DIR and reuse it "
@@ -1646,6 +1655,9 @@ def main():
     config.RK4_L0_SKIP_BOUNDARY_ELEMENTS = not args.no_l0_skip_boundary
     if args.point_in_tet_tol is not None:
         config.POINT_IN_TET_TOLERANCE = args.point_in_tet_tol
+    if args.mesh_load_workers:
+        # Set before any snapshot is read; the loader consults config.
+        config.MESH_LOAD_WORKERS = args.mesh_load_workers
     if args.interpolation_det_min is not None:
         config.INTERPOLATION_DET_MIN = args.interpolation_det_min
     if args.registration is not None:

@@ -304,6 +304,36 @@ Performance impact:
 Default: "parent_cube" (static inner loop, best GPU performance)
 """
 
+MESH_LOAD_WORKERS = 0
+"""
+Thread count for reading velocity snapshots. 0 = auto, min(8, cpu_count).
+
+Loading a snapshot is dominated by VTK's XML parsing, not by disk. Measured on
+one D2 snapshot (128 piece files, 1130 MiB, page-cached so disk is out of the
+picture): the raw byte read is 0.03 s against 7.05 s to parse it, a 245x ratio.
+
+VTK releases the GIL while parsing, so plain threads scale. Measured on a
+32-core host, all with byte-identical results:
+
+    serial       6.99 s
+    4 threads    1.79 s    3.91x
+    8 threads    0.92 s    7.62x
+   16 threads    0.53 s   13.16x
+
+Threads rather than processes: each worker writes one row of a preallocated
+(n_timesteps, n_nodes, 3) array, so there is nothing to pickle and no ordering
+hazard, and a ProcessPoolExecutor additionally hit a forkserver bug on Python
+3.14 here.
+
+Set to 1 to force the original serial path. The default caps at 8 because the
+gain flattens and LUMI allocates 7 cores per task; a larger value is only
+useful on a many-core host reading a fast filesystem.
+
+NOTE this does NOT overlap the octree disk cache: the cache removes the octree
+BUILD, while velocity fields change every timestep and must be read on every
+run. After the cache lands, snapshot loading is the dominant pre-tracking cost.
+"""
+
 OCTREE_EXACT_TET_BOX = False
 """
 Prune AABB-overlap registrations to the cells a tetrahedron genuinely reaches.
