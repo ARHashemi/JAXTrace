@@ -304,6 +304,44 @@ Performance impact:
 Default: "parent_cube" (static inner loop, best GPU performance)
 """
 
+OCTREE_EXACT_TET_BOX = False
+"""
+Prune AABB-overlap registrations to the cells a tetrahedron genuinely reaches.
+
+Only affects non-Kuhn elements, which are registered by AABB overlap: every
+cell the element's bounding box touches. A tetrahedron fills at most ~1/6 of
+its bounding box, so most of those cells are never reached by the tet itself.
+Each wasted entry is an element the search must load and point-in-tet test for
+a cell it can never be the host of.
+
+Enabling this replaces the bounding-box test with an exact tetrahedron/box
+separating-axis test at build time. Measured on D2 (10.8M elements):
+
+    registrations kept        71.3%
+    max cell occupancy        79 -> 56
+    tests per L2 query        17,064 -> 12,096   (1.41x fewer)
+    CSR entries               85.1M -> ~61M
+
+Coverage is preserved: 0 losses over 13,000 adversarial probes (interior,
+near-face, and on-cell-plane in float32), and the general argument is that a
+particle's own cell is the centre of the 3x3x3 neighbourhood and is always
+intersected by its host element, so that registration always survives pruning.
+See docs/dfamily/14_concepts_explained.md.
+
+BUILD-TIME ONLY. The branch is a plain Python `if`, evaluated once on the host
+before any kernel is traced, so neither setting costs anything at run time and
+no extra host-device transfer occurs. What it changes is the octree's contents,
+hence the derived MAX_ELEMS_PER_CELL and therefore the compiled loop bound --
+exactly one kernel is compiled either way.
+
+Cost of enabling: one 13-axis test per candidate cell during the build. On D2
+that is ~85M candidates, which is why the loop is kept in numpy-friendly form;
+expect the build to lengthen.
+
+Default: False (the historical behaviour) until it has run end to end on a
+production case.
+"""
+
 MAX_ELEMS_PER_CELL = 32
 """
 Maximum elements per cell for the static-bound inner search loop.

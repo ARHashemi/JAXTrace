@@ -26,6 +26,8 @@ import numpy as np
 from typing import Tuple, NamedTuple
 from collections import defaultdict
 
+from ... import config
+
 from .mesh_aligned_octree_single_cell import (
     encode_morton_3d_single,
     find_axis_aligned_edges_single,
@@ -92,6 +94,64 @@ def _find_kuhn_node_neighbor(
     return -1, None, None
 
 
+def tet_box_intersect(vertices: np.ndarray,
+                      box_min: np.ndarray,
+                      box_max: np.ndarray) -> bool:
+    """Exact tetrahedron / axis-aligned-box overlap, by separating axes.
+
+    Two convex bodies are disjoint iff some axis exists on which their
+    projections do not overlap. For a tet against an axis-aligned box it is
+    sufficient to test 13 axes: the 3 box face normals, the 4 tet face
+    normals, and the 6 cross products of box edge directions with tet edge
+    directions. Touching counts as intersecting, which is the conservative
+    choice for a point-location structure.
+
+    This is exact, not a tolerance: a cell is rejected only when the
+    tetrahedron provably does not reach it. That matters because dropping a
+    cell the tet does touch would make particles there unfindable -- the same
+    failure mode as the cell-overflow defect (docs/dfamily/11_*).
+
+    Used to prune AABB-overlap registrations: a tet fills at most ~1/6 of its
+    bounding box, so most cells its AABB touches are never reached by the tet
+    itself. See docs/dfamily/14_concepts_explained.md for why pruning cannot
+    lose coverage (in short: a particle's own cell is the centre of the 3x3x3
+    neighbourhood and is always intersected by its host, so it always
+    survives pruning).
+    """
+    bc = 0.5 * (box_min + box_max)
+    be = 0.5 * (box_max - box_min)
+
+    def separated(axis: np.ndarray) -> bool:
+        n = np.linalg.norm(axis)
+        if n < 1e-300:                    # degenerate axis carries no info
+            return False
+        a = axis / n
+        r = abs(a[0]) * be[0] + abs(a[1]) * be[1] + abs(a[2]) * be[2]
+        pc = float(a @ bc)
+        pv = vertices @ a
+        return (pv.min() > pc + r) or (pv.max() < pc - r)
+
+    for i in range(3):                    # box face normals
+        e = np.zeros(3)
+        e[i] = 1.0
+        if separated(e):
+            return False
+    for a, b, c in ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)):
+        if separated(np.cross(vertices[b] - vertices[a],
+                              vertices[c] - vertices[a])):
+            return False
+    tet_edges = (vertices[1] - vertices[0],
+                 vertices[2] - vertices[0],
+                 vertices[3] - vertices[0])
+    for i in range(3):
+        e = np.zeros(3)
+        e[i] = 1.0
+        for te in tet_edges:
+            if separated(np.cross(e, te)):
+                return False
+    return True
+
+
 def extract_octree_cells_parent_cube(
     node_positions: np.ndarray,
     connectivity: np.ndarray,
@@ -99,6 +159,7 @@ def extract_octree_cells_parent_cube(
     verbose: bool = True,
     orphan_fallback: bool = True,
     hybrid_non_kuhn: bool = True,
+    exact_tet_box: bool = None,
 ) -> OctreeCellDataParentCube:
     """
     Extract octree cells using SINGLE parent-cube registration for Kuhn
@@ -136,12 +197,27 @@ def extract_octree_cells_parent_cube(
         hybrid_non_kuhn: when True (default), non-Kuhn elements use
             AABB-overlap registration. When False, they use the
             centroid-only registration (legacy behaviour).
+        exact_tet_box: prune AABB-overlap registrations to the cells the
+            tetrahedron genuinely intersects, instead of every cell its
+            bounding box touches. None (default) reads
+            config.OCTREE_EXACT_TET_BOX. A tet fills at most ~1/6 of its
+            AABB, so this removed ~29% of registrations on D2 and lowered
+            max cell occupancy 79 -> 56, i.e. 1.41x fewer point-in-tet
+            tests per query, with coverage preserved (0 losses over 13,000
+            adversarial probes; see docs/dfamily/14_concepts_explained.md).
+            Build-time only: the branch is evaluated once on the host, so
+            neither setting costs anything at run time.
 
     Returns:
         OctreeCellDataParentCube with single-cube-per-Kuhn-element and
         (AABB-overlap | centroid)-per-non-Kuhn-element mapping.
     """
     n_elements = connectivity.shape[0]
+
+    # Resolved once, on the host, before anything is built. A plain Python
+    # branch: no kernel ever sees it, so neither setting has a runtime cost.
+    if exact_tet_box is None:
+        exact_tet_box = bool(getattr(config, "OCTREE_EXACT_TET_BOX", False))
 
     if verbose:
         print(f"\n{'='*80}")
@@ -266,6 +342,7 @@ def extract_octree_cells_parent_cube(
     n_non_kuhn_orphan_fallback = 0
     n_non_kuhn_dropped = 0
     n_non_kuhn_cell_entries = 0
+    n_non_kuhn_cells_pruned = 0
 
     # Precompute a global fallback (cell_size, level) from the median
     # Kuhn element. We DO NOT compute orphan levels from the orphan's
@@ -375,9 +452,21 @@ def extract_octree_cells_parent_cube(
                 i_hi = int(np.floor(hi[0] / reg_size[0]))
                 j_hi = int(np.floor(hi[1] / reg_size[1]))
                 k_hi = int(np.floor(hi[2] / reg_size[2]))
+                _rs = np.asarray(reg_size, dtype=np.float64)
                 for i in range(i_lo, i_hi + 1):
                     for j in range(j_lo, j_hi + 1):
                         for k in range(k_lo, k_hi + 1):
+                            if exact_tet_box:
+                                # Keep only cells the TET reaches, not every
+                                # cell its bounding box touches. The particle's
+                                # own cell is always intersected by its host,
+                                # so coverage is preserved.
+                                _bmin = np.array([i, j, k],
+                                                 dtype=np.float64) * _rs
+                                if not tet_box_intersect(vertices, _bmin,
+                                                         _bmin + _rs):
+                                    n_non_kuhn_cells_pruned += 1
+                                    continue
                             i_m = int(np.clip(i + offset, 0, max_coord - 1))
                             j_m = int(np.clip(j + offset, 0, max_coord - 1))
                             k_m = int(np.clip(k + offset, 0, max_coord - 1))
@@ -428,6 +517,12 @@ def extract_octree_cells_parent_cube(
             if n_non_kuhn_dropped:
                 print(f"  Non-Kuhn dropped (no fallback): "
                       f"{n_non_kuhn_dropped:,}")
+            if exact_tet_box:
+                _cand = n_non_kuhn_cell_entries + n_non_kuhn_cells_pruned
+                print(f"  Exact tet-box pruning: kept "
+                      f"{n_non_kuhn_cell_entries:,} of {_cand:,} candidate "
+                      f"cells ({100.0 * n_non_kuhn_cell_entries / max(_cand, 1):.1f}%), "
+                      f"pruned {n_non_kuhn_cells_pruned:,} the tet does not reach")
     else:
         if verbose:
             print(f"\n[3/4] Pass 2: No non-Kuhn elements — skipped")
