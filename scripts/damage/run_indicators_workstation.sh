@@ -160,7 +160,19 @@ export JAX_PLATFORMS="${JAX_PLATFORMS:-cuda}"
 # ⚠️ Its non-prealloc branch ALSO sets XLA_PYTHON_CLIENT_ALLOCATOR=platform,
 # which I had omitted entirely -- so my fallback was neither of the two
 # configurations the reference supports.
-XLA_PREALLOC="${XLA_PREALLOC:-1}"
+# ⚠️ MEASURED 2026-10-16, and the answer is the OPPOSITE of the reference.
+# With PREALLOCATE=true, JAX claims ~75 % of HBM REGARDLESS of need:
+#     PREALLOC=true                 -> GPU 24.65 GB claimed (only 7.65 GB of
+#                                      arrays exist) -> ~8 GB left -> the RK4
+#                                      kernel's compilation OOMs
+#     PREALLOC=true MEM_FRACTION=.45-> GPU 15.0 GB
+#     PREALLOC=false ALLOCATOR=platform -> GPU 7.84 GB -> ~24.8 GB free
+# Two full D2 runs died at stage 6/7 with CUDA_ERROR_OUT_OF_MEMORY after ~1.5 h
+# each, at 288k AND at 147k particles -- so it was never the particle count.
+# The reference ships XLA_PREALLOC=1 because LUMI's MI250X has 64 GB, where 75 %
+# still leaves ~48 GB. On a 32.6 GB card that same setting is fatal.
+# ⚠️ So this is a HOST-SPECIFIC override, not a divergence to "fix".
+XLA_PREALLOC="${XLA_PREALLOC:-0}"
 if [ "$XLA_PREALLOC" = "1" ]; then
     export XLA_PYTHON_CLIENT_PREALLOCATE=true
     unset  XLA_PYTHON_CLIENT_ALLOCATOR

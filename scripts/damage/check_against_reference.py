@@ -50,12 +50,6 @@ MUST_MATCH = [
     "FAILED_SUBSTAGE", "INTERPOLATION_METHOD", "PIN_RPM", "PIN_CENTER",
     "PIN_AXIS", "PIN_TILT", "N_GROUPS", "BOUNDARY_WALLS", "MESH_SUBDIR",
     "FEMUSS_SUBDIR", "REGISTRATION", "EXACT_TET_BOX", "MAX_ELEMS_PER_CELL",
-    # ⚠️ Allocator strategy is NOT cosmetic. Running with PREALLOCATE=false and
-    # no XLA_PYTHON_CLIENT_ALLOCATOR killed a D2 run at stage 6/7 with
-    # CUDA_ERROR_OUT_OF_MEMORY after 1h29, while persistent device arrays needed
-    # only ~8.5 GB of a 32.6 GB card: on-demand growth fragments the heap so XLA
-    # cannot place the compiled module. Keep this matched to the reference.
-    "XLA_PREALLOC",
 ]
 
 # Allowed to differ, with the reason. Reported, never a failure.
@@ -79,6 +73,13 @@ EXPECTED_DIFFERENT = {
     "OCTREE_CACHE_FORMAT": "hdf5 chosen deliberately: one self-contained .h5 "
                            "per entry keeps the case folder tidy; falls back "
                            "to a .npy dir if h5py is missing",
+    "XLA_PREALLOC": "⚠️ HOST-DEPENDENT, and the reference's value is WRONG for a "
+                    "32 GB card. PREALLOCATE=true claims ~75 % of HBM "
+                    "regardless of need (measured: 24.65 GB claimed for 7.65 GB "
+                    "of arrays), leaving too little for the RK4 kernel's "
+                    "compilation -- two D2 runs died at stage 6/7. LUMI's "
+                    "MI250X has 64 GB so 75 % still leaves ~48 GB. Use 0 "
+                    "(on-demand, measured 7.84 GB) on the workstation.",
     "SIF": "container, not used off LUMI",
     "JAXTRACE": "repo path differs per host",
     "PKGS": "package path differs per host",
