@@ -705,6 +705,20 @@ def create_rk4_comparison(
     # already visits. See the note at the integration site for why order 4 does not
     # achieve 4th-order convergence here.
     damage_order: int = 1,
+    # Extra INDEPENDENT indicators accumulated alongside the two damage laws.
+    # See docs/damage/NEXT_STEPS_detachment_criterion.md Part A for why these
+    # exist: Rice-Tracey and Cockcroft-Latham agree at rho = +0.982..+0.998, but
+    # they share edot, sigma_eq and the pathlines, so that agreement is not
+    # corroboration (O45). These two share NO inputs with the damage integral:
+    #   residence time t_res = integral( H(edot - thr) dt )   -- a TIME, not work
+    #   Piwnik-Plata  w      = integral( p/sigma_bar dt )     -- the BONDING question
+    # Both reuse samples the damage path already takes, so the marginal cost is
+    # a couple of FLOPs per step and no extra element search.
+    damage_indicators: bool = False,
+    # Strain-rate level defining "inside the shear layer" for t_res [1/s].
+    # ⚠️ Pick this badly and t_res either saturates or vanishes -- sweep it over
+    # at least a decade and report the ranking's stability, not one number.
+    residence_edot_threshold: float = 1.0,
     # Gradient-recovery / higher-order velocity reconstruction. Two
     # methods supported; kernel picks by which arrays are non-None.
     #
@@ -764,6 +778,22 @@ def create_rk4_comparison(
     if int(damage_order) not in (1, 4):
         raise ValueError(f"damage_order must be 1 or 4, got {damage_order!r}")
     use_damage_rk4 = (int(damage_order) == 4)
+    # ⚠️ The extra indicators need eta (for p/sigma_bar = -eta, see below), which
+    # only the 3-slot models stack carries. Asking for them on the edot-only
+    # driver is a configuration error, not something to silently ignore.
+    use_indicators = bool(damage_indicators) and use_damage
+    if use_indicators and not use_damage_models:
+        raise ValueError(
+            "damage_indicators=True needs the 3-slot [edot, eta, s1_ratio] "
+            "stack (--damage-driver=models): the Piwnik-Plata integrand is "
+            "p/sigma_bar = -eta, and eta is absent from the edot-only driver.")
+    # Accumulator width, a Python int at trace time:
+    #   1 -> [ebar]                          (edot driver)
+    #   2 -> [lnPhi, C]                      (models driver)
+    #   4 -> [lnPhi, C, t_res, w]            (models driver + indicators)
+    n_damage_acc = (1 if not use_damage_models
+                    else (4 if use_indicators else 2))
+    residence_thr = float(residence_edot_threshold)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
     # L0 skip for boundary elements (mixed level-set sign at tool boundary)
@@ -1632,7 +1662,38 @@ def create_rk4_comparison(
                     dlogphi = (dlogphi + 2.0*dlp2 + 2.0*dlp3 + dlp4) / 6.0
                     dC      = (dC      + 2.0*dC2  + 2.0*dC3  + dC4 ) / 6.0
 
-                inc = jnp.stack([dlogphi, dC])
+                if not use_indicators:
+                    inc = jnp.stack([dlogphi, dC])
+                else:
+                    # ── Independent indicators (Part A) ───────────────────
+                    # ⚠️ These are deliberately NOT RK4-weighted even when
+                    # use_damage_rk4 is set.
+                    #   t_res integrates a STEP FUNCTION. Simpson/RK4 weights on
+                    #   a discontinuous integrand are not higher order -- they
+                    #   just move the switch point around. Euler on the k1 stage
+                    #   is the honest quadrature for an indicator function, and
+                    #   it keeps t_res exactly interpretable as "number of steps
+                    #   inside the layer x dt".
+                    #   w uses the k1 stage for the same reason the pair above is
+                    #   reported at order 1 by default: the order-4 correction was
+                    #   measured at median +0.01% (max -17.9%) and it would cost
+                    #   another stack of gathers to no useful end here.
+                    #
+                    # Residence time in the shear layer: separates HOW LONG from
+                    # HOW HARD, which the damage integral conflates. Shares no
+                    # stress input with the damage laws -- it is a pure time.
+                    in_layer = (edot_k1 > residence_thr).astype(dlogphi.dtype)
+
+                    # Piwnik-Plata bonding: w = integral( p/sigma_bar dt ).
+                    # ⚠️ p/sigma_bar == -eta EXACTLY, by the definitions in
+                    # jaxtrace/damage/fields.py: eta = sigma_m/sigma_eq and
+                    # p = -sigma_m. So the bonding integrand needs NO new field
+                    # and no extra gather -- it is a sign flip on a scalar the
+                    # Rice-Tracey term already sampled. Clamped with the same
+                    # bounds as eta, for the same bad-pressure reason.
+                    dw = -eta_c
+
+                    inc = jnp.stack([dlogphi, dC, in_layer, dw])
                 dmg_new = dmg + dt * inc
 
                 # Freeze BOTH accumulators on any step the position also skipped:

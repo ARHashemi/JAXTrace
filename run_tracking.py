@@ -569,6 +569,25 @@ def parse_args():
                              "its start, "
                              "removing the k1-only bias where the driver has a steep "
                              "gradient -- i.e. in the shear layer.")
+    parser.add_argument("--damage-indicators", action="store_true",
+                        default=False,
+                        help="Also accumulate the INDEPENDENT indicators "
+                             "alongside the two damage laws: residence time in "
+                             "the shear layer and the Piwnik-Plata bonding "
+                             "integral w = int(p/sigma_bar dt). Requires "
+                             "--damage-driver=models (the bonding integrand is "
+                             "-eta). Costs a few FLOPs per step and no extra "
+                             "element search, because both reuse samples the "
+                             "damage path already takes. Rationale and the "
+                             "independence argument: "
+                             "docs/damage/NEXT_STEPS_detachment_criterion.md "
+                             "Part A.")
+    parser.add_argument("--residence-edot-threshold", type=float, default=1.0,
+                        help="Strain rate [1/s] above which a particle counts "
+                             "as inside the shear layer, for the residence-time "
+                             "indicator (default 1.0). Sweep this over at least "
+                             "a decade: pick it badly and the indicator either "
+                             "saturates or vanishes.")
     parser.add_argument("--damage-mat", type=Path, default=None,
                         help="GiD .mat supplying the Norton tables for "
                              "sigma_eq. Defaults to the first *.mat found "
@@ -1831,6 +1850,26 @@ def main():
     # integrated edot only, which depends on grad(u) alone) -- that property ends
     # here. The extra arrays are read from the ALREADY-OPEN PVTU, so this is one
     # more field per timestep, not a second traversal.
+    # ⚠️ Fail on a bad damage/indicator combination HERE, before the mesh load.
+    # The kernel factory also rejects it, but that is minutes of PVTU reading
+    # later -- and in an overnight array job those minutes are spent 45 times
+    # before anything reports. Cheap checks belong in front of expensive I/O.
+    if args.damage_indicators:
+        if not args.damage:
+            raise SystemExit(
+                "--damage-indicators needs --damage (it adds accumulators to "
+                "the pathline damage integration).")
+        if args.damage_driver != "models":
+            raise SystemExit(
+                "--damage-indicators needs --damage-driver=models: the "
+                "Piwnik-Plata integrand is p/sigma_bar = -eta, and eta is not "
+                f"built by the '{args.damage_driver}' driver.")
+        if args.residence_edot_threshold <= 0.0:
+            raise SystemExit(
+                "--residence-edot-threshold must be > 0 "
+                f"(got {args.residence_edot_threshold}); it is a strain-rate "
+                "level in 1/s, and <= 0 would put every particle in the layer.")
+
     damage_needs_fields = args.damage and args.damage_driver != "edot"
     if damage_needs_fields:
         needs_temperature = True
@@ -2551,6 +2590,8 @@ def main():
         trace_substages=bool(args.trace_substages),
         damage_scalars_gpu=damage_scalars_gpu,
         damage_order=args.damage_order,
+        damage_indicators=args.damage_indicators,
+        residence_edot_threshold=args.residence_edot_threshold,
     )
     # create_rk4_comparison returns just rk4_step by default; when
     # --hit-stats-log is set, it returns (rk4_step, closures) so we can
@@ -2768,7 +2809,12 @@ def main():
         # whole run: no host transfer per step.
         # ⚠️ Shape follows the driver: 1 scalar for 'edot', 2 for 'models'
         # ([lnPhi, C]). The kernel vmaps over the leading particle axis either way.
-        _n_acc = 2 if args.damage_driver == "models" else 1
+        # 1 = [ebar]; 2 = [lnPhi, C]; 4 = [lnPhi, C, t_res, w] with
+        # --damage-indicators. Must match n_damage_acc in the kernel factory.
+        if args.damage_driver != "models":
+            _n_acc = 1
+        else:
+            _n_acc = 4 if args.damage_indicators else 2
         if _n_acc == 1:
             damage_gpu = jnp.zeros(n_particles, dtype=config.FLOAT_DTYPE_JNP)
         else:
@@ -3365,6 +3411,34 @@ def main():
                 _r = float(np.corrcoef(_a, _b)[0, 1])
                 print(f"  [damage] rank corr(lnPhi, C)     : {_r:+.4f}"
                       f"   ({'models agree' if _r > 0.9 else 'MODELS DISAGREE — investigate'})")
+            if dmg_cpu.shape[1] >= 4:
+                # ⚠️ The INDEPENDENT indicators. The point of reporting their
+                # rank correlation against lnPhi is that a HIGH value is the
+                # interesting result here, not the reassuring one: t_res shares
+                # no stress input with the damage laws, so if it ranks the
+                # particles the same way, the damage ranking is largely a
+                # restatement of how long a particle spent being sheared.
+                t_res, w_bond = dmg_cpu[:, 2], dmg_cpu[:, 3]
+                print(f"  [damage] residence t_res [s]     : median "
+                      f"{float(np.median(t_res)):.4g}  max "
+                      f"{float(t_res.max()):.4g}  "
+                      f"(edot > {args.residence_edot_threshold:g} 1/s)")
+                _frac0 = float((t_res <= 0).mean())
+                if _frac0 > 0.5:
+                    print(f"  [damage]   ⚠️  {100.0 * _frac0:.0f} % of particles "
+                          f"never entered the layer — threshold likely too HIGH.")
+                elif float((t_res >= N_STEPS * DT * 0.99).mean()) > 0.5:
+                    print(f"  [damage]   ⚠️  most particles were ALWAYS in the "
+                          f"layer — threshold likely too LOW (saturated).")
+                print(f"  [damage] Piwnik-Plata w          : median "
+                      f"{float(np.median(w_bond)):+.4g}  max "
+                      f"{float(w_bond.max()):+.4g}  min "
+                      f"{float(w_bond.min()):+.4g}")
+                if len(ln_phi) > 10:
+                    for _nm, _v in (("t_res", t_res), ("w", w_bond)):
+                        _c = np.argsort(np.argsort(_v)).astype(np.float64)
+                        _rr = float(np.corrcoef(_a, _c)[0, 1])
+                        print(f"  [damage] rank corr(lnPhi, {_nm:5s}) : {_rr:+.4f}")
         else:
             print(f"  [damage] value : median {float(np.median(dmg_cpu)):.4g}  "
                   f"mean {float(dmg_cpu.mean()):.4g}  max {float(dmg_cpu.max()):.4g}")
@@ -3373,6 +3447,12 @@ def main():
             # A silent no-op accumulator would otherwise look like a clean run.
             print("  [damage] WARNING: nothing accumulated — the damage path "
                   "produced no signal. Check the driver field is non-zero.")
+        if dmg_cpu.ndim == 1 or dmg_cpu.shape[1] == 1:
+            _dmg_columns = ["ebar"]
+        elif dmg_cpu.shape[1] == 2:
+            _dmg_columns = ["ln_phi", "C"]
+        else:
+            _dmg_columns = ["ln_phi", "C", "t_res", "w_bond"]
         dmg_path = args.damage_out
         if dmg_path is None:
             dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"
@@ -3384,6 +3464,12 @@ def main():
             positions=np.asarray(positions_gpu, dtype=np.float32),
             element_ids=np.asarray(element_ids_gpu, dtype=np.int32),
             driver=args.damage_driver,
+            # Name the accumulator columns in the archive itself. A bare
+            # (n_particles, 4) array is unreadable six months later, and the
+            # analysis scripts should not have to re-derive the layout from the
+            # driver string and a flag.
+            columns=np.array(_dmg_columns, dtype=object),
+            residence_edot_threshold=np.float64(args.residence_edot_threshold),
             n_steps=np.int64(N_STEPS),
             dt=np.float64(DT),
         )
