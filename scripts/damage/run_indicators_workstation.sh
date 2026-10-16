@@ -36,6 +36,16 @@ VENV_PY="${VENV_PY:-/flash/shared/jax/.venv/bin/python}"
 INPUT="${INPUT:-/scratch/shared/PinShapes/D-ConcavityTilt/D2.gid}"
 CASE_TAG="${CASE_TAG:-D2}"
 
+# ⚠️ BOTH of these must be passed EXPLICITLY, even though they are empty-ish.
+# The PVTU files sit directly in post/ with the stem A2 (the folder is D2.gid --
+# a real naming quirk of this case). Left to auto-detection, run_tracking.py
+# guessed a 'post/0eule/' subfolder and the stem 'D2', and failed on
+# post/0eule/D2_34.pvtu. MESH_SUBDIR="" pins "no subfolder"; CASE_STEM pins the
+# file stem.
+MESH_SUBDIR="${MESH_SUBDIR-}"
+FEMUSS_SUBDIR="${FEMUSS_SUBDIR-}"
+CASE_STEM="${CASE_STEM:-A2}"
+
 MODE="${MODE:-smoke}"
 OUT_ROOT="${OUT_ROOT:-/scratch/shared/damage_indicators}"
 
@@ -109,6 +119,8 @@ LOG="${OUT}/run.log"
 ARGS=(
   --input  "$INPUT"
   --output "$OUT"
+  --mesh-subdir   "$MESH_SUBDIR"
+  --femuss-subdir "$FEMUSS_SUBDIR"
   --precision      "$PRECISION"
   --vel-range      "$VEL_START" "$VEL_END"
   --velocity-field "$VELOCITY_FIELD"
@@ -146,11 +158,12 @@ ARGS=(
   --residence-edot-threshold "$RESIDENCE_THR"
   --damage-out "${OUT}/damage_models.npz"
 )
+[ -n "$CASE_STEM" ] && ARGS+=( --case-stem "$CASE_STEM" )
 
 echo "============================================================"
 echo " workstation indicator run"
 echo "   mode      : $MODE"
-echo "   case      : $INPUT  (tag $CASE_TAG)"
+echo "   case      : $INPUT  (tag $CASE_TAG, stem ${CASE_STEM:-auto})"
 echo "   steps     : $N_STEPS  dt $DT   vel [$VEL_START,$VEL_END]"
 echo "   seed grid : $SEED_GRID  frac $SEED_FRACTION"
 echo "   driver    : $DAMAGE_DRIVER  order $DAMAGE_ORDER"
