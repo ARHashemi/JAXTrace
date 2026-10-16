@@ -1895,12 +1895,17 @@ def main():
     else:
         # Multi-field path: one pass over the PVTUs for every needed field.
         from jaxtrace.gpu.mesh_loader_timedep import load_field_sequences_from_pvtu
+        # ⚠️ Pass n_workers EXPLICITLY and leave verbose on. This path was
+        # serial until 2026-10-16, so a models-driver run pegged one core and
+        # left 31 idle while --mesh-load-workers was silently ignored; with
+        # verbose=False there was not even a thread-count line to reveal it.
         node_positions, connectivity, _fields = load_field_sequences_from_pvtu(
             base_path=MESH_BASE_PATH,
             file_pattern=args.mesh_pattern,
             timestep_range=VELOCITY_TIMESTEP_RANGE,
             field_names=fields_to_load,
-            verbose=False,
+            verbose=True,
+            n_workers=args.mesh_load_workers,
         )
         velocity_sequence = _fields[VELOCITY_FIELD]
         temperature_sequence = _fields.get(args.temperature_field)

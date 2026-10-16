@@ -104,7 +104,15 @@ PIN_AXIS="0.0 0.0 1.0"
 PIN_TILT=0.0
 N_GROUPS=5
 BOUNDARY_WALLS="x_max=clamp"
-MESH_LOAD_WORKERS=8
+# ⚠️ 16, not the reference's 8. Measured on this host (Ryzen 9 9950X3D, 16c/32t,
+# /scratch on a spinning disk): 1 worker 202s, 4 -> 3.10x, 8 -> 2.30x, 16 -> 3.45x
+# on 16 snapshots. 8 was SLOWER than 4 under disk contention. The plateau is
+# seek-bound, not CPU-bound -- the disk served 104 MB/s at 33 % utilisation with
+# the CPU 96.7 % idle -- so the real win would be staging the case onto the idle
+# NVMe rather than adding workers.
+# ⚠️ This is a HOST tuning value, deliberately diverging from the reference's 8.
+# check_against_reference.py lists MESH_LOAD_WORKERS as host-dependent.
+MESH_LOAD_WORKERS="${MESH_LOAD_WORKERS:-16}"
 
 # ── [4] The indicators under test ────────────────────────────────────────────
 # models driver is REQUIRED: the Piwnik-Plata integrand is p/sigma_bar = -eta,

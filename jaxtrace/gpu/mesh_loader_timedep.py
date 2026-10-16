@@ -193,6 +193,7 @@ def load_field_sequences_from_pvtu(
     timestep_range: Tuple[int, int],
     field_names: List[str],
     verbose: bool = True,
+    n_workers: int = None,
 ):
     """
     Load multiple per-node fields from a sequence of PVTU files in a
@@ -208,6 +209,42 @@ def load_field_sequences_from_pvtu(
     Field components are auto-detected: 1-component fields are stacked
     into ``(n_timesteps, n_nodes)`` arrays; multi-component fields
     into ``(n_timesteps, n_nodes, n_components)``.
+
+    ⚠️ THIS FUNCTION USED TO BE SERIAL, which made it the wall-clock bottleneck
+    for every multi-field run -- i.e. every ``--damage-driver=models`` run, since
+    that needs velocity + pressure + temperature. The threaded loader with the
+    measured speedup was a DIFFERENT function
+    (:func:`load_velocity_sequence_from_pvtu`), so ``--mesh-load-workers`` was
+    accepted, stored in config, and then silently ignored here: one core at 100 %
+    and 31 idle on a 32-core host.
+
+    It now uses the same ThreadPoolExecutor pattern. VTK releases the GIL while
+    parsing, so plain threads scale. Timestep 0 is still read serially first,
+    because its shapes determine the output allocation; the remaining timesteps
+    are then filled concurrently, each thread writing only its own pre-allocated
+    slice, so no locking is needed.
+
+    ⚠️ MEASURED HERE (16 D2 snapshots, 1.92M nodes, 3 fields, Ryzen 9 9950X3D
+    16c/32t, data on a SPINNING disk, with another job competing for it):
+
+        workers   wall    speedup
+              1   202s      1.00x   (the old serial path)
+              4    65s      3.10x
+              8    88s      2.30x   <- slower than 4
+             16    59s      3.45x
+
+    Output was byte-identical at every width, and no adjacent Pressure slices
+    matched, which rules out a timestep landing in the wrong slot.
+
+    The 3.1-3.45x plateau is NOT the thread pool failing: during the test the
+    disk served ~104 MB/s at only 33 % utilisation while the CPU sat 96.7 % idle,
+    so this is SEEK-BOUND on rotational media, not CPU-bound. The sibling
+    function's 13.16x at 16 workers was measured on faster storage; do not expect
+    it here. The non-monotonic 8-worker point is disk contention, not a bug.
+
+    ⚠️ Consequence for the host this ran on: /scratch is a spinning disk while an
+    idle NVMe sits beside it. Staging a case onto NVMe would help far more than
+    adding workers.
 
     Parameters
     ----------
@@ -253,39 +290,8 @@ def load_field_sequences_from_pvtu(
     sequences: dict = {}
     n_nodes = None
 
-    for i, ts in enumerate(timesteps):
-        file_path = base_path / file_pattern.format(timestep=ts)
-        pos, conn, fields_dict = load_mesh_from_pvtu(
-            file_path, field_names=field_names, verbose=False,
-        )
-
-        if i == 0:
-            node_positions = pos.astype(config.FLOAT_DTYPE_NP)
-            connectivity = conn
-            n_nodes = pos.shape[0]
-            # Allocate the output stacks now that we know the per-field
-            # component count from the first timestep.
-            for name in field_names:
-                arr = fields_dict.get(name)
-                if arr is None:
-                    raise RuntimeError(
-                        f"Field '{name}' not found in {file_path}"
-                    )
-                if arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1):
-                    sequences[name] = np.zeros(
-                        (n_steps, n_nodes), dtype=config.FLOAT_DTYPE_NP,
-                    )
-                elif arr.ndim == 2:
-                    sequences[name] = np.zeros(
-                        (n_steps, n_nodes, arr.shape[1]),
-                        dtype=config.FLOAT_DTYPE_NP,
-                    )
-                else:
-                    raise ValueError(
-                        f"Field '{name}' has unsupported shape {arr.shape}"
-                    )
-
-        # Validate consistency and store per-step values.
+    def _store(i, ts, fields_dict, file_path):
+        """Write one timestep's fields into their pre-allocated slices."""
         for name in field_names:
             arr = fields_dict.get(name)
             if arr is None:
@@ -298,8 +304,69 @@ def load_field_sequences_from_pvtu(
                 else np.asarray(arr).reshape(n_nodes, -1)
             sequences[name][i] = arr.astype(config.FLOAT_DTYPE_NP)
 
-        if verbose and (i % 10 == 0 or i == n_steps - 1):
-            print(f"  Loaded timestep {ts} ({i + 1}/{n_steps})")
+    # ── Timestep 0 serially: its shapes determine the allocation ────────────
+    ts0 = timesteps[0]
+    path0 = base_path / file_pattern.format(timestep=ts0)
+    pos, conn, fields0 = load_mesh_from_pvtu(
+        path0, field_names=field_names, verbose=False,
+    )
+    node_positions = pos.astype(config.FLOAT_DTYPE_NP)
+    connectivity = conn
+    n_nodes = pos.shape[0]
+    for name in field_names:
+        arr = fields0.get(name)
+        if arr is None:
+            raise RuntimeError(f"Field '{name}' not found in {path0}")
+        if arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1):
+            sequences[name] = np.zeros(
+                (n_steps, n_nodes), dtype=config.FLOAT_DTYPE_NP,
+            )
+        elif arr.ndim == 2:
+            sequences[name] = np.zeros(
+                (n_steps, n_nodes, arr.shape[1]),
+                dtype=config.FLOAT_DTYPE_NP,
+            )
+        else:
+            raise ValueError(
+                f"Field '{name}' has unsupported shape {arr.shape}"
+            )
+    _store(0, ts0, fields0, path0)
+    del fields0
+
+    # ── The rest concurrently ───────────────────────────────────────────────
+    if n_workers is None:
+        n_workers = int(getattr(config, "MESH_LOAD_WORKERS", 0) or 0)
+    if n_workers <= 0:                      # 0 / None => auto
+        n_workers = min(8, (os.cpu_count() or 1))
+    _rest = list(enumerate(timesteps))[1:]
+    n_workers = max(1, min(n_workers, len(_rest) or 1))
+
+    def _load_one(i, ts):
+        file_path = base_path / file_pattern.format(timestep=ts)
+        _, _, fd = load_mesh_from_pvtu(
+            file_path, field_names=field_names, verbose=False,
+        )
+        # ⚠️ Each thread writes ONLY sequences[name][i], a slice no other
+        # thread touches, so the shared dict needs no lock. The arrays are
+        # pre-allocated above, so no thread ever resizes or rebinds them.
+        _store(i, ts, fd, file_path)
+
+    if n_workers == 1 or not _rest:
+        for i, ts in _rest:
+            _load_one(i, ts)
+            if verbose and (i % 10 == 0 or i == n_steps - 1):
+                print(f"  Loaded timestep {ts} ({i + 1}/{n_steps})")
+    else:
+        if verbose:
+            print(f"  (parsing {len(_rest)} timesteps with {n_workers} threads)")
+        done = 1
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            futures = [ex.submit(_load_one, i, t) for i, t in _rest]
+            for fut in as_completed(futures):
+                fut.result()                # re-raise any loader error here
+                done += 1
+                if verbose and (done % 10 == 0 or done == n_steps):
+                    print(f"  Loaded {done}/{n_steps} timesteps")
 
     if verbose:
         total_mb = sum(s.nbytes for s in sequences.values()) / (1024 ** 2)
