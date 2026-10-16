@@ -31,6 +31,12 @@ set -uo pipefail
 REPO="${REPO:-/projappl/project_465002752/hashemia/JAXTrace}"
 PERCASE="${PERCASE:-${REPO}/scripts/dfamily/lumi/percase}"
 STAGE="${STAGE:-/scratch/project_465002752/hashemia/damage_indicators/staged}"
+# ⚠️ LOGS LIVE WITH THE RESULTS.
+# SLURM's stdout/stderr go into the per-case output directory, not a central
+# logs/ dir, so <OUT_ROOT>/<case>/ is self-contained: the npz, the exports, the
+# job log and a copy of the exact script that produced them. A result whose log
+# sits somewhere else is unreproducible six months later. A central copy is still
+# kept, because the output dir does not exist until the job's own resolver runs.
 LOGDIR="${LOGDIR:-/scratch/project_465002752/hashemia/logs}"
 
 MODE="${MODE:-full}"
@@ -166,13 +172,33 @@ PYEOF
     _ns=$(grep -oE '^N_STEPS=[0-9]+' "$dst" | head -1 | cut -d= -f2)
     _dt=$(grep -oE '^DT=[0-9.e-]+' "$dst" | head -1 | cut -d= -f2)
     if [ "$SUBMIT" = "1" ]; then
+        # The run's own output dir, matching the SCRATCH_FOLDER pinned above.
+        _case_out="${OUT_ROOT}/${c}"
+        mkdir -p "$_case_out" 2>/dev/null
         jid=$(sbatch --parsable \
                 --job-name="dmgind_${c}" \
-                --output="${LOGDIR}/dmgind_${c}_%j.out" \
-                --error="${LOGDIR}/dmgind_${c}_%j.err" \
+                --output="${_case_out}/slurm_%j.out" \
+                --error="${_case_out}/slurm_%j.err" \
                 "$dst" 2>&1)
         if [[ "$jid" =~ ^[0-9]+$ ]]; then
+            # Keep the exact script and the submission metadata beside the
+            # results, so the run can be reproduced from its own directory.
+            cp "$dst" "${_case_out}/run_script_${jid}.sh" 2>/dev/null
+            {
+                echo "case            : $c"
+                echo "job_id          : $jid"
+                echo "submitted       : $(date -Is)"
+                echo "submitted_by    : ${USER}@$(hostname)"
+                echo "reference       : $src"
+                echo "n_steps         : $_ns"
+                echo "dt              : $_dt"
+                echo "damage_order    : $DAMAGE_ORDER"
+                echo "residence_thr   : $RESIDENCE_THR"
+                echo "repo_commit     : $(cd "$REPO" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+                echo "log             : ${_case_out}/slurm_${jid}.out"
+            } > "${_case_out}/RUN_INFO_${jid}.txt"
             echo "  SUBMIT $c  job $jid   steps=$_ns dt=$_dt"
+            echo "         log: ${_case_out}/slurm_${jid}.out"
             n_ok=$((n_ok + 1))
         else
             echo "  FAIL   $c  sbatch: $jid"

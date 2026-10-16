@@ -123,7 +123,25 @@ export TF_CPP_MIN_LOG_LEVEL=3
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUT="${OUT_ROOT}/${CASE_TAG}_${MODE}_${STAMP}"
 mkdir -p "$OUT" || { echo "ERROR: cannot create $OUT" >&2; exit 1; }
+# ⚠️ Logs and provenance live WITH the results, so $OUT is self-contained: the
+# npz, the exports, the full stdout log, a copy of this script as it ran, and the
+# commit it ran from. A result whose log is elsewhere is unreproducible later.
 LOG="${OUT}/run.log"
+cp "$0" "${OUT}/run_script.sh" 2>/dev/null
+{
+    echo "case          : $INPUT"
+    echo "tag           : $CASE_TAG   stem ${CASE_STEM:-auto}"
+    echo "mode          : $MODE"
+    echo "started       : $(date -Is)"
+    echo "host          : ${USER}@$(hostname)"
+    echo "n_steps       : $N_STEPS   dt $DT   vel [$VEL_START,$VEL_END]"
+    echo "seed          : grid $SEED_GRID  box $SEED_BOX  seed $SEED"
+    echo "levelset      : $LEVELSET_FIELD ($LEVELSET_MODE)"
+    echo "damage        : driver=$DAMAGE_DRIVER order=$DAMAGE_ORDER"
+    echo "residence_thr : $RESIDENCE_THR"
+    echo "repo_commit   : $(cd "$JAXTRACE" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "python        : $VENV_PY"
+} > "${OUT}/RUN_INFO.txt"
 
 ARGS=(
   --input  "$INPUT"
@@ -178,6 +196,7 @@ echo "   seed grid : $SEED_GRID  box $SEED_BOX"
 echo "   driver    : $DAMAGE_DRIVER  order $DAMAGE_ORDER"
 echo "   t_res thr : $RESIDENCE_THR 1/s"
 echo "   out       : $OUT"
+echo "   log       : $LOG   (tail -f this)"
 echo "   python    : $VENV_PY"
 echo "============================================================"
 

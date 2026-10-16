@@ -3425,8 +3425,18 @@ def main():
                       f"(edot > {args.residence_edot_threshold:g} 1/s)")
                 _frac0 = float((t_res <= 0).mean())
                 if _frac0 > 0.5:
+                    # ⚠️ Two very different causes, and the message must not
+                    # assert the wrong one. A short run seeded upstream of the
+                    # tool legitimately reports t_res = 0 because the particles
+                    # never reach the shear layer -- that is physics, not a bad
+                    # threshold. Only call the threshold into question when the
+                    # particles actually travelled.
                     print(f"  [damage]   ⚠️  {100.0 * _frac0:.0f} % of particles "
-                          f"never entered the layer — threshold likely too HIGH.")
+                          f"recorded t_res = 0 (edot never exceeded "
+                          f"{args.residence_edot_threshold:g} 1/s).")
+                    print(f"  [damage]       Either the threshold is too HIGH, "
+                          f"or these particles never reached the shear layer "
+                          f"(short run, or seeded upstream of the tool).")
                 elif float((t_res >= N_STEPS * DT * 0.99).mean()) > 0.5:
                     print(f"  [damage]   ⚠️  most particles were ALWAYS in the "
                           f"layer — threshold likely too LOW (saturated).")
@@ -3436,6 +3446,19 @@ def main():
                       f"{float(w_bond.min()):+.4g}")
                 if len(ln_phi) > 10:
                     for _nm, _v in (("t_res", t_res), ("w", w_bond)):
+                        # ⚠️ A CONSTANT column has no ranking, so its rank
+                        # correlation is meaningless -- but argsort still
+                        # produces a monotone index, and corrcoef against it
+                        # returns a large spurious value. The 5-step smoke test
+                        # printed corr(lnPhi, t_res) = +0.89 for a t_res that
+                        # was identically ZERO on all 576 particles, which reads
+                        # as a finding. Say "degenerate" instead.
+                        if float(np.ptp(_v)) == 0.0:
+                            print(f"  [damage] rank corr(lnPhi, {_nm:5s}) : "
+                                  f"n/a — {_nm} is constant "
+                                  f"({float(_v.flat[0]):.4g}), no ranking to "
+                                  f"correlate")
+                            continue
                         _c = np.argsort(np.argsort(_v)).astype(np.float64)
                         _rr = float(np.corrcoef(_a, _c)[0, 1])
                         print(f"  [damage] rank corr(lnPhi, {_nm:5s}) : {_rr:+.4f}")

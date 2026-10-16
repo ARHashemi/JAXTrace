@@ -108,9 +108,20 @@ def density_cv(pos, nby=120, nbz=40):
 
 
 def spearman(a, b):
-    """Rank correlation, ties averaged, NaN-safe."""
+    """Rank correlation, ties averaged, NaN-safe.
+
+    ⚠️ Returns NaN for a CONSTANT input rather than a number. A constant column
+    has no ranking, so correlating it is meaningless -- but a naive
+    argsort-of-argsort produces a monotone index and corrcoef against it returns
+    a large spurious value. A 5-step validation run reported
+    corr(lnPhi, t_res) = +0.89 for a t_res that was identically zero, which
+    reads as a finding. rankdata already collapses a constant to a single tied
+    rank, so the std check below is what catches it.
+    """
     ok = np.isfinite(a) & np.isfinite(b)
     if ok.sum() < 10:
+        return np.nan
+    if np.ptp(a[ok]) == 0 or np.ptp(b[ok]) == 0:
         return np.nan
     from scipy.stats import rankdata
     ra, rb = rankdata(a[ok]), rankdata(b[ok])
@@ -188,16 +199,25 @@ def main() -> int:
         print()
         if "t_res" in cat and "ln_phi" in cat:
             r = spearman(cat["ln_phi"], cat["t_res"])
-            print(f"  corr(ln_phi, t_res)  = {r:+.3f}  -> ", end="")
-            print("the damage ranking largely restates TIME SPENT SHEARED"
-                  if abs(r) > 0.9 else
-                  "t_res carries information the damage laws do not")
+            if not np.isfinite(r):
+                print("  corr(ln_phi, t_res)  = n/a — t_res is constant across "
+                      "these particles;\n"
+                      "                         no ranking to correlate (did "
+                      "they reach the shear layer?)")
+            else:
+                print(f"  corr(ln_phi, t_res)  = {r:+.3f}  -> ", end="")
+                print("the damage ranking largely restates TIME SPENT SHEARED"
+                      if abs(r) > 0.9 else
+                      "t_res carries information the damage laws do not")
         if "A_edot" in cat and "ln_phi" in cat:
             r = spearman(cat["ln_phi"], cat["A_edot"])
-            print(f"  corr(ln_phi, A_edot) = {r:+.3f}  -> ", end="")
-            print("exp(1.5*eta) contributes NOTHING (O55 confirmed)"
-                  if r > 0.999 else
-                  "the triaxiality factor does reorder particles")
+            if not np.isfinite(r):
+                print("  corr(ln_phi, A_edot) = n/a — degenerate input")
+            else:
+                print(f"  corr(ln_phi, A_edot) = {r:+.3f}  -> ", end="")
+                print("exp(1.5*eta) contributes NOTHING (O55 confirmed)"
+                      if r > 0.999 else
+                      "the triaxiality factor does reorder particles")
 
     # ── O56 ──
     cvs = np.array([r["density_cv"] for r in rows], dtype=np.float64)
