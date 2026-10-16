@@ -86,7 +86,26 @@ RUN_TAG="${_CASE_NAME}_new"
 # ~90% of the build stage and the mesh is static for every PinShapes case, so
 # a repeat run loads it in seconds. The key hashes the mesh arrays, every
 # build option and the build modules' source, so any change rebuilds.
-OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"   # key hashes mesh+options+build source, so all four cases share it safely
+# OCTREE_CACHE: where the built search structure is cached. The build is ~90%
+# of the build stage and these meshes are static, so a repeat run loads it in
+# under a millisecond instead of rebuilding. The key hashes the mesh arrays,
+# every build option and the build modules' source, so any change rebuilds
+# automatically.
+#
+# Set OCTREE_CACHE_IN_CASE=1 to keep it beside the case instead of in scratch,
+# as <case>.gid/octree_cache/. One entry is a single .h5 file, so it travels
+# with the case and is simple to archive or delete. Resolved after the case
+# directory is known, further down.
+OCTREE_CACHE_IN_CASE=0
+OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"
+
+# OCTREE_CACHE_FORMAT: hdf5 = one self-contained .h5 per entry (default, and
+# what makes keeping it beside the case tidy); dir = the original directory of
+# .npy files. Both are memory-mapped on read and cost the same to open
+# (0.77ms vs 0.41ms for a 0.275 GiB D2 octree, against a 963s build), and
+# entries of either format are read automatically, so switching never strands
+# an existing cache.
+OCTREE_CACHE_FORMAT=hdf5
 
 #   case-flash -- write to /flash during the run (fast IO, not the shared
 #                 Lustre case tree), then MOVE into <case>.gid/<subfolder>
@@ -300,6 +319,13 @@ if [ "$(basename "$_CASE_DIR")" = "post" ]; then
   _CASE_DIR="$(dirname "$_CASE_DIR")"
 fi
 
+# ── Octree cache beside the case, if asked ─────────────────────────────────
+# Done here because it needs _CASE_DIR, which is resolved just above.
+if [ "${OCTREE_CACHE_IN_CASE:-0}" = "1" ]; then
+  OCTREE_CACHE="${_CASE_DIR}/octree_cache"
+  echo "[octree-cache] keeping the cache beside the case: $OCTREE_CACHE"
+fi
+
 # ── Output paths ────────────────────────────────────────────────────────────
 # Two layouts:
 #   OUTPUT_TARGET=scratch (default): /flash for active IO, then move to
@@ -443,6 +469,7 @@ ARGS=(
 # Optional / conditional flags
 [ -n "$CASE_STEM" ]       && ARGS+=( --case-stem "$CASE_STEM" )
 [ -n "$OCTREE_CACHE" ]    && ARGS+=( --octree-cache "$OCTREE_CACHE" )
+[ -n "$OCTREE_CACHE_FORMAT" ] && ARGS+=( --octree-cache-format "$OCTREE_CACHE_FORMAT" )
 [ -n "$MESH_LOAD_WORKERS" ] && ARGS+=( --mesh-load-workers "$MESH_LOAD_WORKERS" )
 [ "$NO_OCTREE_CACHE" = "1" ] && ARGS+=( --no-octree-cache )
 [ "$EXACT_TET_BOX" = "1" ]   && ARGS+=( --exact-tet-box )

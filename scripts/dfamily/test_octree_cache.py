@@ -112,20 +112,70 @@ def main():
         check("arrays are memory-mapped",
               isinstance(got.cell_morton_codes, np.memmap))
 
-        print("\nrobustness")
-        (oc.cache_path(d, key) / "cell_levels.npy").write_bytes(b"garbage")
-        check("corrupt array -> miss, no crash",
-              oc.load(d, key, OctreeCellDataParentCube, verbose=False) is None)
-        oc.store(d, key, built, verbose=False)
-        (oc.cache_path(d, key) / "meta.json").unlink()
-        check("missing meta.json -> miss",
-              oc.load(d, key, OctreeCellDataParentCube, verbose=False) is None)
-        oc.store(d, key, built, verbose=False)
-        check("overwrite an existing entry",
-              oc.load(d, key, OctreeCellDataParentCube,
-                      verbose=False) is not None)
-        meta = json.loads((oc.cache_path(d, key) / "meta.json").read_text())
-        check("meta records the build-source hash", "build_sources" in meta)
+        print("\nrobustness -- both container formats")
+        # The cache can write one .h5 per entry (the default) or a directory
+        # of .npy files. Corruption must degrade to a rebuild in either, so
+        # the checks run against each format on its own terms.
+        for fmt in ("hdf5", "dir"):
+            kf = (fmt + "k").ljust(32, "0")[:32]
+            oc.store(d, kf, built, verbose=False, format=fmt)
+            p_entry = oc.cache_path(d, kf, fmt)
+            check(f"[{fmt}] entry written",
+                  p_entry.is_file() if fmt == "hdf5" else p_entry.is_dir())
+            check(f"[{fmt}] round-trips before corruption",
+                  oc.load(d, kf, OctreeCellDataParentCube,
+                          verbose=False) is not None)
+            if fmt == "hdf5":
+                with open(p_entry, "r+b") as fh:          # truncate the file
+                    fh.truncate(p_entry.stat().st_size // 3)
+            else:
+                (p_entry / "cell_levels.npy").write_bytes(b"garbage")
+            check(f"[{fmt}] corrupt entry -> miss, no crash",
+                  oc.load(d, kf, OctreeCellDataParentCube,
+                          verbose=False) is None)
+            # the marker that makes an entry readable at all
+            oc.store(d, kf, built, verbose=False, format=fmt)
+            if fmt == "hdf5":
+                oc.cache_path(d, kf, "hdf5").unlink()
+            else:
+                (oc.cache_path(d, kf, "dir") / "meta.json").unlink()
+            check(f"[{fmt}] missing marker -> miss",
+                  oc.load(d, kf, OctreeCellDataParentCube,
+                          verbose=False) is None)
+            oc.store(d, kf, built, verbose=False, format=fmt)
+            check(f"[{fmt}] overwrite an existing entry",
+                  oc.load(d, kf, OctreeCellDataParentCube,
+                          verbose=False) is not None)
+            if fmt == "hdf5":
+                import h5py
+                with h5py.File(oc.cache_path(d, kf, "hdf5"), "r") as h:
+                    has_src = "build_sources" in h.attrs
+                    # contiguous datasets are what keep the entry mappable
+                    noff = [k for k in h.keys()
+                            if h[k].size > 0 and h[k].id.get_offset() is None]
+                check(f"[{fmt}] records the build-source hash", has_src)
+                check(f"[{fmt}] all datasets contiguous (mappable)"
+                      + (f" -- non-contiguous: {noff}" if noff else ""),
+                      not noff)
+            else:
+                meta = json.loads(
+                    (oc.cache_path(d, kf, "dir") / "meta.json").read_text())
+                check(f"[{fmt}] meta records the build-source hash",
+                      "build_sources" in meta)
+            got_f = oc.load(d, kf, OctreeCellDataParentCube, verbose=False)
+            check(f"[{fmt}] arrays are memory-mapped",
+                  isinstance(got_f.cell_morton_codes, np.memmap))
+            check(f"[{fmt}] every field identical after round-trip", all(
+                np.array_equal(np.asarray(getattr(built, f)),
+                               np.asarray(getattr(got_f, f)))
+                for f in OctreeCellDataParentCube._fields))
+
+        # An entry written in either format must be found without being told
+        # which, so a cache made before the default changed is still a hit.
+        check("reader finds the hdf5 entry",
+              oc._existing_entry(d, ("hdf5k").ljust(32, "0")[:32])[1] == "hdf5")
+        check("reader finds the dir entry",
+              oc._existing_entry(d, ("dirk").ljust(32, "0")[:32])[1] == "dir")
 
         print("\ninvalidation")
         for label, kw in (
