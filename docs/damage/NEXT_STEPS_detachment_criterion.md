@@ -339,11 +339,34 @@ Be scrupulous here; this is where a novelty claim gets tested.
 | dimensionless criterion removing a per-alloy threshold | Guo et al. (2015), Kang et al. (2013) **[13]** | the *pattern* being borrowed — from casting |
 | bonding governed by creep rate, weakly by triaxiality | Wang et al. (2020) **[10]** | motivates A.1 and the rate-based $\Pi_2$ |
 
-⚠️ **Sticking/slipping and shear-layer-thickness literature is the real risk.** There
-is an established FSW body of work on whether material sticks to or slips past the
-tool, and on shear-layer thickness. A rate-competition detachment criterion may well
-already exist there under different terminology. **We have not searched it.** Until we
-do, the honest claim is narrow:
+⚠️ **SEARCHED 2026-10-16. The risk was real, and the novelty claim must shrink.**
+An Undermind deep search (204 papers) on exactly this question found substantial
+prior art. These are now in Zotero under *FSW Void & Wormhole Prediction*, tagged
+`O57`:
+
+| what exists | reference | overlap with our proposal |
+|---|---|---|
+| **Sliding-to-sticking transition linked DIRECTLY to void formation** | Zhao, Pei & Liu (2022), *Int. J. Adv. Manuf. Technol.* | ⚠️ **the causal chain we proposed, already published** |
+| Analytical stick-slip model, **dimensionless** functions, fraction tied to spin rate | Wang et al. (2021), *Acta Materialia*, 77 cit. | ⚠️ a dimensionless stick/slip criterion already exists |
+| **Critical radius = "location of vanishing material velocity"**, non-dimensional, Bingham plastic, peak T ~80 % of melting | Buck & Langerman (2004) | ⚠️ **an analytically-derived dimensionless detachment radius, 20 years old** |
+| Formal **scaling analysis** of coupled heat transfer + plastic deformation around the pin | Mendez, Tello & Lienert (2010), *Acta Materialia* | ⚠️ the non-dimensionalisation of §B.3, already done properly |
+| Shear-localisation model for process-window estimation | Pei & Dong (2017, 2014) | "shear localisation" may be the established term for our "detachment" |
+
+✅ **What this changes.** Three claims in the earlier draft are no longer available:
+"a dimensionless FSW criterion is novel" (Wang 2021, Buck 2004), "deriving the groups
+is novel" (Mendez 2010), and "linking a stick/slip transition to voids is novel"
+(Zhao 2022). ⚠️ Note Buck & Langerman give a *yield-stress* (Bingham) basis for
+material ceasing to move, which is cleaner physics than the thermal-softening ratio
+$\Pi_2$ proposed in §B.3 — consider adopting it.
+
+⚠️ **What may still be novel**, pending full-text reads: evaluating the criterion
+**locally, per tracer particle, along its own trajectory**, and producing the void as
+a **particle-density deficit from a piecewise-divergent ensemble** rather than from a
+CEL/VOF free surface or an interface-level condition. That is a narrower claim than
+the one this document originally made, and it cannot be confirmed until Zhao (2022)
+and Wang (2021) are read in full.
+
+So the honest claim is narrow:
 
 > ✅ **Defensible claim:** a *dimensionless, locally-evaluated detachment criterion*
 > applied to **tracer particles** to produce a mass-deficit void prediction, with the
@@ -402,7 +425,7 @@ model"*.
 | 3 | **A.2** residence time + threshold sweep | low | — |
 | 4 | **A.4** $\Delta p$ (trend first, threshold only if **[15]** verified) | low | — |
 | 5 | **A.5** indicator table + rank-correlation matrix | low | 1, 3, 4 |
-| 6 | **B.8** one targeted search: FSW sticking/slipping & shear-layer detachment criteria | one search | — |
+| 6 | ✅ **DONE 2026-10-16** — deep search run; see §B.6. Now: read Zhao (2022) and Wang (2021) in full | two PDFs | user to supply |
 | 7 | **B.3–B.4** derive $\Pi_2$, settle $\sigma_\text{ref}$, local form | moderate | 6 |
 | 8 | **B.5** implement two-state rule with hysteresis | moderate | 2, 7 |
 | 9 | **B.7.2–4** falsification suite | moderate | 8 |
@@ -426,8 +449,14 @@ To be merged into `OPEN_QUESTIONS.md` (current highest is **O54**):
   effective degree of freedom. (Wang et al. 2020 **[10]** predicts yes.)
 - **O56** — With detachment off, is the particle density field uniform to estimator
   noise? Any deficit is an artefact. Blocks every detachment result.
-- **O57** — Does the sticking/slipping or shear-layer-thickness literature already
-  contain a rate-competition detachment criterion? Novelty claim depends on this.
+- **O57** — ⚠️ **PARTLY ANSWERED 2026-10-16: YES, substantially.** See §B.6. A
+  dimensionless stick/slip criterion (Wang 2021), a non-dimensional critical radius
+  at vanishing material velocity (Buck & Langerman 2004), a formal scaling analysis
+  of the pin region (Mendez 2010) and a sliding-to-sticking transition tied to void
+  formation (Zhao 2022) all exist. **Remaining question:** has anyone evaluated such
+  a criterion LOCALLY per tracer particle to produce a mass-deficit void? Requires
+  reading Zhao (2022) and Wang (2021) in full — both flagged `needs-fulltext` in
+  Zotero.
 - **O58** — Can $\Pi_\text{crit}$ be fitted on A/B/C and predict D, or must it be
   refitted per family? If refitted, the dimensionless construction has failed.
 - **O59** — What is the correct $\sigma_\text{ref}$ in $\Pi_2$, and can it be chosen
