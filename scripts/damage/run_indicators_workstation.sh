@@ -76,8 +76,12 @@ VELOCITY_FIELD=Displacement
 LEVELSET_FIELD=LevelSet
 DT=0.0003629
 LOG_INTERVAL=10
+# ⚠️ SEED_SOURCE=grid takes --seed-box + --seed-grid. --seed-fraction belongs to
+# the 'grid-frac' source and is NOT interchangeable: passing fraction with
+# source=grid fails at the seeding stage, after the mesh load has already cost
+# ~13 minutes. Mirrors the reference script's own case dispatch.
 SEED_SOURCE=grid
-SEED_FRACTION="0.0 0.2 0.0 1.0 0.0 1.0"
+SEED_BOX="${SEED_BOX:--0.0199 -0.0111 -0.01499 0.01499 -0.00599 -0.00019}"
 SEED=42
 RK4_MODE=fused
 L1_METHOD=face
@@ -130,8 +134,8 @@ ARGS=(
   --log-interval   "$LOG_INTERVAL"
   --export-freq    "$EXPORT_FREQ"
   --seed-source    "$SEED_SOURCE"
+  --seed-box       $SEED_BOX
   --seed-grid      $SEED_GRID
-  --seed-fraction  $SEED_FRACTION
   --seed           "$SEED"
   --rk4-mode       "$RK4_MODE"
   --l1-method      "$L1_METHOD"
@@ -165,7 +169,7 @@ echo " workstation indicator run"
 echo "   mode      : $MODE"
 echo "   case      : $INPUT  (tag $CASE_TAG, stem ${CASE_STEM:-auto})"
 echo "   steps     : $N_STEPS  dt $DT   vel [$VEL_START,$VEL_END]"
-echo "   seed grid : $SEED_GRID  frac $SEED_FRACTION"
+echo "   seed grid : $SEED_GRID  box $SEED_BOX"
 echo "   driver    : $DAMAGE_DRIVER  order $DAMAGE_ORDER"
 echo "   t_res thr : $RESIDENCE_THR 1/s"
 echo "   out       : $OUT"
