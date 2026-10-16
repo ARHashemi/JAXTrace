@@ -73,7 +73,12 @@ esac
 PRECISION=float32
 VEL_START=34
 VELOCITY_FIELD=Displacement
-LEVELSET_FIELD=LevelSet
+# ⚠️ The field is named LEVEL in these PVTU files, not 'LevelSet'. With the
+# wrong name run_tracking.py only WARNS and disables the mask, so the tool
+# region stops being enforced and particles pass through the pin -- a silent
+# physics change, not an error. Verified against the arrays actually present:
+# ['LEVEL', 'Displacement', 'Pressure', 'Reactions', 'Temperature'].
+LEVELSET_FIELD=LEVEL
 DT=0.0003629
 LOG_INTERVAL=10
 # ⚠️ SEED_SOURCE=grid takes --seed-box + --seed-grid. --seed-fraction belongs to
