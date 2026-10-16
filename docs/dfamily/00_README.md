@@ -198,3 +198,25 @@ from the log alone. Use the /proc probe instead:
 Note the pgrep trap: `pgrep -f run_tracking.py` matches the *srun wrapper*
 first, which sits in futex_wait at 0% CPU and looks like a hang. Match on the
 interpreter path instead.
+
+---
+
+## D-family production results (complete, 2026-10-16)
+
+| case | lost | % | tracking wall | per-cell bound |
+|---|---:|---:|---:|---:|
+| D1 | 2,369 | 0.82% | 9h15 | 32 -> 85 |
+| D2 | 3,044 | 1.06% | 8h44 | 32 -> 79 |
+| D3 | 2,779 | 0.96% | 9h16 | 32 -> 85 |
+| D4 | 1,921 | 0.67% | 9h18 | 32 -> 85 |
+
+288,000 particles, 8,000 steps, `last_valid_vel`, derived per-cell bound,
+octree cache enabled. Against **4.07%** for D2 before the fixes, the whole
+family is now **under 1.1%**.
+
+The bound landing at 85 on three of four cases is the direct confirmation of
+defect 2: the old hardcoded `MAX_ELEMS_PER_CELL=32` left every element past
+the 32nd in those cells untestable.
+
+Results are in `<case>.gid/post_pt_new/` (84 GB each). Array job 22874004,
+all tasks exit 0:0.
