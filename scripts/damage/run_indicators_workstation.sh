@@ -145,7 +145,31 @@ RESIDENCE_THR="${RESIDENCE_THR:-1.0}"
 
 # ── [5] GPU env (CUDA on the workstation, not ROCm) ──────────────────────────
 export JAX_PLATFORMS="${JAX_PLATFORMS:-cuda}"
-export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
+# ⚠️ ALLOCATOR: mirror the reference's XLA_PREALLOC=1 path.
+# The first full attempt set PREALLOCATE=false and left the allocator unset, and
+# died at stage 6/7 with
+#   RESOURCE_EXHAUSTED: CUDA_ERROR_OUT_OF_MEMORY  (Failed to load in-memory CUBIN)
+# after 1h29 of loading and field building. It was NOT the data: persistent
+# device arrays total only ~8.5 GB of the 32.6 GB card (velocity 3.83 + damage
+# 3.83 + octree 0.44 + mesh 0.37 + particles 0.01). The failure is allocator
+# behaviour during JIT -- on-demand growth fragments the heap, so XLA cannot find
+# contiguous space for the compiled module even with GB free.
+#
+# The reference per-case script ships XLA_PREALLOC=1, i.e. a single pooled
+# preallocation of ~75 % of HBM, which is also what the 45-case survey ran with.
+# ⚠️ Its non-prealloc branch ALSO sets XLA_PYTHON_CLIENT_ALLOCATOR=platform,
+# which I had omitted entirely -- so my fallback was neither of the two
+# configurations the reference supports.
+XLA_PREALLOC="${XLA_PREALLOC:-1}"
+if [ "$XLA_PREALLOC" = "1" ]; then
+    export XLA_PYTHON_CLIENT_PREALLOCATE=true
+    unset  XLA_PYTHON_CLIENT_ALLOCATOR
+    echo "[perf] XLA preallocating allocator ENABLED (pooled, ~75% HBM)"
+else
+    export XLA_PYTHON_CLIENT_PREALLOCATE=false
+    export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+    echo "[perf] XLA on-demand allocator (platform)"
+fi
 export PYTHONPATH="$JAXTRACE${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
 export TF_CPP_MIN_LOG_LEVEL=3

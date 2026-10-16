@@ -50,6 +50,12 @@ MUST_MATCH = [
     "FAILED_SUBSTAGE", "INTERPOLATION_METHOD", "PIN_RPM", "PIN_CENTER",
     "PIN_AXIS", "PIN_TILT", "N_GROUPS", "BOUNDARY_WALLS", "MESH_SUBDIR",
     "FEMUSS_SUBDIR", "REGISTRATION", "EXACT_TET_BOX", "MAX_ELEMS_PER_CELL",
+    # ⚠️ Allocator strategy is NOT cosmetic. Running with PREALLOCATE=false and
+    # no XLA_PYTHON_CLIENT_ALLOCATOR killed a D2 run at stage 6/7 with
+    # CUDA_ERROR_OUT_OF_MEMORY after 1h29, while persistent device arrays needed
+    # only ~8.5 GB of a 32.6 GB card: on-demand growth fragments the heap so XLA
+    # cannot place the compiled module. Keep this matched to the reference.
+    "XLA_PREALLOC",
 ]
 
 # Allowed to differ, with the reason. Reported, never a failure.
