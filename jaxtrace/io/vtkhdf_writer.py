@@ -473,6 +473,39 @@ class VTKHDFExportThread:
     ``stop()``. Internally serialises every queued step through a single
     :class:`TransientPolyDataWriter` so the on-disk file has steps in
     enqueue order.
+    
+    WHY ONE WORKER THREAD, NOT SEVERAL (measured 2026-10-16)
+    --------------------------------------------------------
+    Two independent reasons, either sufficient on its own:
+
+    1. It would not help. One write_step at production scale (288k particles;
+       positions + ParticleID + ElementID + a 4-column damage array = 10.4 MB)
+       takes a median of 92 ms at 113 MB/s. On LUMI the D2 reference is 13h22
+       for 8000 steps = 6017 ms of GPU time per step, so at EXPORT_FREQ=50 the
+       writer has 300.8 s of GPU work to hide behind and uses 0.03% of it. It
+       would have to become ~3270x slower before it stalled the GPU. The queue
+       (maxsize 200) also exceeds the total exports a run makes (160 at
+       8000/50), so a full queue -- the only way enqueue_export can block --
+       cannot occur.
+
+    2. It is not safe. write_step APPENDS to a single HDF5 file and mutates
+       shared state: the Steps/NSteps attribute, PointOffsets, and the length of
+       every PointData dataset, where each step's offset is derived from the
+       CURRENT dataset length. Concurrent writers would interleave those offsets
+       and corrupt the archive. h5py here is a non-MPI build
+       (get_config().mpi is False) and the HDF5 C library serialises through a
+       global lock, so parallel writes to one file would be serialised anyway --
+       adding the corruption risk for no throughput.
+
+    The one case where export cost does matter is EXPORT_FREQ=1, which the
+    per-case reference scripts ship: the budget falls to a single step (6017 ms)
+    and the duty cycle rises to ~2%. Still not blocking, but that is also ~844 GB
+    of output at 288k particles, so the export CADENCE -- not the thread count --
+    is the knob to reach for.
+
+    If export ever does become the bottleneck, the fix is not more threads on one
+    file: it is a coarser EXPORT_FREQ, fewer exported fields, or one file per
+    chunk concatenated afterwards.
     """
 
     def __init__(
