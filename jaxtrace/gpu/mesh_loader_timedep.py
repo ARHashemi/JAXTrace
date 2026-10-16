@@ -246,6 +246,20 @@ def load_field_sequences_from_pvtu(
     idle NVMe sits beside it. Staging a case onto NVMe would help far more than
     adding workers.
 
+    ⚠️ MEMORY COST OF WORKERS. Each in-flight thread holds a full VTK reader plus
+    that snapshot's positions and connectivity, and VTK's parse internals dominate
+    the footprint -- far more than the arrays themselves suggest. Measured on the
+    D2 case (1.92M nodes, ~9.6M tets, 3 fields, 166 snapshots) at 16 workers:
+    RSS plateaued at 36-43 GB against a 6.4 GB output stack, on a 58 GB host with
+    ~19 GB left free and 10 GB of swap in use.
+
+    The footprint PLATEAUS rather than growing with snapshot count -- readers are
+    freed as each snapshot completes -- so the run is bounded and completes. But
+    the plateau scales with n_workers, so on a smaller-memory host, or a mesh
+    larger than this one, reduce the worker count: it trades memory for a speedup
+    that is already disk-limited. 4 workers reached 3.10x where 16 reached 3.45x,
+    for roughly a quarter of the concurrent readers.
+
     Parameters
     ----------
     base_path : Path
