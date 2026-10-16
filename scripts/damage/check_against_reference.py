@@ -65,6 +65,14 @@ EXPECTED_DIFFERENT = {
     "OUTPUT_CASE_SUBFOLDER": "output destination",
     "CASE_STEM": "⚠️ pinned deliberately where auto-detection fails "
                  "(e.g. D2.gid holds A2_*.pvtu)",
+    "OCTREE_CACHE": "cache location is host-dependent",
+    "OCTREE_CACHE_IN_CASE": "⚠️ turned ON deliberately: the octree cache is the "
+                            "one artefact allowed in the case folder, and "
+                            "belongs there so every run of that case shares "
+                            "one 963s build",
+    "OCTREE_CACHE_FORMAT": "hdf5 chosen deliberately: one self-contained .h5 "
+                           "per entry keeps the case folder tidy; falls back "
+                           "to a .npy dir if h5py is missing",
     "SIF": "container, not used off LUMI",
     "JAXTRACE": "repo path differs per host",
     "PKGS": "package path differs per host",

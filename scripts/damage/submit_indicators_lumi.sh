@@ -52,6 +52,24 @@ SUBMIT="${SUBMIT:-0}"
 # which writes to /scratch/$PROJECT/$USER/outputs/<case>_jaxtrace_<jobid>.
 OUT_ROOT="${OUT_ROOT:-/scratch/project_465002752/hashemia/damage_indicators}"
 
+# ── Octree cache: the ONE thing allowed in the case folder on LUMI ───────────
+# ⚠️ Note the asymmetry, and keep it. RESULTS must stay out of the case folders
+# under lorenzgl/ (hence OUTPUT_TARGET=scratch above), but the OCTREE CACHE is
+# explicitly permitted to live beside the case as <case>.gid/octree_cache/.
+# That is the right place for it: the cache is a pure function of the mesh and
+# the build options, so one copy beside the case is reused by every run of that
+# case by anyone, instead of each user rebuilding 963s of octree in their own
+# scratch.
+#
+# The key hashes the mesh arrays, every build option and the build modules'
+# source, so a code or option change rebuilds rather than reusing a stale tree.
+# hdf5 gives one self-contained .h5 per entry, which keeps the case folder tidy
+# and travels with the case; it is verified working on LUMI (h5py 3.16.0 /
+# HDF5 2.0.0 in the container via PYTHONPATH=$PKGS) and falls back to a .npy
+# directory if h5py is ever missing, rather than losing the build.
+OCTREE_CACHE_IN_CASE="${OCTREE_CACHE_IN_CASE:-1}"
+OCTREE_CACHE_FORMAT="${OCTREE_CACHE_FORMAT:-hdf5}"
+
 ALL_CASES="D1 D2 D3 D4 A1 A2 A3 A4 B1 B2 B3 B4 C1 C2 C3 C4"
 CASES="${CASES:-$ALL_CASES}"
 
@@ -72,6 +90,7 @@ echo "   cases      : $CASES"
 echo "   driver     : models   order $DAMAGE_ORDER"
 echo "   t_res thr  : $RESIDENCE_THR 1/s"
 echo "   out root   : $OUT_ROOT  (OUTPUT_TARGET=scratch)"
+echo "   octree\$   : $([ "$OCTREE_CACHE_IN_CASE" = 1 ] && echo "beside each case (<case>.gid/octree_cache)" || echo "scratch")  format $OCTREE_CACHE_FORMAT"
 echo "   staged to  : $STAGE"
 echo "   submit     : $([ "$SUBMIT" = "1" ] && echo YES || echo "no (dry run)")"
 echo "============================================================"
@@ -94,9 +113,10 @@ for c in $CASES; do
     # nothing in the per-case configuration is edited or reordered. The
     # per-case conditional flags that follow ARGS=() keep working because
     # they also use ARGS+=().
-    python3 - "$dst" "$DAMAGE_ORDER" "$RESIDENCE_THR" "$OUT_ROOT" "$c" <<'PYEOF'
+    python3 - "$dst" "$DAMAGE_ORDER" "$RESIDENCE_THR" "$OUT_ROOT" "$c" \
+             "$OCTREE_CACHE_IN_CASE" "$OCTREE_CACHE_FORMAT" <<'PYEOF'
 import re, sys
-path, order, thr, out_root, case = sys.argv[1:6]
+path, order, thr, out_root, case, oc_in_case, oc_fmt = sys.argv[1:8]
 s = open(path).read()
 
 # 1. Append the indicator flags right after the ARGS array literal closes.
@@ -136,7 +156,21 @@ s, n3 = re.subn(r'^(\s*)SCRATCH_FOLDER="\${_CASE}_jaxtrace_\${SLURM_JOB_ID}"',
 if n3 == 0:
     print(f"    [note] {case}: kept the auto SCRATCH_FOLDER name")
 
-# 3. Distinguish the job name in squeue / log filenames.
+# 3. Octree cache. ⚠️ Deliberately the OPPOSITE of the output rule above: the
+#    cache IS allowed beside the case on LUMI, and belongs there so every run of
+#    that case shares one build instead of each user rebuilding it.
+s, n4 = re.subn(r'^OCTREE_CACHE_IN_CASE=\S+',
+                f'OCTREE_CACHE_IN_CASE={int(oc_in_case)}', s, count=1, flags=re.M)
+if n4 == 0:
+    print(f"    [note] {case}: no OCTREE_CACHE_IN_CASE key; cache left as the "
+          f"script had it")
+s, n5 = re.subn(r'^OCTREE_CACHE_FORMAT=\S+',
+                f'OCTREE_CACHE_FORMAT={oc_fmt}', s, count=1, flags=re.M)
+if n5 == 0:
+    print(f"    [note] {case}: no OCTREE_CACHE_FORMAT key; format left as the "
+          f"script had it")
+
+# 4. Distinguish the job name in squeue / log filenames.
 s = re.sub(r'^#SBATCH --job-name=\S+', '#SBATCH --job-name=dmgind',
            s, count=1, flags=re.M)
 

@@ -114,6 +114,28 @@ BOUNDARY_WALLS="x_max=clamp"
 # check_against_reference.py lists MESH_LOAD_WORKERS as host-dependent.
 MESH_LOAD_WORKERS="${MESH_LOAD_WORKERS:-16}"
 
+# ── Octree cache ─────────────────────────────────────────────────────────────
+# The D2 octree build is the second-longest stage after the mesh load (~963s for
+# 5.98M cells / 10.8M elements / 85M CSR entries), and it is pure waste on every
+# repeat of the same case: these meshes are static. The cache key hashes the mesh
+# arrays, every build option AND the build modules' source, so any real change
+# rebuilds automatically rather than silently reusing a stale tree.
+#
+# IN_CASE=1 keeps it as <case>.gid/octree_cache/ so it travels with the case;
+# hdf5 makes each entry a single self-contained .h5, which is what makes that
+# tidy. Both formats are memory-mapped on read and entries of either are read
+# automatically, so switching never strands an existing cache.
+# ⚠️ hdf5 falls back to a directory if h5py is missing rather than losing the
+# build. Verified present here: h5py 3.16.0 in /flash/shared/jax/.venv.
+OCTREE_CACHE_IN_CASE="${OCTREE_CACHE_IN_CASE:-1}"
+OCTREE_CACHE_FORMAT="${OCTREE_CACHE_FORMAT:-hdf5}"
+OCTREE_CACHE="${OCTREE_CACHE:-/scratch/shared/octree_cache}"
+if [ "$OCTREE_CACHE_IN_CASE" = "1" ]; then
+    # Resolved from INPUT, mirroring the per-case scripts' own resolution.
+    _CASE_DIR="${INPUT%/post}"
+    OCTREE_CACHE="${_CASE_DIR}/octree_cache"
+fi
+
 # ── [4] The indicators under test ────────────────────────────────────────────
 # models driver is REQUIRED: the Piwnik-Plata integrand is p/sigma_bar = -eta,
 # and eta only exists in the 3-slot [edot, eta, s1_ratio] stack.
@@ -147,6 +169,7 @@ cp "$0" "${OUT}/run_script.sh" 2>/dev/null
     echo "levelset      : $LEVELSET_FIELD ($LEVELSET_MODE)"
     echo "damage        : driver=$DAMAGE_DRIVER order=$DAMAGE_ORDER"
     echo "residence_thr : $RESIDENCE_THR"
+    echo "octree_cache  : $OCTREE_CACHE (format $OCTREE_CACHE_FORMAT)"
     echo "repo_commit   : $(cd "$JAXTRACE" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     echo "python        : $VENV_PY"
 } > "${OUT}/RUN_INFO.txt"
@@ -185,6 +208,8 @@ ARGS=(
   --n-groups   "$N_GROUPS"
   --boundary-walls "$BOUNDARY_WALLS"
   --mesh-load-workers "$MESH_LOAD_WORKERS"
+  --octree-cache        "$OCTREE_CACHE"
+  --octree-cache-format "$OCTREE_CACHE_FORMAT"
   # the indicators
   --damage
   --damage-driver "$DAMAGE_DRIVER"
@@ -205,6 +230,7 @@ echo "   driver    : $DAMAGE_DRIVER  order $DAMAGE_ORDER"
 echo "   t_res thr : $RESIDENCE_THR 1/s"
 echo "   out       : $OUT"
 echo "   log       : $LOG   (tail -f this)"
+echo "   octree\$ : $OCTREE_CACHE  (format $OCTREE_CACHE_FORMAT)"
 echo "   python    : $VENV_PY"
 echo "============================================================"
 
