@@ -76,6 +76,13 @@ process writing one local file on Lustre.
 Both formats remain supported and are chosen per call. The reader sniffs what
 is actually on disk, so entries written by either format are readable
 regardless of the current default, and a mixed cache directory is fine.
+
+The DIRECTORY format is the default, because it needs only numpy. h5py is not
+installed in the LUMI JAX container, and this cache exists so that a ~963 s
+build is never repeated or lost; it must not hinge on an optional dependency.
+`store(format="hdf5")` falls back to the directory if h5py is missing, and a
+.h5 entry that cannot be opened is reported as a miss and rebuilt, so neither
+direction can fail a run.
 """
 
 from __future__ import annotations
@@ -193,7 +200,11 @@ def _h5_read_array(h5path: Path, dset, mmap: bool):
 
 
 def _load_hdf5(path: Path, key: str, cls, mmap: bool):
-    """Read an entry from a single .h5. Shape mirrors the directory reader."""
+    """Read an entry from a single .h5. Shape mirrors the directory reader.
+
+    A missing h5py raises ImportError, which `load` reports as an unusable
+    entry and turns into a rebuild -- the same degradation as a corrupt file.
+    """
     import h5py
     fields, total = {}, 0
     with h5py.File(path, "r") as h:
@@ -267,11 +278,16 @@ def load(cache_dir: str | os.PathLike, key: str, cls,
 
 
 def store(cache_dir: str | os.PathLike, key: str, octree,
-          verbose: bool = True, format: str = "hdf5") -> bool:
+          verbose: bool = True, format: str = "dir") -> bool:
     """Write an octree to the cache. Returns True on success.
 
-    ``format="hdf5"`` (the default) writes one self-contained .h5; "dir"
-    writes the original directory of .npy files. Both are readable by `load`
+    ``format="dir"`` (the default) writes the directory of .npy files;
+    "hdf5" writes one self-contained .h5. The directory is the default
+    because it needs only numpy: h5py is NOT in the LUMI JAX container, and
+    the cache exists to avoid losing a ~963 s build, so it must not depend on
+    an optional library. Ask for "hdf5" when the single file is worth it --
+    keeping the cache beside a case, copying or archiving it -- having checked
+    h5py is importable there. Both are readable by `load`
     whatever the current default, so changing this does not strand an entry.
 
     Written to a temporary path and renamed into place, so an interrupted
@@ -294,6 +310,19 @@ def store(cache_dir: str | os.PathLike, key: str, octree,
         t0 = time.time()
         total = 0
         scalars = {}
+
+        if format == "hdf5":
+            try:
+                import h5py
+            except ImportError:
+                # Never lose a 963 s build over a missing optional library:
+                # fall back to the directory format, which needs only numpy.
+                if verbose:
+                    print("  [octree-cache] h5py unavailable; storing as a "
+                          ".npy directory instead")
+                format = "dir"
+                final = cache_path(cache_dir, key, format)
+                tmp = final.with_name(final.name + f".tmp{os.getpid()}")
 
         if format == "hdf5":
             import h5py

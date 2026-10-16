@@ -56,13 +56,18 @@ PKGS="/projappl/${PROJECT}/hashemia/required-packages"
 OCTREE_CACHE_IN_CASE=0
 OCTREE_CACHE="/scratch/${PROJECT}/${USER}/octree_cache"
 
-# OCTREE_CACHE_FORMAT: hdf5 = one self-contained .h5 per entry (default, and
-# what makes keeping it beside the case tidy); dir = the original directory of
-# .npy files. Both are memory-mapped on read and cost the same to open
-# (0.77ms vs 0.41ms for a 0.275 GiB D2 octree, against a 963s build), and
-# entries of either format are read automatically, so switching never strands
-# an existing cache.
-OCTREE_CACHE_FORMAT=hdf5
+# OCTREE_CACHE_FORMAT: dir = a directory of .npy files (default, needs only
+# numpy); hdf5 = one self-contained .h5 per entry, which is what makes keeping
+# the cache beside a case tidy. Both are memory-mapped on read and cost the
+# same to open (0.41ms vs 0.77ms for a 0.275 GiB D2 octree, against a 963s
+# build), and entries of either format are read automatically, so switching
+# never strands an existing cache.
+#
+# hdf5 WORKS on LUMI -- verified h5py 3.16.0 / HDF5 2.0.0 inside the container
+# via PYTHONPATH=$PKGS, contiguous offset and byte-exact memmap -- but dir is
+# the default because it depends on nothing. Asking for hdf5 where h5py is
+# missing falls back to a directory rather than losing the build.
+OCTREE_CACHE_FORMAT=dir
 
 INPUT="/scratch/project_465002752/lorenzgl/Cases/PinShapes/A-FlatsVariations/A1.gid"
 

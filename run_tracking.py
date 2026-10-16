@@ -394,21 +394,24 @@ def parse_args():
                              "key hashes the node/connectivity ARRAYS plus "
                              "every build option plus the build modules' "
                              "source, so any change rebuilds automatically.")
-    parser.add_argument("--octree-cache-format", type=str, default="hdf5",
-                        choices=["hdf5", "dir"],
-                        help="Container for the octree cache. 'hdf5' "
-                             "(default) writes one self-contained .h5 per "
+    parser.add_argument("--octree-cache-format", type=str, default="dir",
+                        choices=["dir", "hdf5"],
+                        help="Container for the octree cache. 'dir' (default) "
+                             "writes a directory of .npy files and needs only "
+                             "numpy; 'hdf5' writes one self-contained .h5 per "
                              "entry, which is tidier to copy, archive or keep "
-                             "beside a case; 'dir' writes the original "
-                             "directory of .npy files. Both cost the same to "
-                             "open, because the HDF5 datasets are written "
+                             "beside a case. Both cost the same to open, "
+                             "because the HDF5 datasets are written "
                              "contiguous and uncompressed and are therefore "
                              "memory-mapped through their file offset just as "
-                             ".npy files are (measured 0.77ms vs 0.41ms to "
-                             "open a 0.275 GiB D2 octree, against a 963s "
-                             "build). Entries of either format are "
-                             "read automatically, so changing this never "
-                             "strands an existing cache.")
+                             ".npy files are (0.77ms vs 0.41ms to open a "
+                             "0.275 GiB D2 octree, against a 963s build). "
+                             "'dir' is the default because h5py is NOT in the "
+                             "LUMI JAX container; asking for 'hdf5' there "
+                             "falls back to a directory rather than losing "
+                             "the build. Entries of either format are read "
+                             "automatically, so changing this never strands "
+                             "an existing cache.")
     parser.add_argument("--no-octree-cache", action="store_true",
                         help="Ignore and do not write the octree cache even "
                              "if --octree-cache is set. Use to force a "
