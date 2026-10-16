@@ -878,8 +878,26 @@ conditions cannot feed liquid into the solidifying region.
 ### 3.11.2 The dimensionless form — the better idea
 
 ⚠️ The classical criterion's weakness is exactly ours: **the threshold is
-alloy-specific and requires extensive experimentation.** **Guo et al. (2015)** and
-**Kang et al. (2013)** use a *dimensionless* Niyama that
+alloy-specific and requires extensive experimentation.**
+
+⚠️ **Attribution corrected 2026-10-16, from the Guo 2015 PDF.** The dimensionless
+form $Ny^*$ is **Carlson & Beckermann (2009)**, *Metall. Mater. Trans. A* **40A**,
+163–175 — Guo et al. cite it as their ref [1] and *apply* it rather than deriving
+it. It is derived from Darcy's law in a 1-D directionally solidifying system, and
+its actual form is
+
+$$Ny^* = C_\lambda \frac{G}{\dot T^{5/6}}\Big/\sqrt{\frac{\Delta P_{cr}}{\mu\,\beta\,\Delta T_f}}$$
+
+with $C_\lambda$ a material constant, $\Delta T_f$ the freezing range, $\beta$ the
+solidification shrinkage, and $\Delta P_{cr}$ the critical pressure drop.
+
+⚠️ **Note the exponent: $\dot T^{5/6}$, not $\sqrt{\dot T}$.** The dimensionless
+form is not a rescaling of the classical $G/\sqrt{\dot T}$ — the cooling-rate
+scaling itself changes, and the output is a *pore volume fraction* rather than a
+flag. Any FSW analogue should be derived the same way (from a transport equation),
+not assembled by inspection.
+
+**Guo et al. (2015)** applies it to Ni-based superalloy castings and reports that it
 
 > *"avoids the need to find a threshold Niyama criterion below which shrinkage
 > porosity forms — a criterion which can be determined only via extensive
@@ -1063,9 +1081,25 @@ the *values* depended entirely on fitted constants.
 
 12. **Carlson, K., and Beckermann, C.** (2008). *Use of the Niyama Criterion to Predict
     Shrinkage-Related Leaks…* — $\text{Ny}_\text{micro}=2.0$, $\text{Ny}_\text{macro}=1.0$.
-13. **Guo, J.-Z., Beckermann, C., Carlson, K.,** et al. (2015); **Kang, M.-D.,** et al.
-    (2013), *Materials*, 1789–1802. — the **dimensionless** Niyama, which removes the
-    per-alloy threshold.
+13. **Carlson, K. D., and Beckermann, C.** (2009). *Metall. Mater. Trans. A* **40A**,
+    163–175. — ⚠️ **the actual source of the dimensionless Niyama $Ny^*$.** Earlier
+    drafts of this document credited Guo (2015) / "Kang (2013)"; Guo cites this as
+    ref [1] and applies it. ✅ Confirmed from the Guo 2015 PDF.
+14. **Guo, J.,** et al. (2015). *IOP Conf. Ser.: Mater. Sci. Eng.* **84**, 012003,
+    "Microporosity Prediction and Validation for Ni-based Superalloy Castings."
+    ✅ PDF read. Integrates $Ny^*$ with a POROS=1 model.
+15. **Monroe, C.,** et al. (2014). *JOM* — extends the dimensionless Niyama to include
+    **applied strain**, giving a hot-tearing criterion. ⚠️ The closest casting
+    analogue to our problem, because it adds a *mechanical* driving term to a
+    criterion that was originally purely thermal.
+16. **Poliakov, S. N.,** et al. (2017). *J. Phys.: Conf. Ser.* **918**, 012001. — a
+    SECOND, independent dimensionless microporosity criterion. ✅ PDF read. Useful
+    because it shows non-dimensionalisation is an established methodology in this
+    field, not a single paper's idiosyncrasy.
+17. **Esser, P.,** et al. (2020). *IOP Conf. Ser.: Mater. Sci. Eng.* **861**, 012022.
+    ✅ PDF read.
+18. ⚠️ **"Kang, M.-D., et al. (2013), *Materials*, 1789–1802" could not be located**
+    and is not cited by Guo. Treat it as unverified and do not cite it.
 
 **Other indicator families (§3.7, §3.9)**
 
