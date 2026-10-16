@@ -2271,35 +2271,51 @@ def main():
             mat_path = _cands[0] if _cands else None
 
         stack = np.empty((len(slots), n_ts, n_nod), dtype=config.FLOAT_DTYPE_NP)
+
+        # ⚠️ Hoist the mesh geometry out of the per-timestep loop. grad_N and
+        # the element volumes are a pure function of (node_positions,
+        # connectivity), which are STATIC across the whole snapshot sequence,
+        # but build_damage_fields used to recompute them on every call: a
+        # 10.8M-element np.linalg.det + np.linalg.inv, 5.88 s each at D2 scale.
+        # With the models driver calling it twice per timestep that was 332
+        # rebuilds of an invariant.
+        from jaxtrace.damage.fields import tet_shape_gradients
+        _t_geom = time.time()
+        _geom = tet_shape_gradients(node_positions, connectivity)
+        print(f"  [damage] mesh geometry (grad_N, volume) hoisted: "
+              f"{time.time() - _t_geom:.1f}s once, reused for {n_ts} timesteps")
+
+        _warned_no_tables = False
         for _t in range(n_ts):
             if not want_models:
                 f = build_damage_fields(
                     node_positions, connectivity,
-                    velocity_sequence[_t], None, verbose=False)
+                    velocity_sequence[_t], None, verbose=False, geom=_geom)
                 stack[0, _t] = f["edot"]
                 continue
 
-            # Two passes, as run_stage1 does: edot first, then sigma_eq from the
-            # FOM's own Norton tables, then rebuild so eta uses the real rheology.
-            edot0 = build_damage_fields(
-                node_positions, connectivity,
-                velocity_sequence[_t], None, verbose=False,
-            )["edot"].astype(np.float64)
+            # ⚠️ ONE pass, not two. This used to call build_damage_fields once
+            # to get edot, build sigma_eq from it, then call the function AGAIN
+            # so eta would use the real rheology -- repeating the velocity
+            # gradient, the deviator and the nodal scatter. sigma_eq_from_edot
+            # closes over the Norton tables and is evaluated INSIDE the single
+            # pass, at the point where edot is already in hand.
             T_t = (temperature_sequence[_t] if temperature_sequence is not None
                    else None)
             if mat_path is not None and T_t is not None:
-                sigma_eq, _ = build_sigma_eq("norton", edot0, T_t,
-                                             mat_path=mat_path)
+                def _sig(edot_nodal, _T=T_t):
+                    return build_sigma_eq("norton", edot_nodal, _T,
+                                          mat_path=mat_path)[0]
             else:
-                # No tables: sigma_eq proportional to edot. eta is then a RANKING
-                # quantity only, which is stated rather than hidden.
-                sigma_eq = None
-                print("  [damage] WARNING: no .mat or no temperature; "
-                      "sigma_eq falls back to 3*edot -> eta is scale-free")
+                _sig = None
+                if not _warned_no_tables:
+                    print("  [damage] WARNING: no .mat or no temperature; "
+                          "sigma_eq falls back to 3*edot -> eta is scale-free")
+                    _warned_no_tables = True
             f = build_damage_fields(
                 node_positions, connectivity,
                 velocity_sequence[_t], pressure_sequence[_t],
-                sigma_flow=sigma_eq, verbose=False)
+                verbose=False, geom=_geom, sigma_eq_from_edot=_sig)
             stack[0, _t] = f["edot"]
             stack[1, _t] = f["eta"]
             stack[2, _t] = f["s1_ratio"]

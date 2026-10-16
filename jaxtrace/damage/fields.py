@@ -159,6 +159,8 @@ def build_damage_fields(
     sigeq_floor: float = SIGEQ_FLOOR,
     eta_clamp: float = ETA_CLAMP,
     verbose: bool = True,
+    geom: Optional[tuple] = None,
+    sigma_eq_from_edot=None,
 ) -> dict:
     """Build the nodal damage-driver scalars for ONE timestep.
 
@@ -192,7 +194,16 @@ def build_damage_fields(
     """
     n_nodes = len(node_positions)
 
-    grad_N, volume = tet_shape_gradients(node_positions, connectivity)
+    # ⚠️ grad_N and volume depend ONLY on the mesh, which is static across the
+    # whole snapshot sequence. Recomputing them per timestep was 5.88 s of a
+    # ~14.9 s timestep at D2 scale (10.8M tets): a 10.8M-element np.linalg.det
+    # plus np.linalg.inv, 166 times over -- and TWICE that for the models
+    # driver, which used to call this function twice per timestep. Pass `geom`
+    # to hoist it out of the loop; see build_damage_field_sequence.
+    if geom is not None:
+        grad_N, volume = geom
+    else:
+        grad_N, volume = tet_shape_gradients(node_positions, connectivity)
     L = velocity_gradient_per_element(velocity, connectivity, grad_N)
 
     # Rate of deformation (symmetric part) and spin (antisymmetric, discarded:
@@ -229,6 +240,25 @@ def build_damage_fields(
             "n_inverted": int((volume < 0).sum()),
         }
     sigma_m = -np.asarray(pressure, dtype=np.float64)
+
+    # ⚠️ Single-pass route for the 'models' driver. sigma_eq needs edot, and
+    # edot has just been computed above -- so a caller that previously ran this
+    # whole function once to get edot, built sigma_eq from it, then ran the
+    # function AGAIN can instead pass a callable here. That removes a second
+    # tet_shape_gradients + velocity_gradient_per_element + scatter per
+    # timestep: at D2 scale, 8.61 s of a 23.47 s timestep.
+    if sigma_eq_from_edot is not None:
+        # ⚠️ Feed the FLOAT32 edot, exactly as the old two-pass caller did: it
+        # read f["edot"] from the returned dict, which is cast to float32 on
+        # the way out, and passed THAT to build_sigma_eq. Passing the internal
+        # float64 edot here is marginally more accurate but NOT identical --
+        # measured max|delta| 1.6e-2 on sigma_eq, 3.8e-6 on s1_ratio. Changing
+        # the numerics while claiming to optimise would make every result
+        # incomparable with the 45-case survey, so the float32 round-trip is
+        # reproduced deliberately.
+        sigma_flow = np.asarray(
+            sigma_eq_from_edot(edot.astype(np.float32).astype(np.float64)),
+            dtype=np.float64)
 
     if mu_eff is not None:
         sigma_eq = 3.0 * np.asarray(mu_eff, dtype=np.float64) * edot
