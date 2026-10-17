@@ -52,6 +52,12 @@ X_AFTER_TOOL_MM = 7.4      # wake box start, as in make_wake_metrics.py
 DZ_FRAC = 0.08             # drop the top 8 % of thickness (shoulder-dominated)
 
 
+def _case_name(src: str, path: str) -> str:
+    """Case label for an npz, whether it sits at <src>/<case>/ or one deeper."""
+    rel = os.path.relpath(path, src)
+    return rel.split(os.sep)[0]
+
+
 def load_case(path: str):
     """One damage_*.npz -> (tag, dict of indicator arrays, positions)."""
     z = np.load(path, allow_pickle=True)
@@ -141,12 +147,24 @@ def main() -> int:
     ap.add_argument("--cases", nargs="*", default=None)
     args = ap.parse_args()
 
-    paths = sorted(glob.glob(os.path.join(args.src, "*", "damage_*.npz")))
+    # ⚠️ Search BOTH depths. run_tracking.py writes the npz into a per-run
+    # subfolder named after the seeding (e.g. <case>/run_grid_n288000_s8000/),
+    # so a single "*/damage_*.npz" glob silently finds nothing on a real
+    # production tree -- which is exactly what happened with the first LUMI
+    # results. Deduplicate by case name, newest first, so a re-run supersedes
+    # an older one rather than appearing twice.
+    _hits = (glob.glob(os.path.join(args.src, "*", "damage_*.npz"))
+             + glob.glob(os.path.join(args.src, "*", "*", "damage_*.npz")))
+    _by_case: dict = {}
+    for _p in sorted(_hits, key=os.path.getmtime, reverse=True):
+        _case = _case_name(args.src, _p)
+        _by_case.setdefault(_case, _p)
+    paths = [p for _, p in sorted(_by_case.items())]
     if args.cases:
         keep = set(args.cases)
         paths = [p for p in paths
-                 if os.path.basename(os.path.dirname(p)) in keep
-                 or os.path.basename(os.path.dirname(p)).split("_")[-1] in keep]
+                 if _case_name(args.src, p) in keep
+                 or _case_name(args.src, p).split("_")[-1] in keep]
     if not paths:
         print(f"  no damage_*.npz under {args.src}")
         return 1
@@ -158,7 +176,7 @@ def main() -> int:
     print("  " + "-" * (len(hdr) - 2))
 
     for p in paths:
-        tag = os.path.basename(os.path.dirname(p))
+        tag = _case_name(args.src, p)
         ind, pos = load_case(p)
         m = wake_mask(pos)
         if m.sum() < 100:
