@@ -2854,7 +2854,7 @@ def main():
         if args.damage_driver != "models":
             _n_acc = 1
         else:
-            _n_acc = 4 if args.damage_indicators else 2
+            _n_acc = 5 if args.damage_indicators else 2
         if _n_acc == 1:
             damage_gpu = jnp.zeros(n_particles, dtype=config.FLOAT_DTYPE_JNP)
         else:
@@ -3394,7 +3394,8 @@ def main():
                         # VTU, so they were invisible in ParaView even though the
                         # .npz had them.
                         _names = ['Damage_lnPhi', 'Damage_CL',
-                                  'Damage_tres', 'Damage_wbond']
+                                  'Damage_tres', 'Damage_wbond',
+                                  'Damage_Aedot']
                         for _i in range(_dmg.shape[1]):
                             _nm = (_names[_i] if _i < len(_names)
                                    else f'Damage_col{_i}')
@@ -3525,7 +3526,7 @@ def main():
         elif dmg_cpu.shape[1] == 2:
             _dmg_columns = ["ln_phi", "C"]
         else:
-            _dmg_columns = ["ln_phi", "C", "t_res", "w_bond"]
+            _dmg_columns = ["ln_phi", "C", "t_res", "w_bond", "A_edot"]
         dmg_path = args.damage_out
         if dmg_path is None:
             dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"

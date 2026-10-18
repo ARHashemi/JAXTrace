@@ -791,8 +791,11 @@ def create_rk4_comparison(
     #   1 -> [ebar]                          (edot driver)
     #   2 -> [lnPhi, C]                      (models driver)
     #   4 -> [lnPhi, C, t_res, w]            (models driver + indicators)
+    #   1 -> [ebar]                                   (edot driver)
+    #   2 -> [lnPhi, C]                                 (models driver)
+    #   5 -> [lnPhi, C, t_res, w, A_edot]               (+ indicators)
     n_damage_acc = (1 if not use_damage_models
-                    else (4 if use_indicators else 2))
+                    else (5 if use_indicators else 2))
     residence_thr = float(residence_edot_threshold)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
@@ -1693,7 +1696,17 @@ def create_rk4_comparison(
                     # bounds as eta, for the same bad-pressure reason.
                     dw = -eta_c
 
-                    inc = jnp.stack([dlogphi, dC, in_layer, dw])
+                    # ⚠️ A_edot gets its OWN slot, accumulated independently.
+                    # It was previously DERIVED in analysis as ln_phi/0.849,
+                    # which is exact only if exp(1.5*eta) == 1 -- and the D2 run
+                    # shows exp(1.5*eta) varies by ~35 % across particles
+                    # (0.758..1.020). So the derived control was an
+                    # approximation, and corr(ln_phi, A_edot) = +1.000 was
+                    # partly true BY CONSTRUCTION rather than a measurement.
+                    # Accumulating int(edot dt) directly makes the O55 test
+                    # honest: any remaining correlation is then a real property
+                    # of the flow, not an artefact of how the control was built.
+                    inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1])
                 dmg_new = dmg + dt * inc
 
                 # Freeze BOTH accumulators on any step the position also skipped:

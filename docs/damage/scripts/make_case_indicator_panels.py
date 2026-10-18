@@ -64,8 +64,15 @@ SPEC = {
                    cmap="viridis"),
     "w_bond": dict(label=r"$w=\int p/\bar\sigma\,dt$", scale="diverging",
                    cmap="RdBu_r"),
+    "A_edot": dict(label=r"$A_{\dot\varepsilon}=\int\dot\varepsilon\,dt$",
+                   scale="log", cmap="inferno"),
 }
-ORDER = ["ln_phi", "C", "t_res", "w_bond"]
+# ⚠️ A_edot is plotted ONLY when the archive actually carries it as its own
+# column. Runs before 2026-10-18 derived it in analysis as ln_phi/0.849, which
+# is exact only if exp(1.5*eta) == 1 -- measured to vary ~35 % -- so a panel
+# from the derived value would be the ln_phi panel rescaled by a constant and
+# would show nothing new. Newer runs accumulate it independently.
+ORDER = ["ln_phi", "C", "A_edot", "t_res", "w_bond"]
 
 
 def wake_mask(pos):
@@ -159,26 +166,51 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
     # equal aspect a panel is inherently short and wide and the title needs its
     # own band of whitespace.
     fig, axes = plt.subplots(n_panels, 1,
-                             figsize=(11.4, 2.25 * n_panels + 1.1))
+                             figsize=(11.4, 1.95 * n_panels + 0.8))
     axes = np.atleast_1d(axes)
-    fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.07)
+    fig.subplots_adjust(hspace=0.12, top=0.93, bottom=0.08)
 
     # ── panel 0: Group ──────────────────────────────────────────────────
     a = axes[0]
     if gval is not None:
         gm = wake_mask(gpos)
-        # ⚠️ Larger markers than the raw-scatter panels use: this panel sits
-        # beside FILLED fields, and at s=0.6 the slab structure reads as noise
-        # next to them rather than as a pattern.
-        a.scatter(gpos[gm, 1] * 1e3, gpos[gm, 2] * 1e3, c=gval[gm], s=2.2,
-                  cmap="tab10", vmin=0, vmax=9, linewidths=0, rasterized=True)
-        a.set_title("Group — seeding slab; a defect is where NO slab reaches",
-                    fontsize=9, color="#1a3a5c", loc="left")
+        ng = int(gval[gm].max()) + 1
+        # ⚠️ Discrete colormap sized to the groups that ACTUALLY exist. With
+        # tab10 at vmin=0/vmax=9 five of the ten colours went to absent groups
+        # and the colourbar showed ticks for them; the used colours were also
+        # compressed into half the ramp.
+        import matplotlib as _mpl
+        _gcmap = _mpl.colors.ListedColormap(
+            _mpl.colormaps["tab10"].colors[:ng])
+        # ⚠️ GAUSSIAN-SPHERE LOOK, as in ParaView. A flat scatter dot reads as a
+        # pixel; ParaView's point gaussian renders each particle as a soft
+        # sphere. Approximated by drawing a larger, slightly transparent disc
+        # under a smaller opaque core -- cheap, and it gives the same impression
+        # of volume without a 3-D renderer.
+        yv, zv, cv = gpos[gm, 1] * 1e3, gpos[gm, 2] * 1e3, gval[gm]
+        # ⚠️ Glyph size is a TRADE-OFF, not "bigger is better". At s=18 the
+        # haloes merge into a solid sheet and both the slab structure and the
+        # unreached gaps -- the whole point of this panel -- disappear. s=6/2.0
+        # keeps the spherical impression while leaving the white voids legible.
+        a.scatter(yv, zv, c=cv, s=6.0, cmap=_gcmap, vmin=-0.5, vmax=ng - 0.5,
+                  linewidths=0, alpha=0.25, rasterized=True)
+        sc_g = a.scatter(yv, zv, c=cv, s=2.0, cmap=_gcmap, vmin=-0.5,
+                         vmax=ng - 0.5, linewidths=0, rasterized=True)
+        # ⚠️ The Group panel MUST carry a colorbar too. Without one its axes
+        # keeps the full figure width while every other panel is narrowed to
+        # make room for theirs, so the panels do not line up -- which is exactly
+        # the misalignment this comment exists to prevent.
+        cb = fig.colorbar(sc_g, ax=a, fraction=0.014, pad=0.010,
+                          ticks=list(range(ng)))
+        cb.set_label("Group (seeding slab)", fontsize=7.5, color=INK2)
+        cb.ax.tick_params(labelsize=6.5, colors=INK2)
     else:
         a.text(0.5, 0.5, "Group not available in this run's VTU exports",
                transform=a.transAxes, ha="center", va="center",
                fontsize=9, color="#a33")
-        a.set_title("Group — unavailable", fontsize=9, color="#a33", loc="left")
+        # Keep the axes the same width as the others even with nothing to show.
+        cax = a.inset_axes([1.006, 0.0, 0.014, 1.0])
+        cax.axis("off")
 
     # ── indicator panels ────────────────────────────────────────────────
     pi = 1
@@ -200,28 +232,30 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
             im = a.pcolormesh(gy, gz, np.clip(fld.T, lo, hi), cmap=spec["cmap"],
                               vmin=0.0, vmax=hi, shading="auto", rasterized=True)
         cb = fig.colorbar(im, ax=a, fraction=0.014, pad=0.010)
-        cb.set_label(spec["label"], fontsize=7.5, color=INK2)
+        _warn = ("\n⚠️ 0 where most neighbours\nare 0 → coverage"
+                 if spec["scale"] == "linear_zero" else "")
+        cb.set_label(spec["label"] + _warn, fontsize=7.5, color=INK2)
         cb.ax.tick_params(labelsize=6.5, colors=INK2)
-        suffix = ("   ⚠️ 0 where most neighbours are 0 → coverage, not intensity"
-                  if spec["scale"] == "linear_zero" else "")
-        a.set_title(f"{spec['label']} — k-NN median{suffix}",
-                    fontsize=9, color="#1a3a5c", loc="left")
+        # ⚠️ No per-panel title: the colorbar label already names the
+        # indicator, and a title band per panel cost ~0.4 in of vertical space
+        # each that the panels themselves could use.
         pi += 1
 
-    # ── the better t_res panel: entrained fraction ──────────────────────
-    if extra_tres:
-        v = d[m, cols.index("t_res")]
-        frac = knn(y, zz, v, gy, gz, k, "frac")
-        a = axes[pi]
-        im = a.pcolormesh(gy, gz, frac.T, cmap="cividis", vmin=0.0, vmax=1.0,
-                          shading="auto", rasterized=True)
-        cb = fig.colorbar(im, ax=a, fraction=0.014, pad=0.010)
-        cb.set_label("entrained fraction", fontsize=7.5, color=INK2)
-        cb.ax.tick_params(labelsize=6.5, colors=INK2)
-        a.set_title("entrained FRACTION — share of k neighbours with "
-                    "$t_\\mathrm{res}>0$: the stir-zone boundary",
-                    fontsize=9, color="#1a3a5c", loc="left")
-        pi += 1
+        # ⚠️ The entrained-FRACTION panel goes DIRECTLY under t_res, not at the
+        # bottom of the figure. The median panel is misleading where most
+        # neighbours are zero, and the fraction panel alone invites "where is
+        # the actual residence time?" -- adjacent, each answers the other's
+        # weakness. Appending it last put w_bond between them.
+        if name == "t_res" and extra_tres:
+            frac = knn(y, zz, v, gy, gz, k, "frac")
+            a = axes[pi]
+            im = a.pcolormesh(gy, gz, frac.T, cmap="cividis", vmin=0.0,
+                              vmax=1.0, shading="auto", rasterized=True)
+            cb = fig.colorbar(im, ax=a, fraction=0.014, pad=0.010)
+            cb.set_label("entrained fraction\n(stir-zone boundary)",
+                         fontsize=7.5, color=INK2)
+            cb.ax.tick_params(labelsize=6.5, colors=INK2)
+            pi += 1
 
     for a in axes:
         # ⚠️ Observer at the ORIGIN looking DOWNSTREAM (+x): +y on the LEFT.

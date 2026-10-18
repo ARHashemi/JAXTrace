@@ -886,16 +886,26 @@ form $Ny^*$ is **Carlson & Beckermann (2009)**, *Metall. Mater. Trans. A* **40A*
 it. It is derived from Darcy's law in a 1-D directionally solidifying system, and
 its actual form is
 
-$$Ny^* = C_\lambda \frac{G}{\dot T^{5/6}}\Big/\sqrt{\frac{\Delta P_{cr}}{\mu\,\beta\,\Delta T_f}}$$
+$$Ny^* = C_\lambda \frac{G}{\dot T^{5/6}}\sqrt{\frac{\Delta P_{cr}}{\mu_l\,\beta\,\Delta T_f}}$$
 
 with $C_\lambda$ a material constant, $\Delta T_f$ the freezing range, $\beta$ the
 solidification shrinkage, and $\Delta P_{cr}$ the critical pressure drop.
 
-⚠️ **Note the exponent: $\dot T^{5/6}$, not $\sqrt{\dot T}$.** The dimensionless
-form is not a rescaling of the classical $G/\sqrt{\dot T}$ — the cooling-rate
-scaling itself changes, and the output is a *pore volume fraction* rather than a
-flag. Any FSW analogue should be derived the same way (from a transport equation),
-not assembled by inspection.
+⚠️ **Note the exponent: $\dot T^{5/6}$, not $\sqrt{\dot T}$.** ✅ Verified against
+the full text 2026-10-16 (their Eq. 12). It is **not** a fitted choice: it follows
+solely from the secondary dendrite arm spacing $\lambda_2 = C_\lambda\dot T^{-1/3}$
+and that spacing's effect on mushy-zone permeability. The same dependence was found
+independently in three other studies.
+
+⚠️ **And the real source of the universal threshold is not the non-dimensionalisation
+itself.** It is that $Ny^*=\sqrt{I(g_{l,cr})}$, an integral whose only argument is the
+critical liquid fraction — so $Ny^*$ depends on the solid-fraction–temperature curve
+*alone*. The criterion is then **inverted** to a physical quantity,
+$Ny^*\to I\to g_{l,cr}\to g_p=\beta' g_{l,cr}$, giving a predicted pore volume
+fraction rather than a flag.
+
+The full derivation and what an FSW analogue would need to match it are worked
+through in `NEXT_STEPS_detachment_criterion.md` §B.3b.
 
 **Guo et al. (2015)** applies it to Ni-based superalloy castings and reports that it
 
