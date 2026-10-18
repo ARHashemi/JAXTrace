@@ -131,6 +131,33 @@ evaluated around the pin. Shi et al. (2022) **[15]** report a threshold of
   but the earlier "+1.70/−1.35 MPa" figures were **not reproducible** and were
   retracted — do not reuse them.
 
+### A.5a ⚠️ What is actually implemented — the exact tally
+
+Worth stating plainly, because "we added four independent indicators" is close
+but not right, and the difference matters when describing the work:
+
+| # | indicator | status | how |
+|---|---|---|---|
+| 1 | $\ln(\Phi/\Phi_0)$ Rice–Tracey | **pre-existing** (45-case survey) | pathline accumulator |
+| 2 | $C$ Cockcroft–Latham | **pre-existing** | pathline accumulator |
+| 3 | $t_\mathrm{res}$ residence time | ✅ **added here** | pathline accumulator |
+| 4 | $w$ Piwnik–Plata | ✅ **added here** | pathline accumulator |
+| — | $A_{\dot\varepsilon}=\int\dot\varepsilon\,dt$ (A.1) | ✅ available | ⚠️ **DERIVED**, not accumulated: recovered from $\ln\Phi$ as its degenerate limit |
+| — | $\Delta p$ (A.4) | ⚠️ **NOT RUN** | `scripts/damage/indicator_dp.py` exists but is a pressure-FIELD diagnostic, never executed |
+
+So: **two new accumulators**, not four. The accumulator width went 2 → 4
+(`[ln_phi, C, t_res, w_bond]`), and the fifth column in the results table,
+$A_{\dot\varepsilon}$, costs nothing because it is $\ln\Phi$ divided by a constant
+— which is precisely why $\rho(\ln\Phi, A_{\dot\varepsilon}) = +1.000$ is a
+measurement of $\exp(1.5\eta)$ rather than a tautology.
+
+✅ **All four accumulators computed correctly** on all 16 cases: 100 %
+accumulation, all archives pass `verify_indicator_npz.py`, every column finite.
+
+⚠️ **$\Delta p$ remains the one unexecuted item of Part A.** It is independent of
+the damage integral and cheap, so it is still worth running — but it needs a
+pressure-field pass over the PVTUs, not a tracking run.
+
 ### A.5b ⚠️ Measured outcome, full family (2026-10-18)
 
 16 cases on LUMI, 288,000 particles each, all exit 0:0, all passing
