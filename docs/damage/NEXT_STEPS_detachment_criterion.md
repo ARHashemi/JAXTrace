@@ -131,6 +131,47 @@ evaluated around the pin. Shi et al. (2022) **[15]** report a threshold of
   but the earlier "+1.70/−1.35 MPa" figures were **not reproducible** and were
   retracted — do not reuse them.
 
+### A.5b ⚠️ Measured outcome, full family (2026-10-18)
+
+16 cases on LUMI, 288,000 particles each, all exit 0:0, all passing
+`verify_indicator_npz.py`. Pooled over **4,092,780** wake-box particles:
+
+|            | ln_phi |     C  | A_edot | t_res  | w_bond |
+|------------|--------|--------|--------|--------|--------|
+| **ln_phi** |  1.000 |  0.996 |  1.000 |  0.802 | −0.085 |
+| **t_res**  |  0.802 |  0.802 |  0.802 |  1.000 |  0.019 |
+| **w_bond** | −0.085 | −0.123 | −0.085 |  0.019 |  1.000 |
+
+✅ **The indicator set did its job**: it collapsed three of the five columns into
+one and left exactly one genuinely new signal.
+
+⚠️ **The damage block is degenerate.** `ln_phi`, `C` and `A_edot` are the same
+quantity to three decimals. Across the 16 cases they span only **1.17–1.19×**
+between the lowest and highest case — barely more than noise. Reporting them as
+three indicators overstates the evidence.
+
+✅ **`w_bond` is the one that discriminates**, spanning **7.03×** across the
+family, and it separates the families in a way nothing else does:
+
+| family | median $w$ | range |
+|---|---|---|
+| A-Flats | 0.0111 | 0.0072 – 0.0379 |
+| C-Threads | 0.0241 | 0.0236 – 0.0250 |
+| B-Flutes | 0.0293 | 0.0216 – 0.0345 |
+| **D-Concavity** | **0.0464** | 0.0400 – 0.0508 |
+
+⚠️ **This reverses the headline of the existing report.** `DAMAGE_REPORT.md` has
+B-Flutes highest on every wake statistic — and on the damage laws that is still
+true. But on the bonding criterion **D-Concavity is highest by a clear margin**,
+and the two measures disagree ($\rho = -0.085$). Which ranking is meaningful is
+an open question that only experimental validation can settle (§B.8), and the
+honest statement is that *the answer depends on which indicator you believe*.
+
+⚠️ `t_res` has a median of exactly 0 in every case, because the majority of wake
+particles never enter the shear layer (65.6 % in D2). The median is therefore the
+wrong summary statistic for it — use the entrained fraction or a high percentile.
+See the figure note in `scripts/make_indicator_figures.py`.
+
 ### A.5 What to report
 
 A single table, 45 cases × 6 indicators, plus the rank-correlation matrix between
@@ -288,6 +329,64 @@ alloys and geometries", which is Guo et al. (2015) / Kang et al. (2013) **[13]**
 actual argument for the dimensionless Niyama. Be precise about this in any write-up:
 the per-alloy threshold is replaced by a dimensionless one, not eliminated.
 
+### B.3b ⚠️ How Carlson & Beckermann actually did it — the template
+
+✅ **Read from the full text** (`s11661-008-9715-y.pdf`, supplied 2026-10-16).
+This matters because §B.3 above currently *assembles* two rates that happen to
+have the right dimensions. That is not how the criterion we are imitating was
+built, and a reviewer who knows this literature will see the difference.
+
+**Their chain, in order:**
+
+$$\boxed{\;Ny^* \;=\; \frac{Ny}{\sqrt{\dfrac{\mu_l\,\beta\,\Delta T_f}{\Delta P_{cr}\,\lambda_2^{2}}}}\;=\;\sqrt{I(g_{l,cr})}\;}$$
+
+and, substituting the secondary dendrite arm spacing $\lambda_2 = C_\lambda \dot T^{-1/3}$,
+
+$$Ny^* \;=\; C_\lambda\,\frac{G}{\dot T^{5/6}}\sqrt{\frac{\Delta P_{cr}}{\mu_l\,\beta\,\Delta T_f}}$$
+
+1. **Start from a transport equation** — Darcy flow through the mushy zone,
+   1-D directional solidification. Not from dimensional analysis.
+2. **Group the material and process constants** into the denominator
+   ($\mu_l$ viscosity, $\beta$ shrinkage, $\Delta T_f$ freezing range,
+   $\Delta P_{cr}$ critical pressure drop, $\lambda_2$ arm spacing).
+3. ⚠️ **The decisive step: $Ny^*$ equals $\sqrt{I(g_{l,cr})}$, an integral whose
+   ONLY argument is the critical liquid fraction.** So $Ny^*$ is a function of the
+   solid-fraction–temperature curve *alone*. That is what makes the threshold
+   universal — not the non-dimensionalisation by itself.
+4. **Invert to a physical quantity.** $Ny^* \to I(g_{l,cr}) \to g_{l,cr} \to$ pore
+   volume fraction $g_p = \beta' g_{l,cr}$ from the continuity equation, assuming
+   feeding ceases once porosity forms. ✅ **The output is a predicted POROSITY, not
+   a flag.** They call this inversion "a novel concept that significantly enhances
+   the usefulness of this new criterion".
+
+⚠️ **The $\dot T^{5/6}$ exponent is not a fitting choice.** It follows *solely* from
+the arm spacing $\lambda_2 \propto \dot T^{-1/3}$ and that spacing's effect on mushy-zone
+permeability. The authors note the same dependence was found independently in three
+other studies. **Lesson: the exponent fell out of the physics.** If our FSW groups
+need a fitted exponent $n$ (as §B.3 currently proposes), that is a sign the
+derivation is missing, not a free parameter to calibrate.
+
+**What the FSW analogue must therefore have, to be the same kind of object:**
+
+| their ingredient | our required analogue | do we have it? |
+|---|---|---|
+| Darcy flow in the mushy zone | a transport equation for material delivery into the wake cavity | ❌ **not yet derived** |
+| permeability ~ $\lambda_2(\dot T)$ | how delivery rate depends on the local state | ❌ |
+| $I(g_{l,cr})$ — single-argument integral | a function of one state variable only | ❌ |
+| $g_p = \beta' g_{l,cr}$ | void fraction from a mass balance | ⚠️ partly: the particle-density deficit IS a mass balance |
+| $\Delta P_{cr}$ calibrated once per alloy | one calibrated constant, not several | ⚠️ §B.3 currently needs $n$, $\Pi_{crit}$, $\Delta$, $\ell$ |
+
+✅ **The one place we are already in the right shape** is the output: a
+particle-density deficit is a mass-balance-derived void fraction, which is exactly
+the kind of quantity $g_p$ is. ⚠️ **The gap is the front end** — we have no transport
+equation, so we cannot yet claim the same rigour.
+
+**Monroe & Beckermann (2014)** (`s11837-014-0999-7.pdf`, also supplied) is the
+closest guide for adding our mechanical term: they extend the same $Ny^*$ with an
+applied strain rate, which enhances the mushy-zone pressure drop. Read for *how the
+mechanical term enters the pressure balance*, since that is structurally what the
+tool's delivery rate must do in our case.
+
 ### B.4 The local form — what a particle actually tests
 
 $\Pi_1$ as written is a *process* group, constant per case, so it cannot decide when
@@ -444,11 +543,20 @@ literature risks rediscovering published work under new notation.
 
 To be merged into `OPEN_QUESTIONS.md` (current highest is **O54**):
 
-- **O55** — Does $\int\dot\varepsilon\,dt$ alone reproduce the B-Flutes-highest
-  ranking? If yes, $\exp(1.5\eta)$ contributes nothing and the damage apparatus has one
-  effective degree of freedom. (Wang et al. 2020 **[10]** predicts yes.)
-- **O56** — With detachment off, is the particle density field uniform to estimator
-  noise? Any deficit is an artefact. Blocks every detachment result.
+- **O55** — ✅ **ANSWERED 2026-10-18: YES, conclusively.** Full 16-case family on
+  LUMI, 4,092,780 particles pooled: $\rho(\ln\Phi, A_{\dot\varepsilon}) = +1.000$.
+  The $\exp(1.5\eta)$ factor contributes **nothing** to the ranking, exactly as
+  Wang et al. (2020) **[10]** predicted. The damage apparatus has **one effective
+  degree of freedom** — it is an expensive way to measure accumulated strain.
+  ⚠️ This is a real result about our method, and it should be stated plainly in
+  any write-up rather than buried: two damage laws, agreeing at $\rho=+0.996$,
+  are both reducible to $\int\dot\varepsilon\,dt$.
+- **O56** — ✅ **MEASURED 2026-10-18.** Density CV in the wake box: median
+  **0.273** across 16 cases, max **0.443** (B2). With detachment off the field is
+  divergence-free and $\det\mathbf{F}\equiv 1$, so this is seeding/sampling noise,
+  not voids. ⚠️ It is also the **floor** against which any future detachment
+  result must be judged: a detachment-induced deficit has to exceed a CV of
+  ~0.27 before it means anything. B2's 0.443 is the outlier to understand first.
 - **O57** — ⚠️ **PARTLY ANSWERED 2026-10-16: YES, substantially.** See §B.6. A
   dimensionless stick/slip criterion (Wang 2021), a non-dimensional critical radius
   at vanishing material velocity (Buck & Langerman 2004), a formal scaling analysis

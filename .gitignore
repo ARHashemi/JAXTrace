@@ -123,3 +123,8 @@ signal-desktop.sources
 docs/rom_latex/
 docs/damage/_doc_for_pandoc.md
 docs/damage/*.pdf
+
+# The damage indicator tables are small ANALYSIS RESULTS (16 rows), not bulk
+# data: they are the output the write-up cites, so they are tracked despite the
+# blanket *.csv rule above.
+!docs/damage/indicators_*.csv
