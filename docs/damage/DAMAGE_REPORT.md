@@ -25,6 +25,17 @@ fields from an existing finite-element model. Three results:
    Two independently-structured damage laws agree on the ordering (rank correlation
    +0.98 to +0.998).
 
+   ⚠️ **Qualified 2026-10-18 by the independent-indicator run** (16 cases,
+   4,092,780 wake particles; see §8c). The two damage laws are **not**
+   independent: they share $\dot\varepsilon$, share $\sigma_\text{eq}$ and are
+   evaluated on the same pathlines, so their agreement was never corroboration.
+   Measured against indicators that share fewer inputs, the damage block is
+   **degenerate** — $\ln\Phi$, $C$ and $\int\dot\varepsilon\,dt$ agree to three
+   decimals and span only 1.17–1.19× across the family. The **Piwnik–Plata
+   bonding criterion** spans 7.03× and ranks **D-Concavity highest**, disagreeing
+   with the damage laws ($\rho = -0.085$). **Which ranking predicts a real void
+   cannot be settled without an experimental cross-section.**
+
 3. **It shows the mechanism.** Following individual particles reveals that damage is
    acquired in **discrete capture events**: a particle is entrained into orbit in the
    shear layer, accumulates sharply over a few revolutions, then releases. A
@@ -868,6 +879,109 @@ changed is that the trapping is no longer attributable to this implementation.
 
 ---
 
+## 8c. Independent indicators — what survives the degeneracy test
+
+⚠️ **Added 2026-10-18.** The §8 ranking rests on two damage laws agreeing at
+ρ = +0.98…+0.998. That agreement was never corroboration: Rice–Tracey and
+Cockcroft–Latham share $\dot\varepsilon$, share $\sigma_\text{eq}$ and are
+evaluated on the **same pathlines**, so two indicators built from the same inputs
+*must* agree. This section reports what happens when indicators sharing fewer
+inputs are added.
+
+### 8c.1 What was added
+
+Two new pathline accumulators, costing a few FLOPs per step and **zero extra
+element searches** — both reuse samples the damage path already takes:
+
+| indicator | shares inputs with the damage laws? |
+|---|---|
+| $t_\text{res}=\int H(\dot\varepsilon-\dot\varepsilon_\text{thr})\,dt$ | ❌ **independent** — it is a *time*, carrying no stress information |
+| $w=\int p/\bar\sigma\,dt$ (Piwnik–Plata) | ⚠️ partly, through $\bar\sigma$ |
+
+✅ $w$ needs **no new field**: $p/\bar\sigma = -\eta$ exactly, since
+$\eta=\sigma_m/\sigma_\text{eq}$ and $p=-\sigma_m$. It is a sign flip on a scalar
+Rice–Tracey already samples.
+
+### 8c.2 The measurement
+
+16 cases, 288,000 particles each, all jobs exit 0:0, all archives passing an
+internal-consistency check. Rank correlation pooled over **4,092,780** wake-box
+particles:
+
+|            | ln_phi |     C  | A_edot | t_res  | w_bond |
+|------------|--------|--------|--------|--------|--------|
+| **ln_phi** |  1.000 |  0.996 |  1.000 |  0.802 | −0.085 |
+| **C**      |  0.996 |  1.000 |  0.996 |  0.802 | −0.123 |
+| **t_res**  |  0.802 |  0.802 |  0.802 |  1.000 |  0.019 |
+| **w_bond** | −0.085 | −0.123 | −0.085 |  0.019 |  1.000 |
+
+⚠️ **The damage block is degenerate.** $\ln\Phi$, $C$ and
+$A_{\dot\varepsilon}$ agree to three decimals, and across the 16 cases span only
+**1.17–1.19×** between the lowest and highest case — barely more than noise.
+Reporting them as three indicators overstates the evidence.
+
+### 8c.3 ⚠️ The ranking depends on which indicator you believe
+
+$w$ spans **7.03×** across the family and is the only indicator that
+discriminates between tool families:
+
+| family | median $w$ | range |
+|---|---|---|
+| A-Flats | 0.0111 | 0.0072 – 0.0379 |
+| C-Threads | 0.0241 | 0.0236 – 0.0250 |
+| B-Flutes | 0.0293 | 0.0216 – 0.0345 |
+| **D-Concavity** | **0.0464** | 0.0400 – 0.0508 |
+
+⚠️ **This reverses the §8 headline.** On the damage laws B-Flutes is still
+highest. On the bonding criterion **D-Concavity is highest by a clear margin**,
+and the two measures disagree ($\rho=-0.085$).
+
+That is not a contradiction — they answer different questions. $\ln\Phi$ and $C$
+ask *how hard was this material worked*; $w$ asks *did it spend its time under
+the compression that makes a bond*. A particle can be heavily worked and poorly
+bonded. ⚠️ **Which one predicts a real void cannot be settled from simulation
+alone.**
+
+### 8c.4 The density floor (O56)
+
+With the current model the velocity field is divergence-free and the particles
+follow it exactly, so $\det\mathbf{F}\equiv 1$ and the particle density **must**
+be uniform — a hole is impossible by construction. Measured wake-box density
+coefficient of variation: **median 0.273**, max **0.443** (B2).
+
+✅ That is seeding and sampling noise, not voids. ⚠️ It is also the **floor** any
+future void prediction must clear: a density deficit must exceed CV ≈ 0.27 before
+it means anything. B2's 0.443 is the outlier to understand first.
+
+### 8c.5 What cannot yet be claimed
+
+⚠️ **O55 is provisionally, not conclusively, answered.**
+$\rho(\ln\Phi, A_{\dot\varepsilon}) = +1.000$ appears to show that
+$\exp(1.5\eta)$ contributes nothing — but $A_{\dot\varepsilon}$ was **derived**
+as $\ln\Phi/0.849$, which is exact only if $\exp(1.5\eta)\equiv 1$. Recovering
+$\exp(1.5\eta)$ per particle from $w$ gives **0.758 … 1.020**, a 35 % spread, so
+the +1.000 is partly true **by construction**. $A_{\dot\varepsilon}$ now has its
+own accumulator slot; the number needs a re-run before it can be quoted as a
+measurement. The *direction* is almost certainly right — Wang et al. (2020)
+predict it and $\eta$ is small — but it should not be presented as measured.
+
+### 8c.6 Candidate real defects
+
+Two features appear in several *independent* panels at once, which rules out an
+estimator artefact:
+
+- **A1**, y ≈ +3 mm, z ≈ −4.5 mm — a Group gap, an $\ln\Phi$/$C$ bright spot, a
+  $t_\text{res}$ spike and a $w$ sign reversal, all co-located.
+- **B2**, y ≈ +3…+4 mm, z ≈ −4…−5 mm — a Group gap, in the case that is also the
+  density-CV outlier.
+
+Figures: one per case, `figs_cases/fig_case_<CASE>.png`, generated by
+`scripts/make_case_indicator_panels.py`. Group is taken from the **same run** as
+the indicators — not the older `post_pt/` tracking, which predates the D-family
+octree fix.
+
+---
+
 ## 9. How the tool concentrates damage along a pathline
 
 Individual particles were followed through all 167 exported states and coloured by
@@ -955,11 +1069,15 @@ than roughly 1 mm² cannot be distinguished from sampling noise.
 
 | | |
 |---|---|
-| **1** | **Resolve the D trapping.** The conservation test is done (§8.3b) and the behaviour repeats with the same code (§8.5), so the cause is either in the tracking or upstream in the flow solution / mesh — it is a bug to be found, not a finding. Compare the near-pin velocity profile and divergence of D3 against B2 on the flow fields, and check whether D's mesh refinement follows its own pin or the source case's — the D directories were copied from A1/A2/B4/C2 with only the tool replaced. **This is the blocking item**: until it is settled the void measure cannot be used. |
-| **2** | Extend the order-1 vs order-4 comparison (§6.2) beyond the single case tested, to establish whether the 18 % tail shift is case-dependent. Both orders are implemented, so this is cheap. |
-| **3** | Resolve the cohort-specific retreating-side asymmetry. |
-| **4** | Apply the independent force-ratio criterion across all cases — an external check against experimentally validated quantities, at no experimental cost. |
-| **5** | Deposit the per-particle damage indicator onto a grid to produce a continuous defect-susceptibility field suitable for a reduced-order model. |
+| **0** | ⚠️ **Obtain one experimental cross-section.** Added 2026-10-18 and placed first deliberately: §8c shows the damage laws and the bonding criterion give **different family rankings**, and nothing in simulation can say which is right. Until a macrograph or CT scan exists, every ranking here is unvalidated, and more model complexity buys precision rather than accuracy. |
+| **1** | ✅ **D trapping — RESOLVED** (2026-10-18). The cause was the octree cell-pitch bug, fixed; the 16-case indicator run shows D losing only ~0.8 % of particles, in line with its mesh. Superseded text follows for the record. ~~**Resolve the D trapping.** The conservation test is done (§8.3b) and the behaviour repeats with the same code (§8.5), so the cause is either in the tracking or upstream in the flow solution / mesh — it is a bug to be found, not a finding. Compare the near-pin velocity profile and divergence of D3 against B2 on the flow fields, and check whether D's mesh refinement follows its own pin or the source case's — the D directories were copied from A1/A2/B4/C2 with only the tool replaced. **This is the blocking item**: until it is settled the void measure cannot be used.~~ |
+| **2** | **Re-run with the real $A_{\dot\varepsilon}$ accumulator** so the O55 test is honest — see §8c.5. The derived control made ρ = +1.000 partly true by construction. |
+| **3** | **$\Delta p$ (A.4)** — the one indicator of the independent set never run. It shares no inputs with the damage integral and is cheap, but needs a pressure-field pass over the PVTUs rather than a tracking run. |
+| **4** | **Understand B2's density CV = 0.443** against the 0.273 family floor (§8c.4). It is the one case whose particle density deviates enough to be worth explaining. |
+| **5** | Extend the order-1 vs order-4 comparison (§6.2) beyond the single case tested, to establish whether the 18 % tail shift is case-dependent. Both orders are implemented, so this is cheap. |
+| **6** | Resolve the cohort-specific retreating-side asymmetry. |
+| **7** | Apply the independent force-ratio criterion across all cases — an external check against experimentally validated quantities, at no experimental cost. |
+| **8** | Deposit the per-particle damage indicator onto a grid to produce a continuous defect-susceptibility field suitable for a reduced-order model. |
 
 ---
 
