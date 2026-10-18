@@ -153,18 +153,26 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
     n_panels = 1 + len(names) + (1 if extra_tres else 0)
 
     gpos, gval = load_group(run_dir)
+    # ⚠️ Height per panel and hspace are tuned together. At 1.85 in with default
+    # spacing each axes' title landed on top of the panel above and the x tick
+    # labels bled through it. The weld is 30 mm wide and ~5.5 mm deep, so at
+    # equal aspect a panel is inherently short and wide and the title needs its
+    # own band of whitespace.
     fig, axes = plt.subplots(n_panels, 1,
-                             figsize=(10.6, 1.85 * n_panels + 0.9))
+                             figsize=(11.4, 2.25 * n_panels + 1.1))
     axes = np.atleast_1d(axes)
+    fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.07)
 
     # ── panel 0: Group ──────────────────────────────────────────────────
     a = axes[0]
     if gval is not None:
         gm = wake_mask(gpos)
-        a.scatter(gpos[gm, 1] * 1e3, gpos[gm, 2] * 1e3, c=gval[gm], s=0.6,
+        # ⚠️ Larger markers than the raw-scatter panels use: this panel sits
+        # beside FILLED fields, and at s=0.6 the slab structure reads as noise
+        # next to them rather than as a pattern.
+        a.scatter(gpos[gm, 1] * 1e3, gpos[gm, 2] * 1e3, c=gval[gm], s=2.2,
                   cmap="tab10", vmin=0, vmax=9, linewidths=0, rasterized=True)
-        a.set_title("Group — seeding slab each particle came from. "
-                    "A defect is a region NO slab reaches.",
+        a.set_title("Group — seeding slab; a defect is where NO slab reaches",
                     fontsize=9, color="#1a3a5c", loc="left")
     else:
         a.text(0.5, 0.5, "Group not available in this run's VTU exports",
@@ -194,7 +202,7 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
         cb = fig.colorbar(im, ax=a, fraction=0.014, pad=0.010)
         cb.set_label(spec["label"], fontsize=7.5, color=INK2)
         cb.ax.tick_params(labelsize=6.5, colors=INK2)
-        suffix = (" ⚠️ median is 0 where most neighbours are 0 → reads as coverage"
+        suffix = ("   ⚠️ 0 where most neighbours are 0 → coverage, not intensity"
                   if spec["scale"] == "linear_zero" else "")
         a.set_title(f"{spec['label']} — k-NN median{suffix}",
                     fontsize=9, color="#1a3a5c", loc="left")
@@ -210,8 +218,8 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
         cb = fig.colorbar(im, ax=a, fraction=0.014, pad=0.010)
         cb.set_label("entrained fraction", fontsize=7.5, color=INK2)
         cb.ax.tick_params(labelsize=6.5, colors=INK2)
-        a.set_title("entrained FRACTION — share of the k neighbours with "
-                    "$t_\\mathrm{res}>0$; maps the stir-zone boundary directly",
+        a.set_title("entrained FRACTION — share of k neighbours with "
+                    "$t_\\mathrm{res}>0$: the stir-zone boundary",
                     fontsize=9, color="#1a3a5c", loc="left")
         pi += 1
 
@@ -224,6 +232,11 @@ def build(tag, npz_path, run_dir, outdir, nby, nbz, k, raw):
         a.tick_params(labelsize=7, colors=INK2)
         for sp in a.spines.values():
             sp.set_color("#cccccc")
+    # ⚠️ x tick labels ONLY on the bottom panel: every panel shares the same y
+    # range, so repeating them six times just adds clutter that the titles then
+    # have to compete with.
+    for a in axes[:-1]:
+        a.tick_params(labelbottom=False)
     axes[-1].set_xlabel("y [mm]   (+y left: viewed from the origin along +x)",
                         fontsize=8.5, color=INK2)
     thr_s = f"   ε̇ threshold {thr:g} 1/s" if np.isfinite(thr) else ""
