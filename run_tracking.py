@@ -3386,9 +3386,19 @@ def main():
                 if args.damage and damage_gpu is not None:
                     _dmg = np.asarray(damage_gpu)
                     if _dmg.ndim == 2 and _dmg.shape[1] >= 2:
-                        # driver=models: name them, do not export an opaque 2-vector
-                        step_extras['Damage_lnPhi'] = _dmg[:, 0]
-                        step_extras['Damage_CL'] = _dmg[:, 1]
+                        # driver=models: name them, do not export an opaque vector.
+                        # ⚠️ Export EVERY accumulator column, not just the first
+                        # two. With --damage-indicators the array is 4 wide
+                        # [lnPhi, C, t_res, w_bond]; hardcoding [:, 0] and [:, 1]
+                        # silently dropped the two independent indicators from the
+                        # VTU, so they were invisible in ParaView even though the
+                        # .npz had them.
+                        _names = ['Damage_lnPhi', 'Damage_CL',
+                                  'Damage_tres', 'Damage_wbond']
+                        for _i in range(_dmg.shape[1]):
+                            _nm = (_names[_i] if _i < len(_names)
+                                   else f'Damage_col{_i}')
+                            step_extras[_nm] = _dmg[:, _i]
                     else:
                         step_extras['Damage_ebar'] = _dmg.reshape(-1)
                 exporter.enqueue_export(step, pos_cpu, particle_ids=particle_ids,
