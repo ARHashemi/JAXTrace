@@ -1233,15 +1233,42 @@ det F improvement.
 
 `max |det F − 1|` is **90.7 at 100 steps** (P1: 70.5), versus 108.7 at 8000
 steps on D2. ✅ **So the pathological tail is NOT an accumulation effect** — it
-is present almost immediately and barely grows. That points to a small number
-of elements with a huge spurious divergence (recall D2's raw `|div u|` max of
-5938 1/s against a median of 2.31), not to gradual drift. ✅ **This is good
-news for route 2 in §B.6i**: a tail driven by a few bad elements can be
-diagnosed and excluded, whereas uniform drift could not.
+is present almost immediately and barely grows. ⚠️ **I then wrongly inferred "a few bad
+elements".** ❌ **Measured and refuted** — see §B.6l. The deviation is
+DISTRIBUTED across essentially the whole population, so there is nothing to
+exclude, and exclusion was never the right idea in any case.
 
 ⚠️ Note also that cylA's median is 9.0e-05 against D2's 3.2e-03 — a 35×
 difference between cases. The det F error is strongly **case- and
 mesh-dependent**, so no single floor figure can be quoted for the method.
+
+### B.6l ❌ The det F error is DISTRIBUTED, not a few bad elements
+
+Measured on the full D2 run, 284,810 alive particles:
+
+| threshold | particles over it | share |
+|---|---|---|
+| \|det F − 1\| > 1e-4 | 278,311 | **97.72 %** |
+| > 1e-3 | 224,532 | **78.84 %** |
+| > 1e-2 | 83,670 | **29.38 %** |
+| > 1e-1 | 18,630 | 6.54 % |
+| > 1.0 | 329 | 0.116 % |
+| > 10 | 18 | 0.006 % |
+
+Percentiles: p50 3.16e-03, p75 1.72e-02, p90 7.33e-02, p95 1.20e-01,
+p99 2.64e-01, p100 1.09e+02.
+
+❌ **This refutes the "few pathological elements" reading in §B.6k.** The
+distribution is smooth and heavy-tailed with **no isolated outlier population**:
+97.7 % of particles carry a deviation above 1e-4 and nearly 30 % above 1e-2.
+⚠️ **Element exclusion is therefore both useless and wrong** — there is no small
+set to remove, and removing elements would discard real material.
+
+✅ **The correct conclusion: the error is a systematic property of the P1
+discretisation**, exactly as the field-level measurement in §B.6i says
+(|div u|/|D| median 4.87e-02, 79.3 % of elements above 0.01). ✅ **So the fix must
+be a better velocity representation, not data rejection** — which is the HCT
+route, and is what §B.6m implements.
 
 ### B.6b Full texts needed before the derivation — in priority order
 
