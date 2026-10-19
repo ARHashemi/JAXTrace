@@ -131,6 +131,38 @@ evaluated around the pin. Shi et al. (2022) **[15]** report a threshold of
   but the earlier "+1.70/−1.35 MPa" figures were **not reproducible** and were
   retracted — do not reuse them.
 
+### A.0b ⚠️ Two different senses of "independent" — and we only tested one
+
+Worth separating, because the original motivation and what was measured are not
+the same thing:
+
+| sense | meaning | which indicators qualify |
+|---|---|---|
+| **(i) independent INTEGRAND** | built from different field quantities | $t_\text{res}$ (a time, no stress), $w$ (partly) |
+| **(ii) independent of the PARTICLES** | does not depend on seeding, tracking or element search at all | ⚠️ **only $\Delta p$** |
+
+⚠️ **Every indicator measured so far is sense (i), not sense (ii).** $\ln\Phi$,
+$C$, $A_{\dot\varepsilon}$, $t_\text{res}$ and $w$ are *all* pathline integrals:
+they share the same seeding, the same 288,000 trajectories, the same RK4 stepping
+and the same L0/L1/L2 element search. A systematic error in any of those —
+a seeding bias, a lost-particle pattern, a search failure — moves **all five
+together**, and no amount of agreement between them would reveal it.
+
+✅ **$\Delta p$ is the only one in sense (ii).** It reads `Pressure` from the PVTU
+nodes directly and compares the advancing and retreating sides of the pin at one
+instant. No particle is integrated, no element is searched, no seed box is
+chosen. It would therefore be the **first genuine external check** on the whole
+particle apparatus.
+
+⚠️ **This is also the honest limit of the §A.5b result.** "Two genuinely
+independent indicators agree/disagree" means independent *integrands*. The
+particle machinery underneath is common to all of them, and remains untested by
+anything in that table.
+
+**Other sense-(ii) candidates**, for completeness: the flow-partitioning /
+mass-balance criterion (Arbegast 2008, §6 item 6) and the Cooper–Allwood
+thresholds are also evaluable on the field alone. Neither is implemented.
+
 ### A.5a ⚠️ What is actually implemented — the exact tally
 
 Worth stating plainly, because "we added four independent indicators" is close
@@ -549,7 +581,7 @@ model"*.
 | 1 | **A.1** strain-rate-only ranking | trivial | — |
 | 2 | **B.7.1** incompressibility sanity check (detachment off) | low | D-family fixes in progress |
 | 3 | **A.2** residence time + threshold sweep | low | — |
-| 4 | **A.4** $\Delta p$ (trend first, threshold only if **[15]** verified) | low | — |
+| 4 | **A.4** $\Delta p$ — ⚠️ **promoted**: the ONLY indicator independent of the particles (§A.0b), so the only external check on the tracking itself | low | — |
 | 5 | **A.5** indicator table + rank-correlation matrix | low | 1, 3, 4 |
 | 6 | ✅ **DONE 2026-10-16** — deep search run; see §B.6. Now: read Zhao (2022) and Wang (2021) in full | two PDFs | user to supply |
 | 7 | **B.3–B.4** derive $\Pi_2$, settle $\sigma_\text{ref}$, local form | moderate | 6 |
