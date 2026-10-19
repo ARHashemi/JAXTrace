@@ -887,6 +887,70 @@ confirming on the full run, but it is not evidence of a problem in this change.
 ✅ **Next: the full-length D2 run**, where particles traverse the shear layer —
 that is the first run in which Π₁ can say anything physical.
 
+### B.6h Run plan — what to march, and why the workstation run comes first
+
+**✅ Step counts: the reference values, unchanged.** Detachment adds columns to
+the same integration, so there is no reason to march differently from the
+previous indicator runs. From each case's own `run_jaxtrace.sh`:
+
+| | value (D2) |
+|---|---|
+| `N_STEPS` | **8000** |
+| `VEL_START` / `VEL_END` | **34 / 199** (B2 is 201 — per-case, never generalise) |
+| `DT` | **0.0003629** (B2 is 0.0003) |
+| `SEED_GRID` | **60 120 40** = 288,000 particles |
+
+⚠️ These differ per case and the per-case scripts are authoritative. The LUMI
+submitter **injects flags into those scripts** rather than regenerating them,
+precisely so facts like B2's `dt` and `VEL_END` cannot be lost.
+
+**Measured cost, from the 2026-10-16 full D2 run (3 slots):**
+
+```
+Stage 1 mesh load   1417 s        Stage 7 tracking   8574 s
+Stage 2              140 s        TOTAL            13750 s  = 3.82 h
+Stage 3 damage      3539 s
+```
+
+⚠️ **So the workstation cannot do this in 2 hours — it is ~4 h per case**, and
+mesh loading plus the damage build is 36 % of it before a single step is
+marched. ✅ This is why the family sweep belongs on LUMI, where the 16 cases run
+*simultaneously* rather than 16 × 4 h in series.
+
+**Memory, projected from the measured 3-slot figures and verified in the smoke
+test:** the field stack grows 3 → 5 slots, 3650 → **6083 MB (+2433 MB)**, on
+both host and device. Total GPU resident ≈ **12.2 GB** of the RTX 5090's
+32.6 GB (63 % free); on MI250X's 64 GB it is comfortable. ✅ No allocator change
+needed — the workstation's `XLA_PREALLOC=0` override still applies.
+
+#### ⚠️ Why a short end-to-end run was NOT sufficient on its own
+
+The smoke test **was** end-to-end — all 7 stages, exit 0, npz with 7 named
+columns. ✅ It validated the plumbing completely. But it marched 50 steps over
+7 snapshots, and `t_res = 0` on **every** particle: the particles never reached
+the shear layer. ⚠️ **So Π₁ was only ever sampled in the undeformed far field**,
+where it sat in a 2.9 % band around 0.9 and nothing detached.
+
+That leaves two things untested by the smoke run, both of which only appear
+where the material actually deforms:
+
+1. ⚠️ **Whether Π₁ develops usable spread at all.** If it stays within a few
+   percent even through the shear layer, the criterion has no discriminating
+   power and the dimensionless form (§B.6f step 3) is attacking the wrong group.
+2. ⚠️ **Whether the `clip(…, 0, 10)` upper bound on `tau_ratio` binds.** It can
+   only be reached at high $\dot\varepsilon$, i.e. inside the layer. A clip that
+   silently saturates would flatten the top of the distribution.
+
+✅ **Hence: one full-length D2 run on the workstation first** (≈4 h), then the
+LUMI family sweep. The cost of being wrong about either point across 16
+simultaneous LUMI jobs is far higher than one workstation run.
+
+⚠️ **The detachment plan is NOT yet complete** — this delivers §B.6f **steps 1
+and 2 only**. Step 3 (the dimensionless form, the actual contribution) is not
+implemented, and step 4's sweep is free *by construction* because `tau_min` is
+recorded rather than thresholded. So the full-step LUMI jobs are collecting the
+**inputs** the derivation needs, not executing a finished criterion.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
