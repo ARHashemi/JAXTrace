@@ -616,6 +616,44 @@ So the honest claim is narrow:
 
 **One targeted literature search would settle this** — see §B.8.
 
+### B.6c ✅ READ 2026-10-19 — the novelty question, answered
+
+**Zhao, Pei & Liu (2022)** read in full. ✅ **Our remaining claim survives, and
+it is sharper than I expected.**
+
+They *do* use particle tracing — but **only to compute a strain distribution**
+on a cross-section 30 mm behind the pin. ⚠️ **Their void criterion is not on the
+particles at all.** Two criteria, both geometric:
+
+| model | their void criterion |
+|---|---|
+| CFD | position of the **TMAZ boundary** relative to the pin periphery on the advancing side |
+| shear localisation | **shear-layer width** $\delta$ vs $w_{\max}$ (their Eq. 3) |
+
+⚠️ **Their particles never detach.** They advect through the whole field, and the
+void is inferred from *where a boundary sits*, not from material failing to
+arrive. There is **no mass deficit and no density hole** anywhere in their method.
+
+✅ **So the distinct contribution is intact**, and it is specifically:
+
+> a **local, per-particle detachment rule** evaluated along each trajectory,
+> producing the void as a **particle-density deficit from a piecewise-divergent
+> ensemble** — rather than inferring it from the position of a boundary in the
+> field.
+
+⚠️ **What this does NOT make novel**, and the write-up must keep saying so:
+linking a contact-state transition to voids (Zhao 2022), a dimensionless
+stick/slip criterion (Wang 2021), the scaling groups (Mendez 2010), or a
+dimensionless critical radius (Buck 2004).
+
+**Buck & Langerman (2004)**, also read: they derive a **critical radius**, "the
+location of vanishing material velocity", as a closed-form function of the
+**Bingham number** $Bu$ — a yield-stress parameter — plus a geometric ratio $a$
+and $R$. ✅ **This is the right basis for $\Pi_2$**: a particle stops moving when
+the local stress cannot overcome the yield stress, which is a cleaner and more
+defensible statement than a thermal-softening ratio. Their $Bu$ range is 0.1–5.0,
+and $Bu$ is interpretable as a reciprocal dimensionless rotation rate.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
