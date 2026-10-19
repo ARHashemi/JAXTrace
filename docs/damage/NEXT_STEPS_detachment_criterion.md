@@ -1270,6 +1270,52 @@ discretisation**, exactly as the field-level measurement in §B.6i says
 be a better velocity representation, not data rejection** — which is the HCT
 route, and is what §B.6m implements.
 
+### B.6m ⚠️ cylA baseline, full 2684 steps — and a reporting bug of my own
+
+Full cylA, `field` divergence + raw P1, 293,455 particles, **0 escaped**,
+exit 0 in 1691 s (Stage 7 = 1577.9 s, 1.70 step/s).
+
+```
+ln_J       median -0.00026   p01 -0.1208   p99 +0.0801   min -1814.51   max +81.26
+|det F-1|  median 1.865e-03  p99 2.759e-01
+fraction with |det F - 1| > 1e-2 : 12.67 %
+⚠️ GATE NOT PASSED
+```
+
+#### ⚠️ My reporting said the opposite, and the logic was wrong
+
+The run printed **"✅ det F is 1 to within the interpolation error"** beside a
+**max of 1.96e+35**. Two faults, both mine:
+
+1. ❌ **The gate tested only the median.** Median 1.87e-03 passed a `> 1e-2`
+   check while p99 sat at 2.76e-01 and **12.67 % of the population** exceeded
+   1e-2. ✅ Now the verdict tests **p99 and the population fraction**, because a
+   void fraction of interest is O(1e-2…1e-1) and what matters is how much of
+   the ensemble reaches that order — not where the middle sits.
+2. ⚠️ **det F was quoted without `ln_J`.** `ln_J` spans **−1814 … +81**, and
+   `exp()` of that under/overflows to 0 and 2e35. So the 1e35 is a *reporting*
+   artefact of ~0.07 % of particles (|ln_J| > 10: 213 of 293,455), not a
+   catastrophic physical failure. ✅ Both reporters now print `ln_J` with its own
+   percentiles, since **`ln_J` is the interpretable quantity** and det F loses
+   resolution at both ends.
+
+✅ **Net: the conclusion is unchanged but now correctly stated.** The field is
+not incompressible enough — `|det F − 1|` reaches the void's own order for
+12.7 % of particles on cylA, and 29.4 % on D2 (§B.6l).
+
+#### ✅ Two things the baseline settles
+
+- **cylA loses NO particles** (293,455/293,455 alive), unlike D2's 1.1 %. ✅ So
+  this case isolates the divergence question from the escapee question
+  entirely — a cleaner test bed than D2 for everything that follows.
+- ⚠️ **Π₁'s sweep is degenerate here too**, and more extremely: thresholds
+  0.10–0.40 all select **117 particles (0.04 %)**, the `tau_min == 0`
+  population. Median 0.8216, p01 0.8076 — a band of ~1 % around the median
+  with a hard-zero spike. ⚠️ **The same bimodal structure as D2** (§B.6i), so it
+  is a property of how Π₁ is built, not of one case. The `spread 111.65 %`
+  line is misleading: it is `(max−min)/median`, which the hard zeros inflate.
+  ⚠️ **That spread metric needs fixing before it is quoted anywhere.**
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
