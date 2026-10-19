@@ -826,10 +826,16 @@ det F = exp(ln_J)  : median 1.000000   min 0.999856   max 1.000212
 |det F - 1|        : median 1.43e-05   p99 1.19e-04   max 2.12e-04
 ```
 
-✅ **det F is 1 to 1.4e-05.** The null result is confirmed *on our own data and
+⚠️ **SUPERSEDED BY §B.6i — this conclusion was wrong.** On the full 8000-step
+run the median is 3.17e-03 and the max 1.09e+02, because 50 steps in the
+undeformed far field cannot test an accumulator that only diverges where the
+material deforms. The text below is kept as the record of what the smoke test
+showed and what I incorrectly concluded from it.
+
+~~det F is 1 to 1.4e-05. The null result is confirmed *on our own data and
 our own pipeline*: with $\nabla\!\cdot u=0$ and full entrainment, no
-criterion-free post-process can ever produce a void. ✅ **And the gate is
-passed with four orders of magnitude of headroom** — a void fraction of
+criterion-free post-process can ever produce a void. And the gate is
+passed with four orders of magnitude of headroom~~ — a void fraction of
 interest is O(1e-2…1e-1), against an interpolation floor of 1.4e-05. Any
 detachment signal above ~1e-4 is resolvable and not numerical noise.
 
@@ -996,6 +1002,118 @@ and 2 only**. Step 3 (the dimensionless form, the actual contribution) is not
 implemented, and step 4's sweep is free *by construction* because `tau_min` is
 recorded rather than thresholded. So the full-step LUMI jobs are collecting the
 **inputs** the derivation needs, not executing a finished criterion.
+
+### B.6i ⚠️ STEP 1 FAILED — the field is not discretely divergence-free
+
+Full D2 run, 2026-10-19 (8000 steps, 288,000 particles, exit 0 in 12,119 s =
+3.37 h, `lost=3,190` matching the 16-10 reference exactly). ⚠️ **The step-1 gate
+does not pass, and the smoke test's result was an artefact.**
+
+```
+                         smoke (50 steps)      FULL (8000 steps, alive only)
+  median |det F - 1|     1.43e-05              3.17e-03      (222x worse)
+  max    |det F - 1|     2.12e-04              1.09e+02      (det F = 109.7!)
+  min     det F          0.999856              0.0261
+  frac   |ln_J| > 1e-2   ~0                    29.4 %
+```
+
+⚠️ **det F reaching 109.7 and 0.026 is not interpolation error — it is a factor
+of 100 change in volume, which is physically impossible for this flow.** I
+reported the smoke result as "✅ the null result holds" (§B.6g). ⚠️ **That
+conclusion was wrong**: 50 steps in the undeformed far field cannot test an
+accumulator that only diverges where the material deforms.
+
+#### ✅ Root cause, measured directly on the field — it is NOT the integrator
+
+`div u = tr(D)` computed per element from snapshot 34, the same way
+`build_damage_fields` does it:
+
+```
+  |div u| / |D|   per element      RAW |div u| [1/s]
+     p50    4.87e-02                  p50    2.31
+     p75    1.86e-01                  p95   61.2
+     p90    5.81e-01                  p99  321.5
+     p95    8.21e-01                  p100 5938.7
+     p99    1.08e+00
+     p100   1.68e+00              (edot median 54.6 1/s)
+  frac > 0.01 : 79.3 %      frac > 0.1 : 36.0 %
+```
+
+⚠️ **The discrete field carries a divergence of ~5 % of |D| at the median and
+over 100 % in the tail.** A P1 tetrahedral velocity interpolation of an
+incompressible solve is only *weakly* divergence-free — it satisfies the
+constraint in an integral/variational sense, not pointwise per element. So
+$\ln J=\int \nabla\!\cdot u\,dt$ integrates a **systematic discretisation
+residual** over 8000 steps, and it accumulates.
+
+✅ **This means the sign of the finding is the opposite of a bug in my code**: the
+accumulator is faithfully reporting a real property of the FOM discretisation.
+
+#### ⚠️ What this does to the plan
+
+The step-1 gate was supposed to establish a floor that any detachment signal
+must beat. ⚠️ **The floor is now 3.2e-03 median / 2.6e-01 at p99, against a void
+fraction of interest of O(1e-2…1e-1).** The p99 floor *overlaps the signal*.
+
+❌ **So "void = particle-density deficit from det F" is NOT viable as stated.**
+A density deficit of a few percent cannot be distinguished from the
+discretisation's own volume error. This is a real obstacle, not a tuning issue,
+and §B.6f step 3 cannot be built on $\det F$ directly.
+
+✅ **Three routes remain, in order of how much they salvage:**
+
+1. ✅ **Use det F as a RELATIVE, not absolute, measure.** The error is
+   systematic, so a *detached* particle's $\ln J$ versus the local *attached*
+   mean cancels much of the common discretisation drift. This needs the
+   detachment rule first, and a control population — it does not need a
+   divergence-free field.
+2. ✅ **Drop det F from the void definition entirely and count particles.** A
+   void is then "a region the surviving particles do not reach", measured by the
+   existing density/KDE machinery on the *detached-excluded* ensemble. ⚠️ This
+   is in fact closer to what §B.6d claimed as the contribution — a
+   particle-density deficit — and it never needs $\det F$ to be 1.
+3. ⚠️ **Project the velocity onto a discretely divergence-free space** before
+   tracking. Correct but expensive, invalidates comparison with every existing
+   result, and is a research project in itself.
+
+✅ **Recommendation: route 2.** It keeps the contribution intact, needs no new
+field, and sidesteps the obstacle rather than fighting it. Route 1 is a useful
+diagnostic to keep. ⚠️ `ln_J` should be **retained and reported as a measured
+property of the FOM discretisation** — that is a publishable observation in its
+own right, and it is the honest reason the method does not use $\det F$.
+
+#### ✅ Π₁ passed its two tests
+
+```
+  Pi_1 min (alive)  median 0.8151   p01 0.0000   p02 0.7915   max 0.9111
+  spread  111.8 % of the median    ✅ usable, not the 2.9 % band of the smoke test
+  at clip 0 particles at tau_ratio >= 9.999    ✅ the clip never binds
+```
+
+✅ **Both open questions are answered favourably.** Π₁ develops real spread once
+particles traverse the shear layer, and the `clip(…, 0, 10)` never binds.
+
+⚠️ **But the threshold sweep is degenerate, and that is informative:**
+
+```
+  Pi_1_crit  0.10 .. 0.70  ->  1.260 %  (3,588 particles, IDENTICAL)
+  Pi_1_crit  0.80          -> 11.370 %
+  Pi_1_crit  0.90          -> 98.072 %
+```
+
+⚠️ `tau_min == 0` **exactly** for 3,588 particles (1.26 %), and the rest sit in a
+tight band 0.79–0.91. So the distribution is **bimodal, not continuous**: a
+hard-zero population plus a narrow cluster. Any threshold in 0.1–0.7 selects
+exactly the zero population. ✅ **That is a usable binary classifier**, but it is
+*not* a tunable continuum, so §B.6f step 4's "stability over a decade of
+threshold" is satisfied trivially rather than meaningfully.
+
+⚠️ **The zeros need explaining before Π₁ is trusted.** `tau_ratio = 0` means
+`sigma_eq = 0` at that node, i.e. a node the Norton route gave zero flow
+stress — plausibly outside the active material or at a level-set boundary.
+Only 1,184 of the 18,787 worst-`ln_J` particles overlap them, so they are a
+distinct population. ⚠️ **Until that is identified, "1.26 % detached" must not
+be read as a void fraction.**
 
 ### B.6b Full texts needed before the derivation — in priority order
 
