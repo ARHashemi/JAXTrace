@@ -173,9 +173,21 @@ An **11× spread** across the family — the widest of any indicator we have.
 
 <div class="tiny">
 
-Converged: the 16-case ranking has rank correlation +0.94 against the full set using only the first 20 of 166 snapshots, with D2 top at every subsample.
+Converged: rank correlation +0.94 against the full set using only the first 20 of 166 snapshots, D2 top at every subsample.
 
 </div>
+
+---
+
+## $B$ — ranking and per-snapshot spread
+
+![w:980](figs_dp/fig_dp_ranking.png)
+
+---
+
+## $B$ — the full time series
+
+![w:590](figs_dp/fig_dp_series.png)
 
 ---
 
@@ -202,6 +214,12 @@ at the tool interface; $B$ is a **pressure** difference in the material.
 Only the **pattern** transfers.
 
 </div>
+
+---
+
+## Chen's mechanism, side by side
+
+![w:1020](figs_dp/fig_chen_comparison.png)
 
 ---
 
@@ -333,6 +351,30 @@ $t_\text{res}$ is zero wherever most neighbours are zero, so that panel reads as
 figs_cases/fig_case_&lt;CASE&gt;.png — 16 figures, plus a backstage raw-scatter set.
 
 </div>
+
+---
+
+## D2 — all indicators on one cross-section
+
+![w:490](figs_cases/fig_case_D2.png)
+
+---
+
+## B2 — the density-CV outlier
+
+![w:490](figs_cases/fig_case_B2.png)
+
+---
+
+## A1 — a feature in four independent panels
+
+![w:490](figs_cases/fig_case_A1.png)
+
+---
+
+## C1 — a quiet case, for contrast
+
+![w:490](figs_cases/fig_case_C1.png)
 
 ---
 

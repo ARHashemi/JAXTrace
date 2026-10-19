@@ -128,3 +128,9 @@ docs/damage/*.pdf
 # data: they are the output the write-up cites, so they are tracked despite the
 # blanket *.csv rule above.
 !docs/damage/indicators_*.csv
+
+# Deck assets. The blanket *.png above would exclude the figures the
+# presentation embeds, which breaks a Marp export rather than just omitting
+# a file. Tracked deliberately.
+!docs/damage/figs_dp/*.png
+!docs/damage/figs_cases/*.png
