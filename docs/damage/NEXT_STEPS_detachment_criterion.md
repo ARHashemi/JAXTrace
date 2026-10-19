@@ -1115,6 +1115,64 @@ Only 1,184 of the 18,787 worst-`ln_J` particles overlap them, so they are a
 distinct population. ⚠️ **Until that is identified, "1.26 % detached" must not
 be read as a void fraction.**
 
+### B.6j ✅ Would HCT fix det F? Partly — and it is worth trying
+
+Measured 2026-10-20 on D2 snapshot 34, comparing the divergence of the raw P1
+field against the **SPR-recovered nodal gradient**, which is the field the HCT
+cubic is built *through*:
+
+| | raw P1 (what the det F run used) | SPR-recovered nodal |
+|---|---|---|
+| relative \|div u\| median | 4.87e-02 | **3.31e-03** (≈15× lower) |
+| p90 | 5.81e-01 | **5.71e-02** (10× lower) |
+| frac > 0.01 | 79.3 % | **32.5 %** |
+| frac > 0.1 | 36.0 % | **6.4 %** |
+| raw \|div u\| median | 2.31 1/s | **0.72 1/s** (3.2× lower) |
+
+⚠️ **HCT enforces C⁰/C¹ *continuity*, never a divergence constraint** — verified
+in `jaxtrace/gpu/recovery/hct3d.py`, which claims exactness for linear fields
+and quadratic precision at face centroids, and nowhere a solenoidal condition.
+There is **no divergence-free projection anywhere in the codebase**. So HCT
+cannot make $\det F \equiv 1$ by construction.
+
+✅ **But it should still improve $\det F$ substantially**, because the quantity
+that enters $\ln J$ is the divergence *of the reconstruction*, and SPR recovery
+alone already reduces it by an order of magnitude. A 15× smaller integrand over
+the same 8000 steps would move the median $|\det F - 1|$ from 3.2e-03 toward
+~2e-04, which **would clear the void fraction of interest**.
+
+#### ⚠️ Two blockers before this can be tested
+
+1. ❌ **HCT is steady-only.** `run_tracking.py` builds the reconstruction under
+   `if n_frames == 1`, and our D2 case has **166 frames**. With a sequence it
+   prints *"SKIPPED: velocity_sequence has N frames; only single-frame (steady)
+   fields are supported today. Falling back to raw P1"*. ✅ It warns rather than
+   failing silently — but it means **turning HCT on in the per-case script would
+   have had no effect on the det F run.** The D-family scripts do not set
+   `--recovery-method` at all.
+2. ⚠️ **Cost.** HCT stores (n_elements, 4 subtets, 20 coeffs, 3) float32 =
+   10.8 M × 240 B ≈ **2.6 GB per frame**. At 166 frames that is ~430 GB,
+   impossible. Extending HCT to time-dependent fields therefore needs either
+   on-the-fly rebuild per snapshot or a far more compact representation.
+
+✅ **Cheap decisive test available:** run D2 with `--vel-range 34 34` (a single
+snapshot, steady) **with and without** `--recovery-method hct_cubic`, 8000 steps
+each, and compare $\det F$. That isolates the reconstruction's effect on $\ln J$
+at a cost of ~1 h per arm instead of a 430 GB redesign. ⚠️ It answers a
+*different* question from the production run (steady vs time-dependent field),
+so it bounds the gain rather than delivering it.
+
+#### ✅ Independent corroboration of the root cause
+
+`rom_out/velocity_diagnostics/divergence_summary_cylindrical_*.csv`, from
+earlier ROM work, measured the **FOM's own** divergence on four cases: median
+|div u| of **1.64 / 1.68 / 2.99 / 2.41 1/s** for $r<10$ mm, with p99 reaching
+75–151 and a max of 478–855. ✅ **That independently confirms §B.6i** — my
+measured 2.31 1/s on D2 sits squarely in that range, and it was recorded before
+any of this detachment work. ⚠️ **The non-zero divergence is a property of the
+FOM discretisation, not of the detachment accumulator**, and it is not specific
+to the D family.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
