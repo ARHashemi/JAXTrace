@@ -904,13 +904,27 @@ previous indicator runs. From each case's own `run_jaxtrace.sh`:
 submitter **injects flags into those scripts** rather than regenerating them,
 precisely so facts like B2's `dt` and `VEL_END` cannot be lost.
 
-**Measured cost, from the 2026-10-16 full D2 run (3 slots):**
+**Measured cost. ⚠️ Two baselines, and they are not comparable:**
 
 ```
-Stage 1 mesh load   1417 s        Stage 7 tracking   8574 s
-Stage 2              140 s        TOTAL            13750 s  = 3.82 h
-Stage 3 damage      3539 s
+                    2026-10-16 (3 slots)   2026-10-19 (5 slots, detachment)
+  commit            ea0b43e                af28eba
+  Stage 1 mesh      1417 s                 1710 s
+  Stage 2            140 s                   75 s
+  Stage 3 damage    3539 s                 1650 s      <-- FASTER with MORE slots
+  Stage 7 tracking  8574 s                 (in progress)
+  TOTAL            13750 s = 3.82 h
 ```
+
+⚠️ **Stage 3 halved while gaining two slots, and that is not an anomaly to
+celebrate blindly — it is a different baseline.** The 16 Oct run predates
+commit `0484d55` ("hoist mesh geometry out of the damage build; vectorise the
+point-in-tet precompute"), verified by `git merge-base --is-ancestor`. ✅ So the
+hoist's gain is real and larger than the two extra slots' cost; the two numbers
+must simply never be quoted as "detachment made the build faster".
+
+✅ The 5-slot stack measured **6083.2 MB**, matching the projection from the
+3-slot figure exactly (3650 × 5/3 = 6083).
 
 ⚠️ **So the workstation cannot do this in 2 hours — it is ~4 h per case**, and
 mesh loading plus the damage build is 36 % of it before a single step is
