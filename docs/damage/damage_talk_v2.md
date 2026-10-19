@@ -460,15 +460,107 @@ and its experimental data traces back to our own group.
 
 ---
 
+## Where the detachment criterion stands in the literature
+
+<div class="box">
+
+✅ **The narrow claim holds.** No located work advects **passive markers through a
+precomputed, fixed field** and lets individual particles **detach by a local
+criterion**, so the void appears as a **particle-density deficit**.
+
+**Zhao 2022** is the closest, and it is not close: particle tracing is used only
+for a strain distribution. The void criterion is the **TMAZ boundary position**
+or the **shear-layer width** — geometric, and the particles never detach.
+
+</div>
+
+<div class="box">
+
+⚠️ **But the null result is the weaker half.** The mechanism *is* established —
+in **pore-scale colloid filtration**: particles tracked through a precomputed
+carrier flow, then immobilised per-particle by a **force/torque balance**
+(Vanness & Johnson 2019; Torkzaban 2007; Bradford 2010).
+
+| | colloid filtration | ours |
+|---|---|---|
+| carrier flow | precomputed, fixed | precomputed, fixed (FOM) |
+| particles | passive, advected | passive, advected |
+| local switch | hydrodynamic vs adhesive torque | stress vs yield |
+| observable | retention profile | density deficit = void |
+
+✅ **Cite it as precedent** — a technique transferred to new physics, not an
+invention defended from scratch.
+
+</div>
+
+<div class="box">
+
+✅ **And their switch is DIMENSIONAL.** Dimensionless groups appear only to
+organise regimes. **So the dimensionless form is the open part** — that is the
+contribution, not the particle bookkeeping.
+
+</div>
+
+---
+
+## Both groups are now sourced — and so is the method's one honest limitation
+
+<div class="columns">
+<div>
+
+**$\Pi_1$ — Buck & Langerman (2004)**
+
+Critical radius = "the location of vanishing material velocity", closed form in
+the **Bingham number**, $Bu \in [0.1,\,5.0]$.
+
+$$\Pi_1 = \frac{\tau_\text{local}}{\tau_\text{yield}(T,\dot\varepsilon)}$$
+
+✅ A particle stops when stress cannot overcome yield — cleaner than a
+thermal-softening ratio.
+
+</div>
+<div>
+
+**$\Pi_2$ — Mendez et al. (2010), Eq. 30**
+
+Shear-layer thickness $\delta$ in closed form, and $\dot\gamma=\omega a/\delta$.
+
+✅ Computable from **process parameters alone** — no extra simulation.
+
+⚠️ **Wang 2021 is a near-miss**: their slip parameter is *interfacial*. Borrow the
+switch form; inherit the warning — **the answer depends on the threshold choice**.
+
+</div>
+</div>
+
+<div class="box">
+
+⚠️ **Do the particles need interaction forces? No — and it is the premise.** Passive
+tracers carry no mass; inter-particle forces are *already* in the constitutive
+response that produced the field. Adding them double-counts, makes the tracers obey
+a momentum balance the carrier field does not satisfy, and turns the post-process
+into **SPH/MPM** — which requires **re-solving momentum**, exactly what a
+post-process avoids.
+
+⚠️ **Scope, stated not hidden:** without interaction the method predicts **where
+material fails to arrive**, not the void's equilibrium shape after consolidation.
+
+</div>
+
+---
+
 ## Next steps
 
 | # | step |
 |---|---|
 | **0** | ⚠️ **One experimental cross-section** — AA6063, ≥2 pin families, void area measured (macrograph or CT) |
 | **0b** | ✅ **Free:** extend the Chen mechanism test to void *location* using the cross-sections |
-| 1 | Re-run with the real $A_{\dot\varepsilon}$ accumulator — the O55 control is currently partly circular |
-| 2 | Understand B2's density CV = 0.443 against the 0.273 floor |
-| 3 | Detachment criterion — the only route to a void that is a **mass deficit**, not a proxy |
+| 1 | ✅ **Measure $\det F$ on existing trajectories** — proves the null result; ⚠️ if it drifts from 1, interpolation error exceeds the effect |
+| 2 | Detachment on Buck's Bingham form — one `int8` state column, detached particles **kept**, not deleted |
+| 3 | Make it **dimensionless** ($\Pi_1$, $\Pi_2$) on the Carlson–Beckermann template — derive, don't fit |
+| 4 | ⚠️ Sweep the threshold and report stability **honestly** — Wang's limitation is ours |
+| 5 | ✅ Validate on **pattern, not number**: $\gamma=1.0$ puts us $3.3\times$ beyond Chen's voided case, so we should predict **sound** welds |
+| 6 | Re-run with the real $A_{\dot\varepsilon}$ accumulator; understand B2's CV = 0.443 |
 
 <div class="tiny">
 

@@ -1328,3 +1328,49 @@ and operating point, so not directly comparable with the tool-shape families abo
 *Data: 45 finite-element cases, 100,000 particles each, 30 mm travel, full
 trajectory export (24 GB). Per-case statistics in
 `results/phase4_rk4_30mm_wake.csv`.*
+
+## §8e ✅ The literature is closed — novelty verdict (2026-10-19)
+
+Four full texts read (Zhao 2022, Mendez 2010, Wang 2021, Buck 2004) plus a deep
+search run on the **mechanism** rather than on FSW keywords (187 papers).
+
+✅ **The narrow claim holds.** No located work advects passive markers through a
+precomputed, fixed field and lets individual particles detach by a local
+criterion, so the void appears as a particle-density deficit. Zhao 2022 is the
+closest and is not close: its particle tracing yields only a strain
+distribution, and the void criterion is the TMAZ boundary position (CFD) or the
+shear-layer width (shear localisation) — geometric, particles never detach.
+
+⚠️ **The null result is the weaker half of the finding.** The mechanism *is*
+established, in **pore-scale colloid filtration**: particles tracked through a
+precomputed carrier flow, then immobilised or remobilised per-particle by a
+force/torque balance (Vanness & Johnson 2019; Torkzaban 2007; Bradford 2010).
+Same mathematical object — fixed field, passive particles, local switch,
+density observable — different physics. ✅ **Cite as methodological precedent.**
+
+✅ **And in that literature the switch is almost always DIMENSIONAL.**
+Dimensionless groups appear only to organise regimes. **The dimensionless form
+is the genuinely open part** — the contribution is there, not in the particle
+bookkeeping.
+
+⚠️ **Prior art to cite, not imply is new:** marker/tracer tracing in FSW
+(Dialami 2015/2019/2020 — our own group; Dialami 2020 is titled *"Defect
+formation and material flow in FSW"*); marker-and-cell (Harlow & Welch 1965);
+VOF/free-surface and explicit damage-evolution void prediction.
+
+✅ **Both groups sourced.** $\Pi_1$ from Buck & Langerman (critical radius as a
+closed form in the Bingham number, $Bu\in[0.1,5]$); $\Pi_2$ from Mendez Eq. (30)
+(shear-layer thickness from process parameters alone, $\dot\gamma=\omega a/\delta$).
+⚠️ Wang 2021 is interfacial, hence a near-miss: borrow its switch form and
+inherit its stated limitation — **the result depends on the threshold choice**.
+
+⚠️ **Interaction forces between particles: no, and it is the method's premise.**
+Passive tracers carry no mass, and inter-particle forces are already in the
+constitutive response that produced the field. Adding them double-counts, makes
+the tracers obey a momentum balance the carrier field does not satisfy, and
+converts the post-process into SPH/MPM — which requires re-solving momentum,
+exactly what a post-process avoids. ⚠️ Scope limit to state: the method predicts
+**where material fails to arrive**, not the void's equilibrium shape.
+
+Detail, derivations and the five implementation steps:
+`NEXT_STEPS_detachment_criterion.md` §B.6d–§B.6f.
