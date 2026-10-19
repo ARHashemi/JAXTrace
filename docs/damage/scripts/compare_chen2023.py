@@ -23,9 +23,10 @@ Their mechanism, in their words:
   (1) A LARGE front-to-rear drop accompanies voids, a SMALL one does not.
       ✅ Directly testable: that is exactly what our B measures.
   (2) The void appears on the ADVANCING side.
-      ⚠️ Testable only in combination with the particle figures, and our
-      advancing/retreating pressure difference has the OPPOSITE sign to B, so
-      the two must not be conflated.
+      ⚠️ Testable only in combination with the particle figures. Our
+      advancing/retreating pressure difference splits on a PERPENDICULAR axis
+      to B, so the two must not be conflated -- similar magnitudes do not make
+      them the same measurement.
   (3) Their absolute numbers.
       ❌ NOT comparable. Chen reports FRICTIONAL SHEAR STRESS (tau) at the
       tool/workpiece interface; our B is a PRESSURE difference in an annulus in
@@ -170,10 +171,10 @@ def main() -> int:
     if ok.any():
         print(f"    advancing-retreating dp: median {np.median(ar[ok]):+.2f} MPa "
               f"over {int(ok.sum())} cases")
-        print("    ⚠️ This is a DIFFERENT quantity from B and has the opposite")
-        print("       sign. It locates a left/right asymmetry; it does not by")
-        print("       itself say a void is there. Settling claim (2) needs the")
-        print("       particle cross-sections, not this number.")
+        print("    ⚠️ A DIFFERENT quantity from B, split on a PERPENDICULAR axis")
+        print("       (±y rather than front/rear). It locates a left/right")
+        print("       asymmetry; it does not by itself say a void is there.")
+        print("       Settling claim (2) needs the particle cross-sections.")
 
     print()
     print("  ── Claim (3): absolute values ──")

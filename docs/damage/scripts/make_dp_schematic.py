@@ -110,7 +110,8 @@ def main() -> int:
 
     # ⚠️ With omega < 0 the advancing side is -y. Labelling it matters: this is
     # the axis the ADVANCING/RETREATING difference uses, and that is a DIFFERENT
-    # quantity from B -- opposite sign on D2 (-11.9 vs +16.8 MPa).
+    # quantity from B -- a different magnitude on D2 (+12.47 vs +16.8 MPa),
+    # and it splits on a different axis entirely.
     ax.text(0, -args.r_shoulder - 1.9, "RETREATING side  ($-y$)",
             fontsize=9, color="#555", ha="center")
     ax.text(0, args.r_shoulder + 3.4, "ADVANCING side  ($+y$)",
@@ -150,7 +151,8 @@ def main() -> int:
              "ends of the quantity.\n"
              "⚠️ Not to be confused with the ADVANCING−RETREATING difference, "
              "which splits on ±y instead: a different quantity, measured at "
-             "−11.9 MPa on D2 where B is +16.8.",
+             "+12.47 MPa on D2 where B is +16.8 — a different axis and a\n"
+             "different magnitude.",
              fontsize=8, color="#555")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

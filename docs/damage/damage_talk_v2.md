@@ -114,8 +114,9 @@ within the pin's z-extent. $\theta$ measured from the travel direction $+x$.
 <div class="warn">
 
 ⚠️ **Not advancing-minus-retreating.** $B$ is **front-to-rear**, along the
-travel direction. We measured both: on D2 they are **+16.8** and **−11.9 MPa** —
-different magnitude *and* opposite sign.
+travel direction; the advancing/retreating difference splits on $\pm y$, which
+is **perpendicular** to it. On D2 they are **+16.8** and **+12.47 MPa** —
+similar in size, but measuring different things on different axes.
 
 </div>
 

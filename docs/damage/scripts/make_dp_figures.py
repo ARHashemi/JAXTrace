@@ -23,9 +23,9 @@ The plane B actually lives in is:
   ✅ xz through y = 0        : shows the same front/rear contrast against depth.
   ❌ yz                      : perpendicular to B. Would show the
                                advancing/retreating contrast instead, which is a
-                               DIFFERENT quantity (measured -12.47 MPa median on
-                               D2 where B is +16.80 — different magnitude AND
-                               opposite sign).
+                               DIFFERENT quantity, split on a PERPENDICULAR
+                               axis (measured +12.47 MPa median on D2 where B is
+                               +16.80 -- similar in size, different meaning).
 
 So this script draws the pressure FIELD in the xy plane, with the two sampling
 sectors marked, so a reader can see where the two numbers come from — and the
