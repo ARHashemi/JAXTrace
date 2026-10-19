@@ -982,6 +982,71 @@ octree fix.
 
 ---
 
+## 8d. The external check — contact-pressure difference B
+
+⚠️ **Added 2026-10-19.** Everything in §8 and §8c is a **pathline** integral over
+the same 288,000 trajectories, the same RK4 stepping and the same L0/L1/L2
+element search. A systematic fault in that machinery would move *all* of those
+indicators together, and no agreement among them could reveal it. $B$ is the
+only indicator we have that needs **no particles at all**.
+
+### 8d.1 Definition and threshold
+
+$$B = P_\max(\theta=0°,\ \text{front}) - P_\min(\theta=180°,\ \text{rear})$$
+
+evaluated in an annulus around the pin. Shi et al., *Int. J. Mech. Sci.* **241**
+(2023) 107969, Eq. (19) and Fig. 21: **voids form when $B > 15$ MPa**. ✅ Verified
+against the full text.
+
+### 8d.2 Result, 16 cases
+
+| case | median $B$ [MPa] | % snapshots > 15 |
+|---|---|---|
+| **D2** | **16.80** | **52 %** |
+| **A2** | **12.82** | **36 %** |
+| A3 | 6.43 | 2 % |
+| D3, B4, D1, B2, D4 | 3.58 – 4.67 | 0 % |
+| C1, A1, C2, A4, B1, C4, B3, C3 | 1.48 – 1.77 | 0 % |
+
+✅ $B$ **discriminates sharply** — an **11× spread**, against the 1.17–1.19× of
+the damage block.
+
+### 8d.3 ⚠️ And it agrees with nothing
+
+| | ln_phi | C | A_edot | w_bond | density_cv |
+|---|---|---|---|---|---|
+| **B** | −0.174 | −0.047 | −0.174 | +0.121 | **−0.518** |
+
+- ✅ The near-zero correlations mean $B$ measures something the pathline family
+  **does not capture**, rather than re-expressing it. That is what an external
+  check is for.
+- ⚠️ **Three indicator families now give three different rankings**: damage laws →
+  B-Flutes; bonding → D-Concavity; contact pressure → **D2 and A2**, which does
+  not rank by *family* at all.
+- ⚠️ $\rho(B,\ \text{density CV}) = -0.518$ has the **wrong sign**. A
+  void-predicting $B$ should move *with* particle-density scatter, not against it.
+
+### 8d.4 What this means for §8 and §8c
+
+⚠️ **No ranking in this report is now independently supported.** §8 (B-Flutes),
+§8c (D-Concavity) and §8d (D2/A2) disagree, and nothing in simulation can
+adjudicate. Each is a defensible answer to its own question; none is *the*
+answer to "which tool makes a void".
+
+✅ **One comparison is available immediately and costs no experiment.** Chen et
+al. (2023), AA6061-T6 at **600 rpm — our rotation speed** — predict a void on the
+**advancing side** when contact pressure falls at the **rear** of the pin, and
+validate it against measured cross-sections. Our $B$ measures that pressure drop
+and our cross-sections predict void location. **That is a falsifiable test of the
+mechanism**, and it should be done before any further model work.
+
+⚠️ **The experimental requirement is now sharper, not weaker**: one cross-section
+on **AA6063**, on at least **two of our four pin families**, with void area
+measured. See `FUTURE_MODELS_EXPLAINED.md` §6b for the full reference table and
+what each source can and cannot support.
+
+---
+
 ## 9. How the tool concentrates damage along a pathline
 
 Individual particles were followed through all 167 exported states and coloured by
@@ -1069,7 +1134,8 @@ than roughly 1 mm² cannot be distinguished from sampling noise.
 
 | | |
 |---|---|
-| **0** | ⚠️ **Obtain one experimental cross-section.** Added 2026-10-18 and placed first deliberately: §8c shows the damage laws and the bonding criterion give **different family rankings**, and nothing in simulation can say which is right. Until a macrograph or CT scan exists, every ranking here is unvalidated, and more model complexity buys precision rather than accuracy. |
+| **0** | ⚠️ **Obtain one experimental cross-section** — now on **AA6063**, on at least **two of our four pin families**, with void area measured (macrograph or X-ray CT, cf. Hamade & Baydoun 2019). Sharpened 2026-10-19: §8d added a THIRD ranking, and the three disagree. |
+| **0b** | ✅ **Free, do it first:** test the Chen et al. (2023) mechanism. They report an **advancing-side void when rear contact pressure drops**, on AA6061-T6 at **600 rpm — our rotation speed** — validated against measured cross-sections. Our $B$ measures that pressure drop and our figures predict void location. A falsifiable comparison needing no new experiment. |
 | **1** | ✅ **D trapping — RESOLVED** (2026-10-18). The cause was the octree cell-pitch bug, fixed; the 16-case indicator run shows D losing only ~0.8 % of particles, in line with its mesh. Superseded text follows for the record. ~~**Resolve the D trapping.** The conservation test is done (§8.3b) and the behaviour repeats with the same code (§8.5), so the cause is either in the tracking or upstream in the flow solution / mesh — it is a bug to be found, not a finding. Compare the near-pin velocity profile and divergence of D3 against B2 on the flow fields, and check whether D's mesh refinement follows its own pin or the source case's — the D directories were copied from A1/A2/B4/C2 with only the tool replaced. **This is the blocking item**: until it is settled the void measure cannot be used.~~ |
 | **2** | **Re-run with the real $A_{\dot\varepsilon}$ accumulator** so the O55 test is honest — see §8c.5. The derived control made ρ = +1.000 partly true by construction. |
 | **3** | **$\Delta p$ (A.4)** — the one indicator of the independent set never run. It shares no inputs with the damage integral and is cheap, but needs a pressure-field pass over the PVTUs rather than a tracking run. |

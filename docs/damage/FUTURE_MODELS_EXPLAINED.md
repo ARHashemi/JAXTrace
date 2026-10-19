@@ -1051,6 +1051,58 @@ the *values* depended entirely on fitted constants.
 
 ---
 
+## 6b. ⚠️ Validation references — the ground truth we do not have
+
+Added 2026-10-19 after an Undermind deep search (205 papers) and four full texts.
+This section exists because §6.3 says one experimental cross-section outranks
+every model on the table, and that is no longer an abstract point: we now have
+**three indicator families giving three different rankings** (damage laws →
+B-Flutes; Piwnik–Plata → D-Concavity; contact pressure → D2 and A2), with no
+way to adjudicate between them from simulation.
+
+### 6b.1 ⚠️ Nothing matches our alloy AND our pin families
+
+Our configuration is **AA6063**, ~600 rpm, four pin families (flats, flutes,
+threads, concavity/tilt). No published study varies that combination. Every
+candidate requires an extrapolation, and the honest thing is to be explicit
+about which axis is being stretched:
+
+| source | alloy | rpm | what it varies | what it gives us | ⚠️ the gap |
+|---|---|---|---|---|---|
+| **Chen et al. (2023)** ✅ read | AA6061-T6 | **600** | pin **size** | ⚠️ **the closest match.** Non-uniform contact pressure → rear pressure drop → **advancing-side void**; void width 0.81–2.40 mm; **validated against measured cross-sections** (sound at 600-20, voided at 600-180) | pin size, not profile family; 6061 |
+| **Shash et al. (2022)** | ⚠️ **AA6063** | — | — | the **only** study on our exact alloy | pin geometry not varied |
+| **Yadav et al. (2025)** ✅ read | AA6082-T6 | 710 | **4 pin profiles** | a measured ordering: threaded → *largest* tunnel, square → *smallest* | pipe butt welds; 6082 |
+| **Reza-E-Rabby & Reynolds (2018)** | AA6061 | — | **thread interruptions** | ⚠️ a thread interruption **is a flat on a threaded pin**, so this sits exactly between our A-Flats and C-Threads | threads/flats only |
+| **Reza-E-Rabby & Reynolds (2014)** | several Al | — | thread **forms** | systematic thread-form comparison | forms only |
+| **Rasti (2018)** | AA1060 | — | parameters | ⚠️ reports **tunnel void AREA** — one of the few quantified void areas | 1060 is pure Al; wrong flow stress |
+| **Ajri et al. (2020)** | AA6061-T6 | — | parameters | defect **mechanisms**, experiment + FEM, strength effects | mechanism, not ranking |
+| **Bui et al. (2026)** | AA6061 | — | parameters | recent process window for voids | parameters, not geometry |
+| **Hamade & Baydoun (2019)** | Al | — | — | ⚠️ **X-ray CT** — the measurement modality §6.3 calls for | lap joints |
+
+### 6b.2 What can and cannot be claimed with these
+
+✅ **Mechanism — testable now.** Chen (2023) predicts a void on the **advancing
+side** when contact pressure falls at the **rear** of the pin, at our exact
+rotation speed on a close alloy. Our $B$ measures precisely that pressure drop,
+and our figures predict void *location*. **That is a real, falsifiable
+comparison** and it does not need new experiments.
+
+✅ **Trend — testable now.** Yadav (2025) establishes that pin profile changes
+defect severity in a measurable, ordered way. ⚠️ Note their threaded pin gave the
+*largest* tunnel defect, which runs against a naive "threads improve flow"
+expectation — worth holding in mind when reading our C family.
+
+❌ **Our 16-case ordering — not validatable from the literature.** No study
+varies our families on our alloy. Claiming literature support for the specific
+ranking would overstate what exists.
+
+⚠️ **So the experimental requirement is unchanged and now sharper**: one
+cross-section, on AA6063, on at least two of our four pin families, with void
+area measured (macrograph or CT per Hamade & Baydoun). Until then the three
+rankings stay unresolved.
+
+---
+
 ## 7. References
 
 **The two models in detail**
