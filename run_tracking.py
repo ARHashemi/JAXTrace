@@ -3596,8 +3596,24 @@ def main():
 
             # ── Detachment groundwork: the step-1 null test ────────────────
             if dmg_cpu.shape[1] >= 7:
-                ln_J, tau_min = dmg_cpu[:, 5], dmg_cpu[:, 6]
+                # ⚠️ ALIVE ONLY. On D2 ~3,190 of 288,000 particles (1.1 %)
+                # leave the domain before step 8000, and their accumulators
+                # are frozen mid-trajectory at whatever partial value they
+                # had reached. Pooling them corrupts BOTH columns, and most
+                # of all the min/max extremes the gate is read from: an
+                # escapee's det F is not a measure of the scheme's
+                # incompressibility, it is a measure of how far it got.
+                # Measured pre-existing behaviour, identical in the 2026-10-16
+                # reference run (first loss at the same step 1930), so this is
+                # not a regression -- but the statistics must exclude it.
+                _al = alive
+                ln_J = dmg_cpu[_al, 5]
+                tau_min = dmg_cpu[_al, 6]
                 detF = np.exp(ln_J)
+                print(f"  [damage] detachment stats over "
+                      f"{int(_al.sum()):,}/{len(dmg_cpu):,} ALIVE particles "
+                      f"({100.0 * float(_al.mean()):.1f} %) — escapees "
+                      f"excluded, their accumulators are frozen mid-path")
                 # ⚠️ THE GATE. With div(u) = 0 imposed on the field and fully
                 # entrained particles, det F == 1 identically and a void is
                 # impossible by construction. What this prints is the
