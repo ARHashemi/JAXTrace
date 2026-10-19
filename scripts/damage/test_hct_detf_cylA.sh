@@ -89,6 +89,37 @@ export PYTHONPATH="$JAXTRACE${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
 export TF_CPP_MIN_LOG_LEVEL=3
 
+# ⚠️ MEMORY COST of the pre-stored alternative, reported rather than guessed.
+# A prebuilt divergence must hold the QUADRATIC that d/dx of the HCT cubic is:
+#   per node, P1-sampled  -> discards the variation (node-exactness trap)
+#   1 float per element    -> a constant cannot represent a quadratic
+#   10 floats per element  -> exact, and a genuine prebuild
+# This prints all three against the measured element/node counts so the
+# trade-off is on the record in the log next to the timing.
+report_memory_cost () {
+    local log="$1"
+    local n_el n_nod
+    # ⚠️ tr -d with a character SET leaves any letter not in the set behind:
+    # "n_nodes=571,533" through tr -d "n_elements=," yields "od571533".
+    # Keep digits only.
+    n_el=$(grep -oE "n_elements=[0-9,]+" "$log" | head -1 | tr -cd "0-9")
+    n_nod=$(grep -oE "n_nodes=[0-9,]+" "$log" | head -1 | tr -cd "0-9")
+    [ -z "$n_el" ] && return 0
+    python3 - "$n_el" "${n_nod:-0}" <<'PYEOF'
+import sys
+n_el, n_nod = int(sys.argv[1]), int(sys.argv[2])
+mb = lambda n: n * 4 / 1024**2
+print("  ── MEMORY COST, pre-stored divergence options ──")
+print(f"     n_elements {n_el:,}   n_nodes {n_nod:,}")
+print(f"     (a) 1 float / NODE          {mb(n_nod):9.1f} MB/frame  ❌ P1 resampling destroys the quadratic")
+print(f"     (b) 1 float / ELEMENT       {mb(n_el):9.1f} MB/frame  ❌ a constant cannot hold a quadratic")
+print(f"     (c) 10 floats / ELEMENT     {mb(n_el*10):9.1f} MB/frame  ✅ exact prebuild")
+print(f"     ref: HCT Bernstein 4x20x3   {mb(n_el*240):9.1f} MB/frame  (held anyway for tracking)")
+print("  ── IN-KERNEL cost: 0 MB extra; 3 forward-mode tangents on 1 of the")
+print("     4 RK4 velocity calls already made per step per particle.")
+PYEOF
+}
+
 run_arm () {
     local tag="$1" extra_args="$2"
     local stamp; stamp="$(date +%Y%m%d_%H%M%S)"
@@ -139,20 +170,41 @@ run_arm () {
     local t0; t0=$(date +%s)
     "$VENV_PY" -u "$JAXTRACE/run_tracking.py" "${args[@]}" 2>&1 | tee "$log"
     local rc=${PIPESTATUS[0]}
-    echo " arm $tag exit $rc  elapsed $(( $(date +%s) - t0 ))s"
+    local el; el=$(( $(date +%s) - t0 ))
+    echo " arm $tag exit $rc  elapsed ${el}s"
+    # ✅ Step rate is the comparable number across arms -- total wall time
+    # includes the mesh load and octree, which are identical and dominate.
+    local s7; s7=$(grep -oE "Stage 7 time: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+")
+    [ -n "$s7" ] && echo " arm $tag STAGE7 (tracking only): ${s7}s  -> $(python3 -c "print(f'{$N_STEPS/$s7:.3f}')") step/s"
+    echo "$tag,$rc,$el,${s7:-NA}" >> "${OUT_ROOT}/timing.csv"
+    report_memory_cost "$log"
     # ⚠️ Did HCT actually build, or silently fall back? The run prints
     # "SKIPPED" on a multi-frame field. Surface it either way.
     grep -E "gradient-recovery" "$log" | head -4
     echo "$out"
 }
 
-ARM="${ARM:-both}"
+# ⚠️ FOUR arms, because two independent things are being measured:
+#   divergence MODE  (field = precomputed nodal P1 | analytic = jacfwd on the
+#                     actual interpolant) -> the TIME cost
+#   reconstruction   (raw P1 | hct_cubic)                -> the det F EFFECT
+# The field+p1 arm reproduces every run before 2026-10-20.
+# ⚠️ Only analytic+hct can show an HCT effect on det F: with 'field' the
+# divergence is precomputed from P1 and cannot respond to the reconstruction
+# (measured identical to 5 s.f., see B.6k).
+ARM="${ARM:-all}"
+mkdir -p "$OUT_ROOT"; echo "arm,rc,elapsed_s,stage7_s" >> "${OUT_ROOT}/timing.csv"
 case "$ARM" in
-  p1)   run_arm p1  "--gradient-recovery 0" ;;
-  hct)  run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic" ;;
-  both) run_arm p1  "--gradient-recovery 0"
-        run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic" ;;
-  *) echo "ARM must be p1 | hct | both" >&2; exit 2 ;;
+  p1)   run_arm p1  "--gradient-recovery 0 --damage-divergence field" ;;
+  hct)  run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence field" ;;
+  p1a)  run_arm p1_analytic  "--gradient-recovery 0 --damage-divergence analytic" ;;
+  hcta) run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
+  both) run_arm p1  "--gradient-recovery 0 --damage-divergence field"
+        run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence field" ;;
+  all)  run_arm p1           "--gradient-recovery 0 --damage-divergence field"
+        run_arm p1_analytic  "--gradient-recovery 0 --damage-divergence analytic"
+        run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
+  *) echo "ARM must be p1 | hct | p1a | hcta | both | all" >&2; exit 2 ;;
 esac
 
 echo
