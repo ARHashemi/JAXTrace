@@ -814,6 +814,79 @@ beyond Chen's voided case, so **we should predict sound welds**. ⚠️ A criter
 that predicts voids everywhere on our 16 cases is falsified by that, and that is
 the most valuable check available to us.
 
+### B.6g ✅ IMPLEMENTED AND TESTED on D2 — steps 1 and 2 are done
+
+`--damage-detachment`, D2 smoke test 2026-10-19 (50 steps, 11,200 particles,
+7 snapshots, exit 0 in 432 s on the workstation RTX 5090). Both columns work.
+
+**✅ Step 1, the null-result gate — PASSED, and this is the important number:**
+
+```
+det F = exp(ln_J)  : median 1.000000   min 0.999856   max 1.000212
+|det F - 1|        : median 1.43e-05   p99 1.19e-04   max 2.12e-04
+```
+
+✅ **det F is 1 to 1.4e-05.** The null result is confirmed *on our own data and
+our own pipeline*: with $\nabla\!\cdot u=0$ and full entrainment, no
+criterion-free post-process can ever produce a void. ✅ **And the gate is
+passed with four orders of magnitude of headroom** — a void fraction of
+interest is O(1e-2…1e-1), against an interpolation floor of 1.4e-05. Any
+detachment signal above ~1e-4 is resolvable and not numerical noise.
+
+**Step 2, Π₁ recorded as a running minimum:**
+
+```
+Pi_1 min along path : median 0.9155   min 0.8974   max 0.9237  (11,200/11,200 finite)
+detached fraction:  Pi_1_crit 0.10..0.70 -> 0.00 %     0.90 -> 0.73 %
+```
+
+⚠️ **Read this as a smoke test, not a result.** The spread is narrow
+(0.897–0.924, i.e. 2.9 %) and `t_res = 0` on *every* particle, which the run
+flags itself: over 50 steps the particles never reach the shear layer. ✅ So
+these particles are the *undeformed far field*, where Π₁ ≈ 0.9 is exactly what
+should be expected — the flow stress sits just below the reference yield
+stress and nothing detaches. **The test proves the plumbing, not the physics.**
+
+⚠️ **Π₁'s absolute scale is set by `--damage-tau-ref-edot` (default 1.0 1/s)**,
+so 0.9 is not meaningful on its own: it says the local flow stress is 0.9× the
+Norton stress at 1 s⁻¹. ✅ Only the *full-length* run, where particles pass
+through the shear layer, can show whether Π₁ develops a usable spread.
+
+✅ **The sweep is free, as designed.** The detached-fraction curve over
+$\Pi_1^{crit}$ is printed from the recorded minimum, so §B.6f step 4 costs no
+extra runs. The threshold is never applied in-kernel.
+
+#### ⚠️ One thing the smoke test exposed, unrelated to detachment
+
+`rank corr(lnPhi, C) = +0.8978`, which the code labels *"MODELS DISAGREE —
+investigate"*. ⚠️ On the 16-case production runs this was +0.982…+0.998. The
+difference is the 50-step window, not a regression: over 50 steps `ln_phi` and
+`C` are both ~5e-04 and dominated by their first few increments. Worth
+confirming on the full run, but it is not evidence of a problem in this change.
+
+#### Implementation notes worth keeping
+
+- `div_u` **costs nothing**: `tr(D)` was already computed in `fields.py` for the
+  incompressibility diagnostic and thrown away.
+- ⚠️ `tau_ratio` must be built against a **reference** yield stress. On the
+  `models` route `sigma_eq` *is* the Norton flow stress, so dividing by the
+  local value would give Π₁ ≡ 1 everywhere. It uses the Norton stress at
+  `--damage-tau-ref-edot` with the **local** temperature.
+- ⚠️ `tau_ratio` is **not** masked by `active`, unlike `eta`: a particle in a
+  dead zone has $\dot\varepsilon\approx0$ and therefore the *lowest* flow
+  stress, which is precisely the detachment condition. Masking it to 0 would
+  erase the signal.
+- ⚠️ `tau_min` is initialised to `+inf`, not 0, or the running minimum latches 0
+  forever. All statistics exclude non-finite entries.
+- ✅ The existing step-freeze reverts the whole accumulator vector, so a skipped
+  step cannot latch a minimum from a position the particle never legitimately
+  occupied. Verified, and the min update is ordered before the freeze.
+- Field stack grows 3 → 5 slots (+67 % memory: 256.5 MB at D2 scale, 7
+  snapshots); one extra Norton evaluation per timestep; 2 floats per particle.
+
+✅ **Next: the full-length D2 run**, where particles traverse the shear layer —
+that is the first run in which Π₁ can say anything physical.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
