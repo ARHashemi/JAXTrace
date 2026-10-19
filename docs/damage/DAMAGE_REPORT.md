@@ -1026,6 +1026,55 @@ the damage block.
 - ⚠️ $\rho(B,\ \text{density CV}) = -0.518$ has the **wrong sign**. A
   void-predicting $B$ should move *with* particle-density scatter, not against it.
 
+### 8d.3b ✅ The Chen (2023) mechanism test — run, and partly passed
+
+⚠️ **Runtime: none needed.** $B$ converges well before our existing data runs
+out. Median $B$ from the first 10, 20, 40, 80 and all 166 snapshots keeps every
+case in the same band, and the 16-case ranking has rank correlation **+0.844 at
+10 snapshots** and **+0.938 at 20** against the full set, with **D2 top at every
+subsample**. The comparison below used data we already had.
+
+**What Chen predicts** (AA6061-T6, 600 rpm — our rotation speed, validated
+against measured cross-sections): a sound weld shows an "approximately regular
+circle" of frictional shear stress (~30 MPa); a voided weld shows ~50 MPa in
+front and ~15 MPa in the rear — *"a severe decrease ... at the rear of the tool
+is observed when forming void defects"* — and the void appears on the advancing
+side.
+
+**What we find:**
+
+| | front [MPa] | rear [MPa] | B |
+|---|---|---|---|
+| our high-B group | 7.64 | **−0.73** | 16.80 |
+| our low-B group | 3.01 | +1.23 | 1.77 |
+
+⚠️ By *magnitude* the front separates the two groups more than the rear
+(+4.58 vs −1.97 MPa), which looks like a mismatch with Chen. **But magnitude is
+the wrong test** — Chen describes the rear *collapsing*, and a median shift in
+MPa blurs exactly that. The sign does not:
+
+✅ **Four cases have a NEGATIVE (tensile) rear pressure — A2, A3, B4, D2 — and
+their median $B$ is 9.63 MPa against 1.67 for the other twelve.** A rear-side
+pressure collapse is real in our data and it does track $B$.
+
+⚠️ **But it is 3 of 4, not 4 of 4.** The top four by $B$ are D2, A2, A3, **D3**;
+the negative-rear four are D2, A2, A3, **B4**. The two disagree for an
+intelligible reason:
+
+- **B4** has a negative rear (−0.07) but low $B$ (4.27) because its *front* is
+  also low (2.74).
+- **D3** has a moderately high $B$ (4.67) from a *high front* (5.88) with a
+  **positive** rear (+2.12) — a large difference reached without any collapse.
+
+✅ So the two signals are genuinely distinguishable, and **"large $B$" and
+"rear collapse" are not the same statement**. Chen's mechanism is the rear
+collapse; $B$ is a proxy for it that agrees on 14 of 16 cases.
+
+❌ **Absolute values are NOT comparable** and must not be quoted as agreement:
+Chen reports frictional *shear stress* at the tool interface, our $B$ is a
+*pressure* difference in an annulus in the material. Same mechanism, different
+quantity. Only the pattern transfers.
+
 ### 8d.4 What this means for §8 and §8c
 
 ⚠️ **No ranking in this report is now independently supported.** §8 (B-Flutes),
