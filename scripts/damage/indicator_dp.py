@@ -45,48 +45,50 @@ import argparse
 import glob
 import os
 import re
+from pathlib import Path
 import sys
 
 import numpy as np
 
 
-def find_pvtu(case: str, vel_range: tuple[int, int] | None) -> list[str]:
-    """PVTU files for the case, restricted to vel_range when given."""
+def load_sequence(case: str, vel_range, field: str, n_workers: int):
+    """Positions + the pressure sequence, via the project's THREADED loader.
+
+    ⚠️ Uses jaxtrace.gpu.mesh_loader_timedep.load_field_sequences_from_pvtu --
+    the same loader the tracking and damage runs use -- rather than opening each
+    PVTU with a fresh vtkXMLPUnstructuredGridReader. An earlier version of this
+    script did the latter and measured ~205 s PER SNAPSHOT on LUMI's Lustre at
+    D2 scale (2.8M nodes), i.e. 9.5 h per case. The threaded loader parses the
+    whole sequence concurrently (VTK releases the GIL), which is why the damage
+    runs load 166 snapshots in ~24 min rather than ~9 h.
+    """
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    from jaxtrace.gpu.mesh_loader_timedep import load_field_sequences_from_pvtu
+
     post = case if os.path.basename(case) == "post" else os.path.join(case, "post")
     if not os.path.isdir(post):
         post = case
-    files = sorted(glob.glob(os.path.join(post, "*.pvtu")))
-    # Keep only the mesh series (names ending _<step>.pvtu), not particle files.
-    stepped = []
-    for f in files:
-        m = re.search(r"_(\d+)\.pvtu$", os.path.basename(f))
-        if m:
-            stepped.append((int(m.group(1)), f))
-    if not stepped:
-        return files
-    stepped.sort()
-    if vel_range is not None:
-        lo, hi = vel_range
-        stepped = [(n, f) for n, f in stepped if lo <= n <= hi]
-    return [f for _, f in stepped]
-
-
-def read_fields(path: str, pressure_field: str = "Pressure"):
-    """Node positions and pressure from one PVTU."""
-    import vtk
-    from vtk.util.numpy_support import vtk_to_numpy
-
-    rdr = vtk.vtkXMLPUnstructuredGridReader()
-    rdr.SetFileName(path)
-    rdr.Update()
-    out = rdr.GetOutput()
-    pos = vtk_to_numpy(out.GetPoints().GetData()).astype(np.float64)
-    arr = out.GetPointData().GetArray(pressure_field)
-    if arr is None:
-        names = [out.GetPointData().GetArrayName(i)
-                 for i in range(out.GetPointData().GetNumberOfArrays())]
-        raise SystemExit(f"  '{pressure_field}' not in {path}\n  have: {names}")
-    return pos, vtk_to_numpy(arr).astype(np.float64)
+    # Derive the stem from the files themselves: the folder name and the file
+    # stem differ in these cases (D2.gid holds A2_*.pvtu).
+    cands = sorted(glob.glob(os.path.join(post, "*.pvtu")))
+    stems = {re.sub(r"_\d+\.pvtu$", "", os.path.basename(f)) for f in cands
+             if re.search(r"_\d+\.pvtu$", os.path.basename(f))}
+    if not stems:
+        raise SystemExit(f"  no <stem>_<step>.pvtu under {post}")
+    stem = sorted(stems)[0]
+    steps = sorted(int(re.search(r"_(\d+)\.pvtu$", os.path.basename(f)).group(1))
+                   for f in cands
+                   if re.search(r"_(\d+)\.pvtu$", os.path.basename(f))
+                   and os.path.basename(f).startswith(stem + "_"))
+    lo, hi = (vel_range if vel_range else (steps[0], steps[-1]))
+    pos, _conn, fields = load_field_sequences_from_pvtu(
+        base_path=Path(post), file_pattern=stem + "_{timestep}.pvtu",
+        timestep_range=(lo, hi), field_names=[field],
+        verbose=True, n_workers=n_workers,
+    )
+    return np.asarray(pos, dtype=np.float64), np.asarray(fields[field]), (lo, hi)
 
 
 def delta_p(pos, p, centre, r_pin, z_lo, z_hi, band, advancing_sign,
@@ -162,61 +164,50 @@ def main() -> int:
                     help="annulus thickness as a fraction of r_pin (0.6)")
     ap.add_argument("--pressure-field", default="Pressure")
     ap.add_argument("--out", default=None, help="write a per-step CSV here")
-    ap.add_argument("--n-snapshots", type=int, default=20,
-                    help="⚠️ Subsample this many snapshots EVENLY from the "
-                         "range (default 20; 0 = all). Delta p is an "
-                         "INSTANTANEOUS field diagnostic, not a time integral, "
-                         "so it needs only enough snapshots to average over the "
-                         "tool rotation and show the spread. One PVTU read is "
-                         "~205 s on LUMI at D2 scale, so all 166 would be 9.5 h "
-                         "per case (151 h for 16); 20 is 1.1 h per case.")
+    ap.add_argument("--workers", type=int, default=16,
+                    help="threads for the PVTU loader (default 16)")
+    ap.add_argument("--n-snapshots", type=int, default=0,
+                    help="Evaluate only this many snapshots, evenly spaced "
+                         "(0 = all, the default). ⚠️ This does NOT save IO: the "
+                         "threaded loader reads the whole range in one pass. It "
+                         "only thins the reported series.")
     args = ap.parse_args()
 
-    files = find_pvtu(args.case, tuple(args.vel_range) if args.vel_range else None)
-    if not files:
-        print(f"  no PVTU found under {args.case}")
-        return 1
-    n_all = len(files)
-    if args.n_snapshots and 0 < args.n_snapshots < n_all:
-        # Evenly spaced INCLUDING both ends, so the sample spans the range
-        # rather than clustering at the start.
-        idx = np.unique(np.linspace(0, n_all - 1, args.n_snapshots).astype(int))
-        files = [files[i] for i in idx]
-        print(f"  {n_all} snapshots available, using {len(files)} evenly spaced "
-              f"(~{len(files) * 205 / 60:.0f} min at ~205 s/read)")
-    else:
-        print(f"  {len(files)} snapshots (all)")
+    pos, pseq, (lo, hi) = load_sequence(
+        args.case, tuple(args.vel_range) if args.vel_range else None,
+        args.pressure_field, args.workers)
+    n_all = pseq.shape[0]
+    # ⚠️ The threaded loader reads the WHOLE range in one pass, so subsampling
+    # no longer saves IO -- it is kept only to thin the reported series.
+    sel_idx = (np.unique(np.linspace(0, n_all - 1, args.n_snapshots).astype(int))
+               if args.n_snapshots and 0 < args.n_snapshots < n_all
+               else np.arange(n_all))
+    print(f"  {n_all} snapshots loaded (steps {lo}..{hi}), "
+          f"evaluating {len(sel_idx)}")
 
     rpm = args.pin_rpm
     if rpm is None:
         rpm = -600.0
-        print(f"  [warn] --pin-rpm not given; assuming {rpm:g} "
-              f"(advancing side follows its sign)")
-    # omega_z < 0 => advancing side is +y (see module docstring).
+        print(f"  [warn] --pin-rpm not given; assuming {rpm:g}")
     advancing_sign = -1.0 if rpm < 0 else +1.0
-    side = "+y" if advancing_sign > 0 else "-y"
-    print(f"  pin_rpm {rpm:+g} -> advancing side is {side}")
+    print(f"  pin_rpm {rpm:+g} -> advancing side is "
+          f"{'+y' if advancing_sign > 0 else '-y'}")
 
-    pos0, _ = read_fields(files[0], args.pressure_field)
     centre = (np.array(args.pin_center, dtype=np.float64)
               if args.pin_center is not None
-              else np.array([pos0[:, 0].mean(), pos0[:, 1].mean(), 0.0]))
+              else np.array([pos[:, 0].mean(), pos[:, 1].mean(), 0.0]))
     r_pin = args.r_pin if args.r_pin is not None else 3.0e-3
-    z_lo, z_hi = pos0[:, 2].min(), pos0[:, 2].max()
-    print(f"  centre ({centre[0]:.4g}, {centre[1]:.4g}) m   r_pin {r_pin:.4g} m   "
-          f"z [{z_lo:.4g}, {z_hi:.4g}] m")
+    z_lo, z_hi = pos[:, 2].min(), pos[:, 2].max()
+    print(f"  centre ({centre[0]:.4g}, {centre[1]:.4g}) m   r_pin {r_pin:.4g} m")
 
     rows = []
-    for i, f in enumerate(files, 1):
-        pos, p = read_fields(f, args.pressure_field)
-        d, pa, pr, n, dar = delta_p(pos, p, centre, r_pin, z_lo, z_hi,
+    for j, i in enumerate(sel_idx, 1):
+        p_i = np.asarray(pseq[i], dtype=np.float64).reshape(-1)
+        d, pa, pr, n, dar = delta_p(pos, p_i, centre, r_pin, z_lo, z_hi,
                                     args.band, advancing_sign)
-        rows.append((os.path.basename(f), d, pa, pr, n, dar))
-        # ⚠️ Progress line per snapshot. One PVTU read is ~205 s on LUMI's
-        # Lustre at D2 scale (2.8M nodes), so a silent loop looks hung for
-        # hours; this also makes a killed run show how far it got.
-        print(f"    [{i}/{len(files)}] {os.path.basename(f)}  "
-              f"B = {d * 1e-6:+.2f} MPa", flush=True)
+        rows.append((f"step_{lo + int(i)}", d, pa, pr, n, dar))
+        if j % 5 == 0 or j == len(sel_idx):
+            print(f"    [{j}/{len(sel_idx)}] B = {d * 1e-6:+.2f} MPa", flush=True)
 
     vals = np.array([r[1] for r in rows], dtype=np.float64)
     vals_ar = np.array([r[5] for r in rows], dtype=np.float64)
