@@ -3636,23 +3636,50 @@ def main():
                 # method cannot resolve the effect and the plan needs
                 # rethinking BEFORE any criterion is tuned.
                 _dev = np.abs(detF - 1.0)
+                # ⚠️ REPORT ln_J, NOT ONLY det F. exp() of a large negative or
+                # positive integral under/overflows: measured ln_J spanning
+                # -1814 .. +81 on cylA, which exp maps to 0 and 2e35. Quoting
+                # only det F made a handful of particles look like a
+                # catastrophic failure and hid that ln_J itself is the
+                # interpretable quantity.
+                print(f"  [damage] ln_J = int(div u dt)    : median "
+                      f"{float(np.median(ln_J)):+.5f}  "
+                      f"p01 {float(np.percentile(ln_J, 1)):+.4f}  "
+                      f"p99 {float(np.percentile(ln_J, 99)):+.4f}  "
+                      f"min {float(ln_J.min()):+.2f}  "
+                      f"max {float(ln_J.max()):+.2f}")
                 print(f"  [damage] det F = exp(ln_J)       : median "
                       f"{float(np.median(detF)):.6f}  "
-                      f"min {float(detF.min()):.6f}  "
-                      f"max {float(detF.max()):.6f}")
+                      f"p01 {float(np.percentile(detF, 1)):.6f}  "
+                      f"p99 {float(np.percentile(detF, 99)):.6f}")
                 print(f"  [damage]   |det F - 1| : median "
                       f"{float(np.median(_dev)):.3e}  p99 "
                       f"{float(np.percentile(_dev, 99)):.3e}  max "
                       f"{float(_dev.max()):.3e}")
-                if float(np.median(_dev)) > 1.0e-2:
-                    print("  [damage]   ⚠️  median |det F - 1| > 1e-2: the "
-                          "incompressibility of the discrete field is NOT "
-                          "tight enough to attribute a density deficit to "
-                          "detachment. Investigate before building on it.")
+                # ⚠️ THE GATE MUST NOT BE READ FROM THE MEDIAN ALONE. A median
+                # of 1.9e-03 with a p99 of 2.8e-01 is NOT a passing field: the
+                # p99 is the population that would be mistaken for a void.
+                # The earlier version printed "✅ the null result holds" beside
+                # a max of 1.96e+35, which was actively misleading.
+                _med, _p99 = float(np.median(_dev)), float(np.percentile(_dev, 99))
+                _frac_bad = float((_dev > 1.0e-2).mean())
+                print(f"  [damage]   fraction with |det F - 1| > 1e-2 : "
+                      f"{100.0 * _frac_bad:.2f} %")
+                if _p99 > 1.0e-2 or _frac_bad > 0.01:
+                    print(f"  [damage]   ⚠️  GATE NOT PASSED: p99 |det F - 1| = "
+                          f"{_p99:.3e} and {100.0*_frac_bad:.2f} % of particles "
+                          f"exceed 1e-2, which is the order of the void "
+                          f"fraction we want to predict. The discrete field is "
+                          f"not incompressible enough for a density deficit to "
+                          f"be attributed to detachment.")
+                elif _med > 1.0e-3:
+                    print(f"  [damage]   ⚠️  marginal: median {_med:.3e}. "
+                          f"Usable only for signals well above it.")
                 else:
-                    print("  [damage]   ✅ det F is 1 to within the "
-                          "interpolation error — the null result holds, so a "
-                          "void CANNOT arise without a detachment rule.")
+                    print(f"  [damage]   ✅ det F is 1 to within the "
+                          f"interpolation error (median {_med:.3e}, p99 "
+                          f"{_p99:.3e}) — a void cannot arise without a "
+                          f"detachment rule.")
                 # ⚠️ +inf means the column was never written for that particle
                 # (zero steps taken). Exclude before any statistic, or the
                 # median silently becomes inf.

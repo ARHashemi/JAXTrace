@@ -91,16 +91,29 @@ def main() -> int:
     lnJ = dmg[alive, i_lnJ].astype(np.float64)
     dev = np.abs(np.exp(lnJ) - 1.0)
     med = float(np.median(dev))
+    p99 = float(np.percentile(dev, 99))
+    frac_bad = float((dev > 1.0e-2).mean())
     print("  ── step-1 gate verdict (alive only) ──")
-    if med > 1.0e-2:
-        print(f"     ⚠️  median |det F - 1| = {med:.3e} > 1e-2: the discrete "
-              f"field is NOT incompressible enough to attribute a density "
-              f"deficit to detachment.")
+    # ⚠️ ln_J is the interpretable quantity; exp() of a large |ln_J|
+    # under/overflows (measured -1814..+81 on cylA -> det F of 0 and 2e35), so
+    # a det-F-only summary makes a 0.07 % tail look like total failure.
+    print(f"     ln_J      median {np.median(lnJ):+.5f}  p01 "
+          f"{np.percentile(lnJ,1):+.4f}  p99 {np.percentile(lnJ,99):+.4f}  "
+          f"min {lnJ.min():+.2f}  max {lnJ.max():+.2f}")
+    print(f"     |det F-1| median {med:.3e}  p99 {p99:.3e}")
+    print(f"     fraction with |det F - 1| > 1e-2 : {100.0*frac_bad:.2f} %")
+    # ⚠️ NOT a median test. A void fraction of interest is O(1e-2..1e-1), so
+    # what matters is how much of the POPULATION reaches that order.
+    if p99 > 1.0e-2 or frac_bad > 0.01:
+        print(f"     ⚠️  GATE NOT PASSED: p99 = {p99:.3e} and "
+              f"{100.0*frac_bad:.2f} % of particles exceed 1e-2, the order of "
+              f"the void fraction itself. A density deficit cannot be "
+              f"attributed to detachment against this floor.")
+    elif med > 1.0e-3:
+        print(f"     ⚠️  marginal: median {med:.3e}; usable only well above it.")
     else:
-        print(f"     ✅ median |det F - 1| = {med:.3e}. A void fraction of "
-              f"interest is O(1e-2..1e-1), so the floor is "
-              f"{1.0e-2/max(med,1e-30):.0f}x below it — any detachment signal "
-              f"above ~{10*med:.1e} is resolvable, not numerical noise.")
+        print(f"     ✅ median {med:.3e}, p99 {p99:.3e} — detachment signals "
+              f"above ~{max(10*med, p99):.1e} are resolvable.")
     print()
 
     tau = dmg[alive, i_tau].astype(np.float64)
