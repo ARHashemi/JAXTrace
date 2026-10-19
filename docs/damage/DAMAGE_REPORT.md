@@ -1075,6 +1075,35 @@ Chen reports frictional *shear stress* at the tool interface, our $B$ is a
 *pressure* difference in an annulus in the material. Same mechanism, different
 quantity. Only the pattern transfers.
 
+### 8d.3c ⚠️ Our own FOM does not validate any of this
+
+Read 2026-10-19: the Venghaus PhD thesis (192 pp.), the Embedded Domain Method
+work producing the velocity and pressure fields this whole report consumes.
+
+| ✅ it validates | ❌ it does not |
+|---|---|
+| temperature at 3 thermocouples (K-type, 0.5 mm) | any void or defect quantity |
+| reaction forces $F_x,F_y,F_z$ and torque $M$ | void location or size |
+| sensitivity to advancing/rotation speed, plunge depth, tool scale, tilt | particle paths, $B$, or any indicator here |
+
+✅ On the right alloy — **Al6063**, which no external reference in
+`FUTURE_MODELS_EXPLAINED.md` §6b offers — against **industrial data from Norsk
+Hydro ASA**.
+
+⚠️ **The thesis never addresses weld defects.** Every "void" in it is
+embedded-domain numerics (material–void interfaces); defect prediction appears
+only as future work.
+
+⚠️ **And the chain is internal:** the thesis states that the Norsk Hydro data
+"was first published by Dialami et al." — our own group. That is ordinary
+practice, but it means the FOM's validation **cannot serve as independent
+corroboration** of anything in §8, §8c or §8d.
+
+✅ **What it does support:** the *flow* we integrate is validated on temperature
+and force against industrial data on the right alloy. That is a real and useful
+claim — but it is a claim about the velocity field, not about whether our
+indicators rank tools correctly.
+
 ### 8d.4 What this means for §8 and §8c
 
 ⚠️ **No ranking in this report is now independently supported.** §8 (B-Flutes),

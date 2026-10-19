@@ -1079,6 +1079,55 @@ about which axis is being stretched:
 | **Bui et al. (2026)** | AA6061 | — | parameters | recent process window for voids | parameters, not geometry |
 | **Hamade & Baydoun (2019)** | Al | — | — | ⚠️ **X-ray CT** — the measurement modality §6.3 calls for | lap joints |
 
+### 6b.1b ⚠️ The FOM's own validation — what it does and does not cover
+
+Read 2026-10-19: **Venghaus, H.,** *PhD thesis* (CIMNE/UPC, 192 pp.), the
+Embedded Domain Method work that produces the velocity and pressure fields our
+whole pipeline consumes. Worth stating plainly, because it bounds what we can
+claim.
+
+✅ **The alloy matches.** The thesis works in **Al6063** — our exact alloy, which
+no other validation candidate in §6b.1 offers.
+
+✅ **The experimental data is real and industrial.** Obtained from **Norsk Hydro
+ASA**, with K-type thermocouples (0.5 mm) at three fixed material positions, and
+reaction forces $F_x, F_y, F_z$ plus torque $M$.
+
+⚠️ **But it validates NONE of what we measure.** The quantities compared against
+experiment are:
+
+| validated | not validated |
+|---|---|
+| temperature evolution at 3 thermocouples | ❌ any void or defect quantity |
+| reaction forces $F_x, F_y, F_z$ | ❌ void location or size |
+| torque $M$ | ❌ particle paths / material transport |
+| sensitivity to advancing speed, rotation speed, plunging depth, tool scale, tilt | ❌ contact-pressure difference $B$ |
+
+⚠️ **The thesis never addresses weld defects.** Every occurrence of "void" in it
+is embedded-domain numerics — material-void interfaces in the EDM formulation,
+not FSW porosity. Defect prediction appears only as *future work*: "...as well
+as the prediction of welding defects."
+
+⚠️ **And the validation chain is internal.** The thesis states the Norsk Hydro
+data "was first published by Dialami et al. [1]". So the experimental reference
+behind our FOM is our own group's earlier publication, not an independent
+measurement. That is normal practice and not a criticism of the work — but it
+means **the FOM's validation cannot serve as independent corroboration of our
+defect results**, because it neither measured defects nor came from an outside
+source.
+
+✅ **What this does give us**, and it is not nothing: the velocity and pressure
+fields we integrate are validated on **temperature and force** against
+industrial data on the **right alloy**. That supports the claim that the *flow*
+is physically reasonable. It says nothing about whether our *defect indicators*
+rank tools correctly.
+
+⚠️ **Nothing new in its bibliography for us.** Its FSW references outside the
+group are reviews (Kilic 2023, Mohan 2021, Çam 2011, Shankar 2022), tool-tech
+notes (Ding 1998, ESAB, AluStir) and dissimilar-material work (Tarasov 2022, Sen
+2020, Bulacu 2024, Álvarez 2013). None reports quantified void data, so the
+validation gap in §6b.1 stands unchanged.
+
 ### 6b.2 What can and cannot be claimed with these
 
 ✅ **Mechanism — testable now.** Chen (2023) predicts a void on the **advancing
