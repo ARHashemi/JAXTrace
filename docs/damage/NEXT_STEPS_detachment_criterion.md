@@ -1135,9 +1135,15 @@ and quadratic precision at face centroids, and nowhere a solenoidal condition.
 There is **no divergence-free projection anywhere in the codebase**. So HCT
 cannot make $\det F \equiv 1$ by construction.
 
-✅ **But it should still improve $\det F$ substantially**, because the quantity
+⚠️ **SUPERSEDED IN PART BY §B.6k.** The claim below assumes $\ln J$ integrates
+the divergence *of the reconstruction*. ❌ **It does not**: `div_u` is
+precomputed from the raw P1 gradient before recovery is even built, so HCT
+cannot change det F as currently wired. The 15× figure is a property of the
+recovered gradient and remains the reason this is worth implementing properly.
+
+~~But it should still improve $\det F$ substantially, because the quantity
 that enters $\ln J$ is the divergence *of the reconstruction*, and SPR recovery
-alone already reduces it by an order of magnitude. A 15× smaller integrand over
+alone already reduces it by an order of magnitude.~~ A 15× smaller integrand over
 the same 8000 steps would move the median $|\det F - 1|$ from 3.2e-03 toward
 ~2e-04, which **would clear the void fraction of interest**.
 
@@ -1172,6 +1178,70 @@ measured 2.31 1/s on D2 sits squarely in that range, and it was recorded before
 any of this detachment work. ⚠️ **The non-zero divergence is a property of the
 FOM discretisation, not of the detachment accumulator**, and it is not specific
 to the D family.
+
+### B.6k ⚠️ The HCT test ran and measured NOTHING — a design flaw in my own test
+
+Two arms on cylA, 100 steps, 293,455 particles, both exit 0:
+
+| | raw P1 | hct_cubic |
+|---|---|---|
+| median \|det F − 1\| | 9.036e-05 | **9.036e-05** |
+| p99 | 7.561e-04 | 7.566e-04 |
+| Π₁ min median | 0.9007 | 0.9007 |
+
+✅ HCT genuinely built — `c1_taylor`, Bernstein coefficients
+(3,050,196 × 4 × 20 × 3) = **2928 MB**, assembled in 2.78 s. Not a silent
+fallback; the gradient-recovery lines confirm it.
+
+❌ **And yet det F is IDENTICAL to five significant figures.** That is not a
+null physical result — it means **the test could not have detected an effect.**
+
+#### The reason, found in the code
+
+`div_u` is computed inside `build_damage_fields` from the **raw P1 velocity
+gradient** (`velocity_gradient_per_element` → `tr(D)` → `elements_to_nodes`),
+and the damage stack is assembled at `run_tracking.py:2391` — **before** the
+gradient recovery is built at line 2423. The kernel then samples `div_u` as a
+plain **nodal scalar field** via `interpolate_scalar_single`.
+
+⚠️ **So `ln_J` integrates the divergence of the raw P1 field no matter what
+`--recovery-method` says.** The reconstruction affects the *velocity* used to
+move particles, but the *divergence* the accumulator sees is precomputed from
+P1 and is completely independent of it. My prediction in §B.6j — that HCT should
+reduce det F by ~15× — was untestable by this experiment, and I should have
+checked the data path before running it.
+
+#### ✅ What would actually test it
+
+`div_u` must be computed **from the same reconstruction that moves the
+particles**. Two options:
+
+1. ✅ **Analytic divergence of the HCT cubic**, evaluated in-kernel at the
+   particle position. The Bernstein form has an exact gradient, so
+   $\nabla\!\cdot u$ is available without a new field — this is the correct
+   answer and it also removes the nodal-scalar round-trip for free.
+2. ⚠️ **Rebuild `div_u` from the recovered nodal gradient** (`tr` of SPR's
+   tensor, scattered to nodes). Cheaper to implement and ~15× lower divergence
+   per §B.6j, but it is still a *projected* field, so it measures the
+   gradient's divergence rather than the interpolant's.
+
+⚠️ **Until one of these is implemented, the question "does HCT fix det F?" is
+OPEN** — §B.6j's 15× is a property of the recovered gradient, not a measured
+det F improvement.
+
+#### ⚠️ A separate finding the test did produce
+
+`max |det F − 1|` is **90.7 at 100 steps** (P1: 70.5), versus 108.7 at 8000
+steps on D2. ✅ **So the pathological tail is NOT an accumulation effect** — it
+is present almost immediately and barely grows. That points to a small number
+of elements with a huge spurious divergence (recall D2's raw `|div u|` max of
+5938 1/s against a median of 2.31), not to gradual drift. ✅ **This is good
+news for route 2 in §B.6i**: a tail driven by a few bad elements can be
+diagnosed and excluded, whereas uniform drift could not.
+
+⚠️ Note also that cylA's median is 9.0e-05 against D2's 3.2e-03 — a 35×
+difference between cases. The det F error is strongly **case- and
+mesh-dependent**, so no single floor figure can be quoted for the method.
 
 ### B.6b Full texts needed before the derivation — in priority order
 
