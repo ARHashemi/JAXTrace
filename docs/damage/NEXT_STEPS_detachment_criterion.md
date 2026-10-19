@@ -926,6 +926,38 @@ must simply never be quoted as "detachment made the build faster".
 ✅ The 5-slot stack measured **6083.2 MB**, matching the projection from the
 3-slot figure exactly (3650 × 5/3 = 6083).
 
+#### ⚠️ GPU memory: my projection was right about the arrays and wrong about the total
+
+Measured in flight on the RTX 5090 (`XLA_PREALLOC=0`, on-demand allocator):
+
+| | MB |
+|---|---|
+| velocity stack (166, 1.92 M, 3) | 3 650 |
+| **damage stack, 5 slots** | **6 083** |
+| temperature stack | 1 217 |
+| octree | 723 |
+| mesh | 495 |
+| particles (pos + 7 accumulators) | 11 |
+| **sum of persistent arrays** | **12 178** |
+| **observed process usage** | **28 420** |
+| ⚠️ **XLA workspace / compiled kernels** | **16 242** |
+
+⚠️ **So the 12.2 GB figure quoted earlier was the ARRAYS, not the footprint.**
+The real number is 28.4 GB of 32.6 GB — **13 % free, not 63 %**. The fused RK4
+kernel's scratch space dominates, and it is ~1.3× the size of all persistent
+data put together.
+
+⚠️ **This also means the 16 Oct 3-slot run was already at ~26.0 GB (80 %).** The
+two extra slots pushed an already-tight configuration to 87 %. It fits, and the
+run is marching at 288,000/288,000 active with 0 lost — but there is **no room
+for a third pair of columns** on this card without reducing the snapshot count
+or the particle count.
+
+✅ **On LUMI this is a non-issue**: the same footprint is 43 % of an MI250X GCD's
+64 GB, leaving ~37 GB. ✅ And it reinforces why `XLA_PREALLOC=0` is mandatory on
+the workstation — a 75 % preallocation (24.5 GB) would leave 8 GB for a
+workspace that demonstrably wants 16 GB.
+
 ⚠️ **So the workstation cannot do this in 2 hours — it is ~4 h per case**, and
 mesh loading plus the damage build is 36 % of it before a single step is
 marched. ✅ This is why the family sweep belongs on LUMI, where the 16 cases run
