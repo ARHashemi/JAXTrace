@@ -116,15 +116,30 @@ Fratini et al. (2016) **[9]**; $w_\text{lim}$ calibration procedure in D'Urso et
 
 ### A.4 Contact-pressure differential
 
-$$\boxed{\;\Delta p \;=\; p_\text{advancing} - p_\text{retreating}\;}$$
+$$\boxed{\;B \;=\; P_\max(\theta=0°,\ \text{front}) \;-\; P_\min(\theta=180°,\ \text{rear})\;}$$
 
-evaluated around the pin. Shi et al. (2022) **[15]** report a threshold of
-**Δp < 15 MPa** for void formation.
+✅ **Read in full 2026-10-19** (PDF supplied). Shi et al., *Int. J. Mech. Sci.*
+**241** (2023) 107969, Eq. (19) and Fig. 21.
 
-- **Independent?** ✅ Yes — a pressure-field diagnostic, no pathline integration at all.
-- **Cost:** low.
-- **Calibration:** ⚠️ the 15 MPa value is alloy- and geometry-specific, and we have not
-  read the paper. Verify before quoting it. Use the *sign and trend* across cases first.
+⚠️ **TWO ERRORS IN THE EARLIER DRAFT OF THIS SECTION, both corrected above.**
+
+1. **The inequality was inverted.** This said "Δp **<** 15 MPa for void
+   formation". The paper says the opposite: *"void defects formed in the joint
+   when the value of B is **greater than** 15 MPa"*. A sound joint is formed when
+   the difference is **lower** than 15 MPa.
+2. **The axis was wrong.** This said $p_\text{advancing}-p_\text{retreating}$.
+   Eq. (19) is a **front-to-rear** difference along the travel direction, using
+   the **maximum** in front and the **minimum** in the rear — not sector means,
+   and not the advancing/retreating contrast, which is perpendicular to it.
+   `indicator_dp.py` computed the advancing/retreating version and has been
+   corrected; it now reports both, but only $B$ may be compared to 15 MPa.
+
+- **Independent?** ✅ Yes, and ⚠️ **in the stronger sense** — see §A.0b. It is the
+  only indicator that needs no particles at all.
+- **Cost:** low, using the project's threaded PVTU loader.
+- **Calibration:** the 15 MPa value is from *their* alloy and tool, so the
+  **ranking across our 16 cases is the primary result**; the absolute pass/fail
+  is indicative. Shi states no second condition — $B$ alone is the criterion.
 - ⚠️ **Our pressure magnitudes need care.** `DAMAGE_REPORT.md` records measured
   −6 … −7.5 MPa ahead of the tool and +0.4 … +2.2 MPa behind, with the sign pattern
   holding in 9/10 cases. That is the right order for a 15 MPa threshold comparison,
@@ -162,6 +177,72 @@ anything in that table.
 **Other sense-(ii) candidates**, for completeness: the flow-partitioning /
 mass-balance criterion (Arbegast 2008, §6 item 6) and the Cooper–Allwood
 thresholds are also evaluable on the field alone. Neither is implemented.
+
+### A.4b ✅ MEASURED — the external check, and it disagrees with everything
+
+16 cases on LUMI (array 22955760, all COMPLETED, 15–27 min each using the
+threaded PVTU loader). Median $B$ per case, Shi threshold 15 MPa:
+
+| case | median B [MPa] | % snapshots > 15 |  | case | median B | % > 15 |
+|---|---|---|---|---|---|---|
+| **D2** | **16.80** | **52 %** |  | A1 | 1.68 | 0 % |
+| **A2** | **12.82** | **36 %** |  | C2 | 1.65 | 0 % |
+| A3 | 6.43 | 2 % |  | A4 | 1.63 | 0 % |
+| D3 | 4.67 | 0 % |  | B1 | 1.60 | 0 % |
+| B4 | 4.27 | 0 % |  | C4 | 1.58 | 0 % |
+| D1 | 3.67 | 0 % |  | B3 | 1.49 | 0 % |
+| B2 | 3.67 | 0 % |  | C3 | 1.48 | 0 % |
+| D4 | 3.58 | 0 % |  | C1 | 1.77 | 0 % |
+
+✅ **$B$ discriminates sharply** — an **11× spread** (1.48 … 16.80) against the
+1.17–1.19× of the damage block. Only **D2** and **A2** approach the threshold.
+
+⚠️ **AND IT CORRELATES WITH NOTHING WE HAVE.** Rank correlation of $B$ against
+the pathline indicators, 16 cases:
+
+| | ln_phi | C | A_edot | w_bond | density_cv |
+|---|---|---|---|---|---|
+| **B** | −0.174 | −0.047 | −0.174 | **+0.121** | **−0.518** |
+
+This is the result that matters, and it cuts both ways:
+
+- ✅ **It is a real external check.** $B$ needs no particles — no seeding, no
+  tracking, no element search (§A.0b). It is the only indicator that could have
+  revealed a systematic fault in the particle apparatus, and the near-zero
+  correlations mean it is **measuring something the pathline family does not
+  capture at all**, not merely re-expressing it.
+- ⚠️ **Three indicator families now give three different rankings.** Damage laws:
+  B-Flutes highest. Bonding ($w$): D-Concavity highest. Contact pressure ($B$):
+  **D2 and A2 highest, with their own families' other members near the bottom** —
+  so $B$ does not even rank by *family*, it ranks by *case*.
+- ⚠️ **$\rho(B, \text{density CV}) = -0.518$** is the one non-trivial link, and it
+  has the **wrong sign** for comfort: cases with a *higher* contact-pressure
+  difference show *lower* particle-density scatter. If $B$ predicts voids, the
+  density measure should move with it, not against it.
+
+⚠️ **None of this can be adjudicated from simulation.** Three indicators, three
+rankings, no ground truth. §B.8 (one experimental cross-section) is now the
+binding constraint on the whole programme, not a nice-to-have.
+
+### A.4c Validation references — what exists, and how far each stretches
+
+Deep search completed 2026-10-19 (205 papers) plus two full texts supplied.
+⚠️ **No study matches our alloy AND our four pin families.** Ranked by usability:
+
+| source | alloy | why it is usable | gap to our case |
+|---|---|---|---|
+| **Chen et al. (2023)**, *J. Manuf. Process.*, 33 cit. ✅ PDF read | **AA6061-T6, 600 rpm** | ⚠️ **the closest match we have.** Same rotation speed; CFD with *non-uniform contact pressure*; voids form on the **advancing side** when rear contact pressure drops; quantitative void width/height for six pin sizes (Table 4: 0.81–2.40 mm width); **validated against measured cross-sections** — sound at 600-20, voided at 600-180 | 6061 not 6063; varies pin *size*, not our four profile families |
+| **Shash et al. (2022)**, *Proc. IMechE C* | ⚠️ **AA6063** | the only hit on **our exact alloy**, coupled experimental + numerical | 11 citations; pin geometry not varied |
+| **Yadav et al. (2025)**, *JMR&T*, 8 cit. ✅ PDF read | AA6082-T6, 710 rpm | **four pin profiles** with a clear defect ordering: threaded cylindrical → *largest* tunnel; square → *smallest* | pipe butt welds, not plate; 6082; profiles differ from ours |
+| **Reza-E-Rabby & Reynolds (2014, 2018)**, 53 + 38 cit. | AA6061 | **thread form / thread interruption** varied systematically — the closest published analogue to our C-Threads family | threads only |
+| **Hamade & Baydoun (2019)**, *Mater. Des.*, 42 cit. | Al lap joints | **X-ray CT** defect detection — the measurement modality §B.8 asks for | lap joints, not butt |
+| **Bui et al. (2026)**, *IJAMT* | **AA6061** | void formation vs welding parameters, very recent | parameters, not pin geometry |
+
+✅ **The defensible validation plan**: use **Chen (2023)** for the *mechanism*
+(advancing-side void when rear contact pressure falls — directly testable against
+our $B$ and our predicted void location) and **Yadav (2025)** for the *trend*
+(pin profile changes defect severity, ordering is measurable). ⚠️ Neither
+validates our specific 16-case ordering, and claiming otherwise would overstate.
 
 ### A.5a ⚠️ What is actually implemented — the exact tally
 
