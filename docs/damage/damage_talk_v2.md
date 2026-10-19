@@ -121,6 +121,19 @@ different magnitude *and* opposite sign.
 
 ---
 
+## Where the two numbers come from
+
+![w:800](figs_dp/fig_dp_schematic.png)
+
+<div class="tiny">
+
+Top view, xy plane at pin mid-depth. Annulus $r\in[3.0, 4.8]$ mm, ±15° sectors
+about $\theta=0$ and $\theta=180$. Drawn to the actual measurement parameters.
+
+</div>
+
+---
+
 ## ⚠️ Which plane it lives in
 
 <div class="box">
