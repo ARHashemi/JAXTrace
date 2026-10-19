@@ -728,6 +728,15 @@ def create_rk4_comparison(
     # then a comparison on the output file, so the §B.6f step-4 sensitivity
     # sweep costs ZERO extra runs instead of one run per threshold.
     damage_detachment: bool = False,
+    # Which divergence ln_J integrates.
+    #   'field'  : the precomputed NODAL div_u (slot 3), i.e. the raw P1
+    #              divergence. ⚠️ Independent of --recovery-method, so det F is
+    #              unchanged by HCT. Kept for comparison with the runs that
+    #              predate the analytic path.
+    #   'analytic': d/dx of the ACTUAL reconstruction at the particle position,
+    #              via jacfwd on interpolate_velocity_single. ✅ This is the one
+    #              that responds to the reconstruction.
+    damage_divergence: str = "field",
     # Gradient-recovery / higher-order velocity reconstruction. Two
     # methods supported; kernel picks by which arrays are non-None.
     #
@@ -807,6 +816,11 @@ def create_rk4_comparison(
     # only the extended build supplies. Like use_indicators this is a
     # configuration error rather than something to silently drop.
     use_detach = bool(damage_detachment) and use_damage
+    if str(damage_divergence) not in ("field", "analytic"):
+        raise ValueError(
+            "damage_divergence must be 'field' or 'analytic', got "
+            f"{damage_divergence!r}")
+    use_analytic_div = (str(damage_divergence) == "analytic")
     if use_detach and not use_indicators:
         raise ValueError(
             "damage_detachment=True needs damage_indicators=True: the "
@@ -1292,6 +1306,35 @@ def create_rk4_comparison(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    # ---- Divergence of the ACTUAL velocity reconstruction ----
+    # ⚠️ WHY THIS EXISTS, and why it is not a nodal scalar like the rest.
+    #
+    # div_u used to be precomputed in build_damage_fields from the RAW P1
+    # gradient and sampled here as a nodal field. Measured consequence: the
+    # det F column was identical to 5 significant figures with and without
+    # --recovery-method hct_cubic (cylA, 2 arms, 100 steps), because ln_J
+    # integrated the P1 divergence no matter which reconstruction moved the
+    # particles. See docs/damage/NEXT_STEPS_detachment_criterion.md B.6k.
+    #
+    # ⚠️ Storing a RECONSTRUCTED NODAL velocity does not fix that either: all
+    # of these reconstructions are EXACT AT NODES (N_b(x_a) = delta_ab and
+    # (x_a - x_a) = 0), so sampling them at the nodes returns the input
+    # velocities unchanged and the P1 operator recovers the original
+    # divergence. The reconstruction differs from P1 only BETWEEN nodes, which
+    # a nodal array cannot represent.
+    #
+    # ✅ So the divergence must be taken of the interpolant itself, at the
+    # particle position. jax.jacfwd differentiates the SAME closure that
+    # produced the velocity, so the two can never drift apart -- if the
+    # velocity path changes, this follows automatically. 3 forward-mode
+    # tangents for a 3-component output; no extra element search.
+    def divergence_single(pos, elem_id, velocity_field):
+        # ⚠️ jacfwd w.r.t. argument 0 only. elem_id is integer (non-
+        # differentiable) and velocity_field is a constant w.r.t. position.
+        J = jax.jacfwd(interpolate_velocity_single, argnums=0)(
+            pos, elem_id, velocity_field)      # (3, 3) = du_i/dx_j
+        return jnp.trace(J)
+
     # ---- Nodal scalar sampler (pathline damage driver) ----
     # Deliberately a separate function rather than a generalisation of
     # interpolate_velocity_single: that is the hot velocity path and is left
@@ -1744,8 +1787,13 @@ def create_rk4_comparison(
                         # positions use. A higher-order J against an RK4
                         # position would attribute the scheme's own
                         # inconsistency to the physics.
-                        divu_k1 = interpolate_scalar_single(
-                            pos, elem_k1, divu_field)
+                        if use_analytic_div:
+                            # ✅ Divergence of the interpolant actually in use.
+                            divu_k1 = divergence_single(
+                                pos, elem_k1, velocity_field)
+                        else:
+                            divu_k1 = interpolate_scalar_single(
+                                pos, elem_k1, divu_field)
 
                         # ⚠️ tau_ratio does NOT go in `inc`. It is a RUNNING
                         # MINIMUM over the path, not a time integral, so

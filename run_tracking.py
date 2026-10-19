@@ -619,6 +619,18 @@ def parse_args():
                              "so the sensitivity sweep costs no extra runs. "
                              "Rationale: docs/damage/"
                              "NEXT_STEPS_detachment_criterion.md section B.6f.")
+    parser.add_argument("--damage-divergence", type=str, default="analytic",
+                        choices=["field", "analytic"],
+                        help="Which divergence ln_J integrates. 'analytic' "
+                             "(default) differentiates the ACTUAL velocity "
+                             "reconstruction at the particle position, so "
+                             "det F responds to --recovery-method. 'field' "
+                             "uses the precomputed nodal div_u from the raw "
+                             "P1 gradient, which is what the runs before "
+                             "2026-10-20 used; ⚠️ it is independent of the "
+                             "reconstruction and was measured identical with "
+                             "and without HCT. Keep 'field' only to reproduce "
+                             "those earlier numbers.")
     parser.add_argument("--damage-tau-ref-edot", type=float, default=1.0,
                         help="Reference strain rate [1/s] at which the Norton "
                              "flow stress is evaluated to give tau_yield_ref "
@@ -2701,6 +2713,7 @@ def main():
         damage_indicators=args.damage_indicators,
         residence_edot_threshold=args.residence_edot_threshold,
         damage_detachment=args.damage_detachment,
+        damage_divergence=args.damage_divergence,
     )
     # create_rk4_comparison returns just rk4_step by default; when
     # --hit-stats-log is set, it returns (rk4_step, closures) so we can
