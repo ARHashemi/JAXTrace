@@ -1075,6 +1075,49 @@ Chen reports frictional *shear stress* at the tool interface, our $B$ is a
 *pressure* difference in an annulus in the material. Same mechanism, different
 quantity. Only the pattern transfers.
 
+### 8d.3bb ⚠️ Why we do NOT put our cases on Chen's pressure axis
+
+Chen gives a closed-form contact-pressure model (his Eq. 12) with every
+parameter stated:
+
+$$P_0 = P_a\,(\gamma/\gamma_0 + 4)^{a_1},\qquad
+P_a = 31.41\ \text{MPa},\ a_1 = 0.35,\ \gamma_0 = 0.025\ \text{mm}$$
+
+with $\gamma = v/\omega$ the forward distance per revolution. It is tempting to
+evaluate it for our cases and plot them alongside his. ⚠️ **We should not**, for
+two reasons found while trying:
+
+**1. We could not establish our $v_\text{adv}$ reliably.** It is not stated in
+the case files we can read, so it has to be inferred from particle motion, and
+two defensible inferences disagree:
+
+| method | $v_\text{adv}$ | $\gamma$ |
+|---|---|---|
+| downstream front advance over the run | 835 mm/min | 1.39 mm/rev |
+| never-entrained particles ($t_\text{res}=0$) | 638 mm/min | 1.06 mm/rev |
+
+⚠️ The second ought to be exact — those particles should translate rigidly — but
+their x-spread grew from the 8.8 mm seed width to 24.1 mm, so they are *not*
+rigidly translating and the inference is not clean.
+
+**2. Even the lower estimate is far outside Chen's fitted range.**
+
+| $\gamma$ [mm/rev] | Chen Eq. 12 $P_0$ | case |
+|---|---|---|
+| 0.033 | 56.4 MPa | Chen 600-20, **sound** |
+| 0.300 | 82.9 MPa | Chen 600-180, **voided** |
+| 1.06 | 120.4 MPa | ours, lower estimate |
+| 1.39 | 131.4 MPa | ours, upper estimate |
+
+⚠️ Eq. 12's parameters were *fitted* over $\gamma \in [0.033, 0.30]$. Our cases
+sit **3.5–4.6× beyond** the voided end. Extrapolating a fitted power law that far
+and presenting the result as a comparison would manufacture agreement rather than
+test it.
+
+✅ **So the comparison stays where the evidence is**: the *mechanism* (does the
+rear collapse in our high-$B$ cases? §8d.3b — yes, on 14 of 16), not the
+absolute pressures and not Chen's parameterisation.
+
 ### 8d.3c ⚠️ Our own FOM does not validate any of this
 
 Read 2026-10-19: the Venghaus PhD thesis (192 pp.), the Embedded Domain Method
