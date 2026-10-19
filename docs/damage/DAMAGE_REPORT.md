@@ -1075,48 +1075,53 @@ Chen reports frictional *shear stress* at the tool interface, our $B$ is a
 *pressure* difference in an annulus in the material. Same mechanism, different
 quantity. Only the pattern transfers.
 
-### 8d.3bb ⚠️ Why we do NOT put our cases on Chen's pressure axis
+### 8d.3bb ⚠️ Where our cases sit on Chen's process axis
 
-Chen gives a closed-form contact-pressure model (his Eq. 12) with every
-parameter stated:
+✅ **$v_\text{adv}$ established 2026-10-19** from the prescribed boundary
+condition in each case's `data/*.som.fix`:
 
-$$P_0 = P_a\,(\gamma/\gamma_0 + 4)^{a_1},\qquad
-P_a = 31.41\ \text{MPa},\ a_1 = 0.35,\ \gamma_0 = 0.025\ \text{mm}$$
+```
+4 111 1.0000000000e-02 0.0 0.0     <- v_x = 1.0e-02 m/s, all 3 components fixed
+```
 
-with $\gamma = v/\omega$ the forward distance per revolution. It is tempting to
-evaluate it for our cases and plot them alongside his. ⚠️ **We should not**, for
-two reasons found while trying:
+**$v_\text{adv} = 1.0\times10^{-2}$ m/s = 600 mm/min**, identical in every case
+checked (A1, A2, B2, C1, D2, D3). With $\omega = 600$ rpm that gives
 
-**1. We could not establish our $v_\text{adv}$ reliably.** It is not stated in
-the case files we can read, so it has to be inferred from particle motion, and
-two defensible inferences disagree:
+$$\gamma = v/\omega = 1.000\ \text{mm/rev}$$
 
-| method | $v_\text{adv}$ | $\gamma$ |
-|---|---|---|
-| downstream front advance over the run | 835 mm/min | 1.39 mm/rev |
-| never-entrained particles ($t_\text{res}=0$) | 638 mm/min | 1.06 mm/rev |
+⚠️ **I had previously inferred this from particle motion and got it wrong both
+ways** — 835 mm/min from the downstream front advance, 638 mm/min from the
+never-entrained particles. Neither is right. The second *should* have been exact
+(those particles ought to translate rigidly) but their x-spread grew from the
+8.8 mm seed width to 24.1 mm, so they are not rigidly translating and the
+inference was unsound. ✅ The boundary condition is the authoritative source.
 
-⚠️ The second ought to be exact — those particles should translate rigidly — but
-their x-spread grew from the 8.8 mm seed width to 24.1 mm, so they are *not*
-rigidly translating and the inference is not clean.
-
-**2. Even the lower estimate is far outside Chen's fitted range.**
+**Where that places us relative to Chen:**
 
 | $\gamma$ [mm/rev] | Chen Eq. 12 $P_0$ | case |
 |---|---|---|
 | 0.033 | 56.4 MPa | Chen 600-20, **sound** |
 | 0.300 | 82.9 MPa | Chen 600-180, **voided** |
-| 1.06 | 120.4 MPa | ours, lower estimate |
-| 1.39 | 131.4 MPa | ours, upper estimate |
+| **1.000** | **118.1 MPa** | ⚠️ **ours — every case** |
 
-⚠️ Eq. 12's parameters were *fitted* over $\gamma \in [0.033, 0.30]$. Our cases
-sit **3.5–4.6× beyond** the voided end. Extrapolating a fitted power law that far
-and presenting the result as a comparison would manufacture agreement rather than
-test it.
+⚠️ **Every one of our 16 cases sits 3.3× beyond Chen's voided condition on the
+weld-pitch axis.** That is now a *measured* statement rather than an uncertain
+one, and it has two consequences:
 
-✅ **So the comparison stays where the evidence is**: the *mechanism* (does the
-rear collapse in our high-$B$ cases? §8d.3b — yes, on 14 of 16), not the
-absolute pressures and not Chen's parameterisation.
+1. ❌ **His Eq. 12 still must not be evaluated for our cases.** Its parameters
+   were fitted over $\gamma \in [0.033, 0.30]$; quoting 118 MPa would be
+   extrapolating a fitted power law 3.3× past its range.
+2. ⚠️ **But it reframes the whole comparison, and this is the more important
+   point.** Chen found voids at $\gamma = 0.30$. Our entire campaign runs at
+   $\gamma = 1.00$ — *deeper into his void-forming regime than his own voided
+   case*. If his process-window reasoning transfers at all, **every one of our
+   16 cases should be void-prone**, and the question stops being "which tool
+   makes a void" and becomes "which tool makes the *worst* one".
+
+✅ That is consistent with what $B$ measures: all 16 cases show a positive
+front-to-rear difference, and the ranking (D2 16.8 … C3 1.5) is a severity
+ordering within an already-aggressive process window, not a sound/defective
+split.
 
 ### 8d.3c ⚠️ Our own FOM does not validate any of this
 

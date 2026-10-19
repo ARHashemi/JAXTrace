@@ -19,7 +19,10 @@ import subprocess
 import sys
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else "damage_talk_meeting.md"
-OUT = sys.argv[2] if len(sys.argv) > 2 else "damage_talk_meeting.pdf"
+# ⚠️ Derive the output from the INPUT, not a fixed name. The old default
+# silently overwrote damage_talk_meeting.pdf whenever another deck was
+# built without an explicit second argument.
+OUT = sys.argv[2] if len(sys.argv) > 2 else SRC.replace(".md", ".pdf")
 SLIDE_PX = 1160.0            # Marp usable width in px, for scaling image widths
 
 
