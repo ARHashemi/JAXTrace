@@ -654,6 +654,166 @@ the local stress cannot overcome the yield stress, which is a cleaner and more
 defensible statement than a thermal-softening ratio. Their $Bu$ range is 0.1–5.0,
 and $Bu$ is interpretable as a reciprocal dimensionless rotation rate.
 
+### B.6d ✅ THE LITERATURE IS CLOSED — novelty verdict, and where the method comes from
+
+Four full texts read 2026-10-19 (Zhao 2022 in B.6c; Mendez 2010, Wang 2021,
+Buck 2004 here), plus a deep search run specifically on the *mechanism* rather
+than on FSW keywords. The question is settled in both directions.
+
+#### ✅ The claim, as narrowly as it can be stated — and it holds
+
+> No located work advects **passive markers through a previously computed,
+> fixed velocity field** and lets **individual particles detach by a local
+> criterion**, so that the void appears as a **particle-density deficit**.
+
+⚠️ **But "nobody has done it" is the weaker half of the finding.** The deep
+search found that the mechanism *is* established — in **pore-scale colloid
+filtration**, where particles are tracked through a precomputed carrier flow and
+then immobilised or remobilised per-particle. ✅ **This is the same mathematical
+object as ours**, and it is a far better citation than a null result:
+
+| | colloid filtration | ours |
+|---|---|---|
+| carrier flow | precomputed, fixed | precomputed, fixed (FOM) |
+| particles | passive, advected | passive, advected |
+| local switch | hydrodynamic torque > adhesive torque | stress < yield (to be derived) |
+| observable | retention / deposition profile | particle-density deficit = void |
+
+The canonical statement of that switch is a **force/torque balance**
+(Torkzaban 2007; Bradford 2010; Vanness 2019 — a *unified* force-and-torque
+balance). ✅ **We should cite this as the methodological precedent**: it makes
+the detachment post-process a recognised technique being transferred to a new
+physics, rather than an invention needing defence from scratch.
+
+⚠️ **Also from the search: the switch in that literature is almost always
+DIMENSIONAL** (a force/torque comparison), with dimensionless groups used only
+to organise regimes. ✅ **So the dimensionless form of the criterion is the
+genuinely open part** — which is exactly where B.3b's Niyama-style derivation
+sits. That is the contribution, not the particle bookkeeping.
+
+#### ⚠️ What is NOT novel, and must be cited as prior art
+
+- **Marker/tracer particle tracing in FSW** — Dialami et al. (2015, 2019, 2020).
+  ⚠️ These are our own team's, and Dialami 2020 is titled *"Defect formation and
+  material flow in FSW"*. The write-up must not imply tracer-based defect
+  discussion is new.
+- **Marker-and-cell** — Harlow & Welch (1965): markers track the liquid region,
+  i.e. a free surface, not detached particles.
+- **Void prediction via free-surface/VOF or explicit damage evolution** — the
+  standard routes; ours is neither.
+- ❌ **Particle methods (SPH / MPM / PFEM / DEM)** are a *different kind of
+  thing*: there the particles **are** the discretisation and **carry mass**, so
+  voids arise from the solution itself. See §B.6e.
+
+#### ✅ Where the criterion's two groups now come from — both sourced
+
+**$\Pi_1$, a yield/stress group — Buck & Langerman (2004).** Their critical
+radius, "the location of vanishing material velocity", is a closed form in the
+**Bingham number** $Bu$, over $Bu \in [0.1, 5.0]$. ✅ A particle detaches when
+the local stress can no longer overcome the yield stress. This is cleaner and
+more defensible than a thermal-softening ratio.
+
+**$\Pi_2$, a kinematic/geometric group — Mendez, Tello & Lienert (2010).** Their
+Eq. (30) gives the **shear-layer thickness** in closed form:
+
+$$\delta = a\left[\tfrac{8}{3}\,\frac{\Delta T_0}{g\sigma_s}\,
+\frac{\tau_R}{AB}\left(\frac{a^2}{k_0}\right)^{\!n}
+\left(\frac{gK_0}{\Delta T_0}\right)\omega^{\,n+1}\right]^{1/2}$$
+
+with the maximum shear rate $\dot{\gamma} = \omega a / \delta$ (their Eq. 35).
+✅ **$\delta$ is the natural length to normalise a detachment distance against**,
+and it is available from process parameters alone — no extra simulation.
+
+⚠️ **Wang 2021 is a near-miss and must be read as a warning, not a basis.** Their
+dimensionless slip parameter $\delta \in [0,1]$ and stick fraction $c/a$ are
+**interfacial**, on the tool/workpiece contact. ✅ Their Eq. (10) is nonetheless
+the right *functional form* to borrow — a switch on a relative velocity against a
+critical $v_c$:
+
+$$\tau_f = \mu_f p \,\mathrm{sgn}(v_{rel})\times
+\begin{cases} 1 & |v_{rel}| \ge v_c\\ \tanh(|v_{rel}|/v_0) & |v_{rel}| < v_c\end{cases}$$
+
+⚠️ **And their own stated limitation is the one we will inherit**: the predicted
+stick-slip ratio **depends on the choice of $v_c$**. Any velocity-threshold
+detachment rule we write has a free parameter, and the honest move is to say so
+and show the sensitivity, not to tune it to a known answer.
+
+### B.6e ⚠️ Do the particles need interaction forces? No — and adding them would break the method
+
+**Short answer: no, and it is not a detail — it is the method's premise.**
+
+Our particles are **passive tracers in a precomputed field**. They carry no mass
+and no momentum, and the field was already solved with momentum balance and
+incompressibility by the FOM. Adding interaction forces would mean:
+
+1. ⚠️ **Double-counting.** Inter-particle forces in the FOM's material are
+   *already* in the constitutive response that produced the velocity field.
+   Adding them again on the tracers imposes the same physics twice.
+2. ⚠️ **An inconsistent system.** The tracers would obey a momentum balance that
+   the carrier field does not satisfy. With $\nabla\!\cdot u = 0$ imposed on the
+   field but repulsion acting on the particles, the two disagree, and nothing
+   reconciles them.
+3. ❌ **It becomes a particle method.** Interaction forces + mass = SPH/MPM. That
+   is a legitimate approach to FSW voids — **and it is what someone should do
+   instead if they want voids to arise from the solution** — but it requires
+   **re-solving momentum**, which is precisely what a post-process is for
+   avoiding.
+
+✅ **The detachment rule is the deliberate alternative to interaction forces.**
+The whole reason a rule is needed is the result in §A: with $\nabla\!\cdot u=0$ and
+fully entrained particles, $\det F \equiv 1$, so a void is **impossible by
+construction**. The two ways out are (a) give the particles mass and re-solve —
+a particle method — or (b) break entrainment with a local rule and read the void
+off the resulting density deficit. ✅ **We are doing (b), on purpose.**
+
+⚠️ **One real limitation to state, not hide.** Without interaction, detached
+particles cannot *resist* each other, so the method predicts **where material
+fails to arrive** — it does not predict the void's **equilibrium shape** after
+surrounding material consolidates. ✅ That is a scope statement for the paper, not
+a defect: the void's *existence and location* is the quantity being claimed.
+
+### B.6f ✅ IMPLEMENTATION STEPS — in order, with what each costs
+
+Each step is independently checkable, and **steps 1–2 produce a publishable
+negative or positive result on their own.**
+
+**Step 1 — prove the null result on our own data (½ day).** ✅ Measure
+$\det F$ along our existing trajectories and confirm it is $1$ to integration
+error. This is the figure that *motivates* everything else: it shows no
+criterion-free post-process can ever produce a void. ⚠️ Do this first — if
+$\det F$ drifts materially from 1, the mesh/interpolation error is larger than
+the effect we intend to measure, and the whole plan needs rethinking.
+
+**Step 2 — implement detachment with the simplest defensible rule (1–2 days).**
+A particle detaches when the local stress cannot sustain entrainment. Start from
+Buck's Bingham form, evaluated from fields we already carry:
+
+$$\Pi_1 = \frac{\tau_{local}}{\tau_{yield}(T,\dot\varepsilon)},\qquad
+\text{detach when } \Pi_1 < \Pi_1^{crit}$$
+
+✅ Reuse the existing accumulator machinery: add one `int8` state column
+(`attached`/`detached`) and freeze a detached particle's velocity contribution.
+⚠️ Do **not** delete detached particles — keep them and record where they stopped;
+the density deficit is computed from the *survivors*, and the stopped set is the
+diagnostic.
+
+**Step 3 — make the criterion dimensionless (the actual contribution, 2–3 days).**
+Normalise with Mendez Eq. (30)'s $\delta$ and the Bingham number, then follow the
+**Carlson & Beckermann template in §B.3b**: derive, don't fit, and invert to a
+predicted void fraction rather than a yes/no flag. ✅ This is the part no located
+work has done.
+
+**Step 4 — sensitivity, reported honestly (1 day).** ⚠️ Wang's warning applies to
+us: the threshold is a free parameter. Sweep $\Pi_1^{crit}$ and show how the void
+map moves. A criterion whose answer is stable over a decade of threshold is a
+result; one that is not must be reported as not.
+
+**Step 5 — validate against the pattern, not the number (1 day).** ✅ We already
+have the comparison in place (§8d.3b): $\gamma = 1.0$ mm/rev puts us $3.3\times$
+beyond Chen's voided case, so **we should predict sound welds**. ⚠️ A criterion
+that predicts voids everywhere on our 16 cases is falsified by that, and that is
+the most valuable check available to us.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
