@@ -174,8 +174,18 @@ run_arm () {
     echo " arm $tag exit $rc  elapsed ${el}s"
     # ✅ Step rate is the comparable number across arms -- total wall time
     # includes the mesh load and octree, which are identical and dominate.
-    local s7; s7=$(grep -oE "Stage 7 time: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+")
-    [ -n "$s7" ] && echo " arm $tag STAGE7 (tracking only): ${s7}s  -> $(python3 -c "print(f'{$N_STEPS/$s7:.3f}')") step/s"
+    # ⚠️ Two traps here, both hit on the first run:
+    #  - `grep -oE "[0-9.]+"` on "Stage 7 time: 24.9" returns the "7" of
+    #    "Stage 7" FIRST, not the duration. Strip the known prefix instead.
+    #  - interpolating $s7 into a python -c string makes a SyntaxError when it
+    #    is empty or partial. Pass values as argv and let python parse them.
+    local s7; s7=$(grep -oE "Stage 7 time: [0-9.]+" "$log" | tail -1 | sed 's/.*: //')
+    if [ -n "$s7" ]; then
+        echo " arm $tag STAGE7 (tracking only): ${s7}s  -> $(python3 -c '
+import sys
+n, t = float(sys.argv[1]), float(sys.argv[2])
+print(f"{n/t:.3f}" if t > 0 else "n/a")' "$N_STEPS" "$s7") step/s"
+    fi
     echo "$tag,$rc,$el,${s7:-NA}" >> "${OUT_ROOT}/timing.csv"
     report_memory_cost "$log"
     # ⚠️ Did HCT actually build, or silently fall back? The run prints
