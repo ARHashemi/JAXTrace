@@ -616,6 +616,36 @@ So the honest claim is narrow:
 
 **One targeted literature search would settle this** — see §B.8.
 
+### B.6b Full texts needed before the derivation — in priority order
+
+⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
+$Ny^*$ comes from a *transport equation*, inverted to a physical quantity, and
+that §B.3's current two-rates-by-inspection is not that. These are what the
+derivation needs, ordered by what each one decides.
+
+| # | paper | DOI | what it decides |
+|---|---|---|---|
+| **1** | **Zhao, C., Pei, X. & Liu, X.** (2022). *Computational investigation on void defects formation and periodic tool-workpiece sliding-to-sticking transition in self-reacting friction stir welding.* **Int. J. Adv. Manuf. Technol.**, 8075–8088 | `10.1007/s00170-022-09259-0` | ⚠️ **Whether our remaining claim survives at all.** It already links a contact-state transition to void formation — our exact causal chain. We need to know whether their criterion is evaluated *locally per material point* or at the interface. |
+| **2** | **Mendez, P. F., Tello, K. E. & Lienert, T. J.** (2010). *Scaling of coupled heat transfer and plastic deformation around the pin in friction stir welding.* **Acta Materialia** 58, 6012–6026 | `10.1016/J.ACTAMAT.2010.07.019` | ⚠️ **Whether $\Pi_1,\Pi_2$ should be invented at all.** A formal scaling analysis of the pin region already exists; our groups should be expressed in *its* terms or explicitly reconciled with them. |
+| **3** | **Buck, G. A. & Langerman, M. A.** (2004). *Non-dimensional characterization of the friction stir/spot welding process using a simple Couette flow model, Part I.* **AIP Conf. Proc.**, 1283–1288 | `10.1063/1.1766706` | ✅ **A cleaner physical basis for $\Pi_2$.** Gives a *critical radius* — "the location of vanishing material velocity" — from a Bingham **yield-stress** argument, at peak $T\sim 80\%$ of melting. Yield stress beats my thermal-softening ratio. |
+| **4** | **Wang, X., Gao, Y.-F., Liu, X., McDonnell, M. & Feng, Z.** (2021). *Tool-workpiece stick-slip conditions and their effects on torque and heat generation rate in the friction stir welding.* **Acta Materialia**, 116969 | `10.1016/J.ACTAMAT.2021.116969` | How a dimensionless stick/slip criterion is *constructed* and tied to spin rate (Hill–Bower contact similarity). 77 cit. Same group as the Wang 2020 we already cite. |
+| **5** | **Pei, X. & Dong, P.** (2014). *Shear localisation modelling of friction stir weld formation process.* **Sci. Technol. Weld. Join.** 19, 416–426 | `10.1179/1362171814Y.0000000207` | ⚠️ **Terminology.** "Shear localisation" may be the established name for our "detachment". Needed to avoid renaming an existing concept. |
+
+**Lower priority, for completeness of the Zhao–Liu series** (the only published
+line coupling contact state to voids):
+
+| paper | DOI | note |
+|---|---|---|
+| Zhao, C. & Liu, X. (2021). *An alternative pressure-dependent velocity boundary condition...* **IJAMT**, 1601–1613 | `10.1007/s00170-021-07589-z` | the BC that makes the transition possible; ✅ **an open-access PDF exists** |
+| Zhao, C. & Liu, X. (2020). *Computational analysis on weld formation mechanism during self-reacting FSW.* **J. Manuf. Sci. Eng.** | `10.1115/1.4048856` | earliest of the series |
+
+⚠️ **All are self-reacting (bobbin) FSW except Mendez and Buck.** The geometry
+differs from our single-shoulder configuration, so what transfers is the
+*mechanism and its formulation*, not the numbers.
+
+✅ **No further searching needed.** The O57 deep search (204 papers) already
+covered this ground; these are specific PDFs, not a research question.
+
 ### B.7 How to falsify it
 
 A criterion that cannot fail is not worth implementing. Four tests, in order:
