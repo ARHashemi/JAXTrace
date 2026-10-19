@@ -143,6 +143,29 @@ DAMAGE_DRIVER=models
 DAMAGE_ORDER="${DAMAGE_ORDER:-1}"
 RESIDENCE_THR="${RESIDENCE_THR:-1.0}"
 
+# ── [4b] Detachment groundwork (Part B) ──────────────────────────────────────
+# DETACHMENT=1 appends two accumulator columns:
+#   ln_J    = integral(div(u) dt)  -> det F = exp(ln_J)
+#   tau_min = running min of Pi_1 = sigma_eq / tau_yield_ref
+#
+# ✅ The det F column is the §B.6f STEP-1 GATE. With div(u)=0 imposed on the
+# field and full entrainment, det F == 1 identically, so a void is impossible
+# without a detachment rule. What the run prints is the pipeline's
+# INTERPOLATION ERROR, and that is the yardstick any later detachment signal
+# must beat. Run this BEFORE building a criterion.
+#
+# ⚠️ tau_min is recorded as a MINIMUM, not thresholded in-kernel. Every
+# Pi_1_crit is therefore a comparison on the output npz, so the sensitivity
+# sweep costs ZERO extra runs -- the run prints the whole detached-fraction
+# curve. Do NOT add a threshold flag here and re-run per value.
+#
+# ⚠️ Costs: div_u is free (tr(D) was already computed for the incompressibility
+# diagnostic and thrown away); tau_ratio adds ONE Norton table evaluation per
+# timestep over the node set, plus 2 slots of the field stack (so the stack
+# grows 3 -> 5, i.e. +67 % of its memory) and 2 floats per particle.
+DETACHMENT="${DETACHMENT:-0}"
+TAU_REF_EDOT="${TAU_REF_EDOT:-1.0}"
+
 # ── [5] GPU env (CUDA on the workstation, not ROCm) ──────────────────────────
 export JAX_PLATFORMS="${JAX_PLATFORMS:-cuda}"
 # ⚠️ ALLOCATOR: mirror the reference's XLA_PREALLOC=1 path.
@@ -205,6 +228,7 @@ cp "$0" "${OUT}/run_script.sh" 2>/dev/null
     echo "levelset      : $LEVELSET_FIELD ($LEVELSET_MODE)"
     echo "damage        : driver=$DAMAGE_DRIVER order=$DAMAGE_ORDER"
     echo "residence_thr : $RESIDENCE_THR"
+    echo "detachment    : $DETACHMENT   tau_ref_edot $TAU_REF_EDOT"
     echo "octree_cache  : $OCTREE_CACHE (format $OCTREE_CACHE_FORMAT)"
     echo "repo_commit   : $(cd "$JAXTRACE" 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     echo "python        : $VENV_PY"
@@ -254,6 +278,9 @@ ARGS=(
   --residence-edot-threshold "$RESIDENCE_THR"
   --damage-out "${OUT}/damage_models.npz"
 )
+if [ "$DETACHMENT" = "1" ]; then
+  ARGS+=( --damage-detachment --damage-tau-ref-edot "$TAU_REF_EDOT" )
+fi
 [ -n "$CASE_STEM" ] && ARGS+=( --case-stem "$CASE_STEM" )
 
 echo "============================================================"
@@ -264,6 +291,7 @@ echo "   steps     : $N_STEPS  dt $DT   vel [$VEL_START,$VEL_END]"
 echo "   seed grid : $SEED_GRID  box $SEED_BOX"
 echo "   driver    : $DAMAGE_DRIVER  order $DAMAGE_ORDER"
 echo "   t_res thr : $RESIDENCE_THR 1/s"
+echo "   detach    : $DETACHMENT  (tau_ref_edot $TAU_REF_EDOT 1/s)"
 echo "   out       : $OUT"
 echo "   log       : $LOG   (tail -f this)"
 echo "   octree\$ : $OCTREE_CACHE  (format $OCTREE_CACHE_FORMAT)"

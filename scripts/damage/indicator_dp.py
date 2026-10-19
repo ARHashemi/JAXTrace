@@ -199,7 +199,15 @@ def main() -> int:
     if rpm is None:
         rpm = -600.0
         print(f"  [warn] --pin-rpm not given; assuming {rpm:g}")
-    advancing_sign = -1.0 if rpm < 0 else +1.0
+    # ⚠️ CORRECTED 2026-10-19. The advancing side is where the tool's SURFACE
+    # motion ADDS to the travel direction. With omega = (0,0,w) and travel along
+    # +x, the surface velocity at (0,y) has v_x = -w*y. So for w < 0 (clockwise
+    # seen from +z, our case) v_x > 0 on the +y side: ADVANCING IS +y.
+    # The previous line had this inverted.
+    # ⚠️ This affects ONLY the secondary advancing-retreating diagnostic. B
+    # itself is a front/rear quantity and does not use advancing_sign at all,
+    # so every B result already reported stands unchanged.
+    advancing_sign = +1.0 if rpm < 0 else -1.0
     print(f"  pin_rpm {rpm:+g} -> advancing side is "
           f"{'+y' if advancing_sign > 0 else '-y'}")
 

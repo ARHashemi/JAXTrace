@@ -606,6 +606,25 @@ def parse_args():
                              "indicator (default 1.0). Sweep this over at least "
                              "a decade: pick it badly and the indicator either "
                              "saturates or vanishes.")
+    parser.add_argument("--damage-detachment", action="store_true",
+                        default=False,
+                        help="Accumulate the two detachment-groundwork columns "
+                             "alongside the indicators: ln_J = int(div(u) dt), "
+                             "whose exponential is det F, and tau_min, the "
+                             "running minimum along the path of "
+                             "Pi_1 = sigma_eq/tau_yield_ref. Needs "
+                             "--damage-indicators (hence --damage-driver=models). "
+                             "Recording the MINIMUM rather than a detached flag "
+                             "makes every threshold a post-process on the npz, "
+                             "so the sensitivity sweep costs no extra runs. "
+                             "Rationale: docs/damage/"
+                             "NEXT_STEPS_detachment_criterion.md section B.6f.")
+    parser.add_argument("--damage-tau-ref-edot", type=float, default=1.0,
+                        help="Reference strain rate [1/s] at which the Norton "
+                             "flow stress is evaluated to give tau_yield_ref "
+                             "for Pi_1. Default 1.0. ⚠️ Pi_1 is a RATIO to this "
+                             "value, so it sets the scale of the detachment "
+                             "threshold but not the ranking of particles.")
     parser.add_argument("--damage-mat", type=Path, default=None,
                         help="GiD .mat supplying the Norton tables for "
                              "sigma_eq. Defaults to the first *.mat found "
@@ -1882,6 +1901,30 @@ def main():
                 "--damage-indicators needs --damage-driver=models: the "
                 "Piwnik-Plata integrand is p/sigma_bar = -eta, and eta is not "
                 f"built by the '{args.damage_driver}' driver.")
+    # ⚠️ Same fail-early discipline for detachment: it needs the indicator
+    # columns (it appends after them) and the extended 5-slot field stack.
+    if args.damage_detachment:
+        if not args.damage_indicators:
+            raise SystemExit(
+                "--damage-detachment needs --damage-indicators: the detachment "
+                "columns are appended after the indicator columns.")
+        # ⚠️ Pi_1 is a ratio to the Norton flow stress, so the .mat tables are
+        # required -- but they AUTO-DETECT from the case folder (see the
+        # mat_path resolution in the damage build), so demanding the flag
+        # explicitly here would reject a perfectly good config. Check for the
+        # FILE, mirroring that same resolution, and fail now rather than after
+        # the mesh load.
+        if args.damage_mat is None:
+            _mc = (sorted(Path(args.input).resolve().parent.glob("*.mat"))
+                   or sorted(Path(args.input).resolve().glob("*.mat")))
+            if not _mc:
+                raise SystemExit(
+                    "--damage-detachment needs the Norton .mat tables, and no "
+                    "*.mat was found beside the case. Pass --damage-mat "
+                    "explicitly. Without it sigma_eq falls back to 3*edot, "
+                    "which makes Pi_1 scale-free and unable to carry a "
+                    "physical threshold.")
+            print(f"  [damage] detachment: tau_yield_ref from {_mc[0].name}")
         if args.residence_edot_threshold <= 0.0:
             raise SystemExit(
                 "--residence-edot-threshold must be > 0 "
@@ -2258,6 +2301,12 @@ def main():
         # reads slice 0 with no branch.
         want_models = (args.damage_driver == "models")
         slots = ["edot", "eta", "s1_ratio"] if want_models else ["edot"]
+        # ⚠️ Detachment appends two MORE nodal fields to the stack. div_u costs
+        # nothing (tr(D) was already computed for the incompressibility
+        # diagnostic and discarded); tau_ratio needs one extra Norton
+        # evaluation per timestep at the reference strain rate.
+        if args.damage_detachment:
+            slots = slots + ["div_u", "tau_ratio"]
 
         if want_models and pressure_sequence is None:
             raise RuntimeError(
@@ -2312,13 +2361,32 @@ def main():
                     print("  [damage] WARNING: no .mat or no temperature; "
                           "sigma_eq falls back to 3*edot -> eta is scale-free")
                     _warned_no_tables = True
+            # ⚠️ tau_yield_ref is the Norton flow stress at a REFERENCE
+            # strain rate with the LOCAL temperature -- not the local flow
+            # stress, which would make Pi_1 identically 1. Evaluated once per
+            # timestep over the whole node set, so the cost is one extra table
+            # lookup per timestep, not per particle.
+            _tau_ref = None
+            if args.damage_detachment:
+                if mat_path is None or T_t is None:
+                    raise RuntimeError(
+                        "--damage-detachment needs both --damage-mat and a "
+                        "temperature field to build tau_yield_ref.")
+                _edot_ref = np.full(n_nod, float(args.damage_tau_ref_edot),
+                                    dtype=np.float64)
+                _tau_ref = build_sigma_eq("norton", _edot_ref, T_t,
+                                          mat_path=mat_path)[0]
             f = build_damage_fields(
                 node_positions, connectivity,
                 velocity_sequence[_t], pressure_sequence[_t],
-                verbose=False, geom=_geom, sigma_eq_from_edot=_sig)
+                verbose=False, geom=_geom, sigma_eq_from_edot=_sig,
+                tau_yield_ref=_tau_ref)
             stack[0, _t] = f["edot"]
             stack[1, _t] = f["eta"]
             stack[2, _t] = f["s1_ratio"]
+            if args.damage_detachment:
+                stack[3, _t] = f["div_u"]
+                stack[4, _t] = f["tau_ratio"]
 
         damage_scalars_gpu = jax.device_put(stack)
         print(f"  [damage] driver='{args.damage_driver}'  slots={slots}  "
@@ -2632,6 +2700,7 @@ def main():
         damage_order=args.damage_order,
         damage_indicators=args.damage_indicators,
         residence_edot_threshold=args.residence_edot_threshold,
+        damage_detachment=args.damage_detachment,
     )
     # create_rk4_comparison returns just rk4_step by default; when
     # --hit-stats-log is set, it returns (rk4_step, closures) so we can
@@ -2853,13 +2922,21 @@ def main():
         # --damage-indicators. Must match n_damage_acc in the kernel factory.
         if args.damage_driver != "models":
             _n_acc = 1
+        elif args.damage_indicators:
+            _n_acc = 7 if args.damage_detachment else 5
         else:
-            _n_acc = 5 if args.damage_indicators else 2
+            _n_acc = 2
         if _n_acc == 1:
             damage_gpu = jnp.zeros(n_particles, dtype=config.FLOAT_DTYPE_JNP)
         else:
             damage_gpu = jnp.zeros((n_particles, _n_acc),
                                    dtype=config.FLOAT_DTYPE_JNP)
+            # ⚠️ Column 6 is a RUNNING MINIMUM, so a zero start would latch 0
+            # permanently and every particle would report Pi_1_min = 0. It must
+            # begin at +inf for the first jnp.minimum to take the real sample.
+            # The other six columns are integrals and correctly start at zero.
+            if args.damage_detachment:
+                damage_gpu = damage_gpu.at[:, 6].set(jnp.inf)
         positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
             positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0,
             damage_gpu,
@@ -3396,6 +3473,9 @@ def main():
                         _names = ['Damage_lnPhi', 'Damage_CL',
                                   'Damage_tres', 'Damage_wbond',
                                   'Damage_Aedot']
+                        if args.damage_detachment:
+                            _names = _names + ['Damage_lnJ',
+                                               'Damage_tauMin']
                         for _i in range(_dmg.shape[1]):
                             _nm = (_names[_i] if _i < len(_names)
                                    else f'Damage_col{_i}')
@@ -3513,6 +3593,58 @@ def main():
                         _c = np.argsort(np.argsort(_v)).astype(np.float64)
                         _rr = float(np.corrcoef(_a, _c)[0, 1])
                         print(f"  [damage] rank corr(lnPhi, {_nm:5s}) : {_rr:+.4f}")
+
+            # ── Detachment groundwork: the step-1 null test ────────────────
+            if dmg_cpu.shape[1] >= 7:
+                ln_J, tau_min = dmg_cpu[:, 5], dmg_cpu[:, 6]
+                detF = np.exp(ln_J)
+                # ⚠️ THE GATE. With div(u) = 0 imposed on the field and fully
+                # entrained particles, det F == 1 identically and a void is
+                # impossible by construction. What this prints is the
+                # INTERPOLATION ERROR of the whole pipeline, and it is the
+                # yardstick any later detachment signal must beat. If |detF-1|
+                # is comparable to the void fraction we hope to predict, the
+                # method cannot resolve the effect and the plan needs
+                # rethinking BEFORE any criterion is tuned.
+                _dev = np.abs(detF - 1.0)
+                print(f"  [damage] det F = exp(ln_J)       : median "
+                      f"{float(np.median(detF)):.6f}  "
+                      f"min {float(detF.min()):.6f}  "
+                      f"max {float(detF.max()):.6f}")
+                print(f"  [damage]   |det F - 1| : median "
+                      f"{float(np.median(_dev)):.3e}  p99 "
+                      f"{float(np.percentile(_dev, 99)):.3e}  max "
+                      f"{float(_dev.max()):.3e}")
+                if float(np.median(_dev)) > 1.0e-2:
+                    print("  [damage]   ⚠️  median |det F - 1| > 1e-2: the "
+                          "incompressibility of the discrete field is NOT "
+                          "tight enough to attribute a density deficit to "
+                          "detachment. Investigate before building on it.")
+                else:
+                    print("  [damage]   ✅ det F is 1 to within the "
+                          "interpolation error — the null result holds, so a "
+                          "void CANNOT arise without a detachment rule.")
+                # ⚠️ +inf means the column was never written for that particle
+                # (zero steps taken). Exclude before any statistic, or the
+                # median silently becomes inf.
+                _fin = np.isfinite(tau_min)
+                if not _fin.any():
+                    print("  [damage] Pi_1 min                : n/a — no "
+                          "particle recorded a finite sample")
+                else:
+                    _tm = tau_min[_fin]
+                    print(f"  [damage] Pi_1 min along path     : median "
+                          f"{float(np.median(_tm)):.4g}  "
+                          f"min {float(_tm.min()):.4g}  "
+                          f"max {float(_tm.max()):.4g}  "
+                          f"({int(_fin.sum()):,}/{len(tau_min):,} finite)")
+                    # ✅ The sweep, for free: every threshold is just a
+                    # comparison on this column, so print the curve rather
+                    # than committing to one value.
+                    print("  [damage]   detached fraction vs threshold:")
+                    for _thr in (0.1, 0.2, 0.3, 0.5, 0.7, 0.9):
+                        print(f"  [damage]     Pi_1_crit {_thr:4.2f} -> "
+                              f"{100.0 * float((_tm < _thr).mean()):6.2f} %")
         else:
             print(f"  [damage] value : median {float(np.median(dmg_cpu)):.4g}  "
                   f"mean {float(dmg_cpu.mean()):.4g}  max {float(dmg_cpu.max()):.4g}")
@@ -3527,6 +3659,10 @@ def main():
             _dmg_columns = ["ln_phi", "C"]
         else:
             _dmg_columns = ["ln_phi", "C", "t_res", "w_bond", "A_edot"]
+            if args.damage_detachment:
+                # ln_J  : integral(div(u) dt)   -> det F = exp(ln_J)
+                # tau_min: running min of Pi_1 = sigma_eq/tau_yield_ref
+                _dmg_columns = _dmg_columns + ["ln_J", "tau_min"]
         dmg_path = args.damage_out
         if dmg_path is None:
             dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"

@@ -161,6 +161,7 @@ def build_damage_fields(
     verbose: bool = True,
     geom: Optional[tuple] = None,
     sigma_eq_from_edot=None,
+    tau_yield_ref=None,
 ) -> dict:
     """Build the nodal damage-driver scalars for ONE timestep.
 
@@ -217,6 +218,17 @@ def build_damage_fields(
         np.median(np.abs(trD) / np.maximum(normD, 1e-30))
     )
 
+    # ⚠️ div(u) = tr(D), exported as a NODAL field for the detachment work.
+    # It costs nothing: trD is computed just above for the incompressibility
+    # diagnostic and was previously discarded. A particle integrating
+    #     d(ln J)/dt = div(u)
+    # along its own path recovers det F = J, which is the §B.6f step-1 null
+    # test: with div u = 0 imposed on the field and full entrainment, J == 1
+    # and a void is IMPOSSIBLE by construction. Measuring the drift of J from
+    # 1 on real trajectories bounds the interpolation error against which any
+    # detachment signal must be judged.
+    div_u = elements_to_nodes(trD, connectivity, n_nodes, volume)
+
     # Deviatoric part of D (equals D itself when incompressible).
     D_dev = D - (trD / 3.0)[:, None, None] * np.eye(3)[None]
 
@@ -234,8 +246,9 @@ def build_damage_fields(
                   "(sigma_m / eta / s1_over_seq are None)")
         return {
             "edot": edot.astype(np.float32),
+            "div_u": div_u.astype(np.float32),
             "sigma_m": None, "sigma_eq": None,
-            "eta": None, "s1_over_seq": None,
+            "eta": None, "s1_over_seq": None, "tau_ratio": None,
             "n_active": int((edot > edot_floor).sum()),
             "n_inverted": int((volume < 0).sum()),
         }
@@ -297,6 +310,34 @@ def build_damage_fields(
     sigma_eq_safe = np.maximum(np.abs(sigma_eq), sigeq_floor)
     s1_ratio = np.where(active, sigma_m / sigma_eq_safe + s1_hat, 0.0)
 
+    # ── Pi_1, the detachment group (Buck & Langerman 2004) ──────────────────
+    # Their critical radius is "the location of vanishing material velocity",
+    # a closed form in the Bingham number. The local statement of the same
+    # physics is: material stops being dragged along when the stress acting on
+    # it can no longer overcome the yield stress.
+    #
+    #   Pi_1 = sigma_eq / tau_yield        detach when Pi_1 < Pi_1_crit
+    #
+    # ⚠️ sigma_eq here IS the flow stress returned by the Norton tables at the
+    # local (T, edot) -- i.e. sigma_eq == tau_yield identically on that route,
+    # which would make Pi_1 == 1 everywhere and useless. So tau_yield must be
+    # the yield stress at a REFERENCE state, not the local one: the ratio then
+    # measures how far the local flow stress has fallen below what the
+    # material can bear. tau_yield_ref is supplied by the caller (the Norton
+    # flow stress at a reference edot, with the local T), and when it is
+    # absent Pi_1 is returned as None rather than silently computing 1.0.
+    if tau_yield_ref is not None:
+        tau_ref = np.maximum(
+            np.abs(np.asarray(tau_yield_ref, dtype=np.float64)), sigeq_floor)
+        # ⚠️ NOT masked by `active`: a particle in a dead zone has edot ~ 0 and
+        # therefore the LOWEST flow stress, which is exactly the detachment
+        # condition we are looking for. Masking it to 0.0 like eta does would
+        # erase the signal. Clipped above at 10 so a pathological node cannot
+        # dominate a running minimum.
+        tau_ratio = np.clip(sigma_eq / tau_ref, 0.0, 10.0)
+    else:
+        tau_ratio = None
+
     if verbose:
         print("  damage fields:")
         print(f"    incompressibility |tr D|/|D| (median) : {incompressibility:.3e}")
@@ -312,10 +353,13 @@ def build_damage_fields(
 
     return {
         "edot": edot.astype(np.float32),
+        "div_u": div_u.astype(np.float32),
         "sigma_m": sigma_m.astype(np.float32),
         "sigma_eq": sigma_eq.astype(np.float32),
         "eta": eta.astype(np.float32),
         "s1_ratio": s1_ratio.astype(np.float32),
+        "tau_ratio": (None if tau_ratio is None
+                      else tau_ratio.astype(np.float32)),
         "diagnostics": {
             "incompressibility": incompressibility,
             "n_active": int(active.sum()),

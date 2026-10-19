@@ -719,6 +719,15 @@ def create_rk4_comparison(
     # ⚠️ Pick this badly and t_res either saturates or vanishes -- sweep it over
     # at least a decade and report the ranking's stability, not one number.
     residence_edot_threshold: float = 1.0,
+    # ── Detachment groundwork (Part B). Adds two MORE accumulator columns:
+    #       ln_J    = integral( div(u) dt )   -> det F = exp(ln_J)
+    #       tau_min = min over the path of Pi_1 = sigma_eq/tau_yield_ref
+    # ⚠️ tau_min is a RUNNING MINIMUM, not an integral, so it does NOT ride the
+    # dmg + dt*inc path -- see the integration site. Recording the minimum
+    # rather than a boolean "detached" flag is deliberate: EVERY threshold is
+    # then a comparison on the output file, so the §B.6f step-4 sensitivity
+    # sweep costs ZERO extra runs instead of one run per threshold.
+    damage_detachment: bool = False,
     # Gradient-recovery / higher-order velocity reconstruction. Two
     # methods supported; kernel picks by which arrays are non-None.
     #
@@ -794,8 +803,22 @@ def create_rk4_comparison(
     #   1 -> [ebar]                                   (edot driver)
     #   2 -> [lnPhi, C]                                 (models driver)
     #   5 -> [lnPhi, C, t_res, w, A_edot]               (+ indicators)
+    # ⚠️ Detachment needs slots 3 and 4 of the stack (div_u, tau_ratio), which
+    # only the extended build supplies. Like use_indicators this is a
+    # configuration error rather than something to silently drop.
+    use_detach = bool(damage_detachment) and use_damage
+    if use_detach and not use_indicators:
+        raise ValueError(
+            "damage_detachment=True needs damage_indicators=True: the "
+            "detachment columns are appended after the indicator columns, "
+            "and splitting them would renumber the existing npz layout.")
+    if use_detach and n_damage_slots < 5:
+        raise ValueError(
+            "damage_detachment=True needs a 5-slot "
+            "[edot, eta, s1_ratio, div_u, tau_ratio] stack, got "
+            f"{n_damage_slots} slots.")
     n_damage_acc = (1 if not use_damage_models
-                    else (5 if use_indicators else 2))
+                    else ((7 if use_detach else 5) if use_indicators else 2))
     residence_thr = float(residence_edot_threshold)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
@@ -1494,6 +1517,9 @@ def create_rk4_comparison(
                 if use_damage_models:
                     eta_field = damage_scalars_gpu[1, _dti]
                     s1_field = damage_scalars_gpu[2, _dti]
+                if use_detach:
+                    divu_field = damage_scalars_gpu[3, _dti]
+                    tauratio_field = damage_scalars_gpu[4, _dti]
             # Real-valued physical time at the start of this step.
             # The mesh provider ignores it (slice already picked above);
             # the analytic provider uses it when is_time_dependent=True.
@@ -1706,11 +1732,47 @@ def create_rk4_comparison(
                     # Accumulating int(edot dt) directly makes the O55 test
                     # honest: any remaining correlation is then a real property
                     # of the flow, not an artefact of how the control was built.
-                    inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1])
+                    if not use_detach:
+                        inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1])
+                    else:
+                        # ── Detachment groundwork (Part B) ────────────────
+                        # ln J: d(ln J)/dt = div(u), so det F = exp(ln_J).
+                        # Euler at k1 for the same reason as the indicators --
+                        # and here it matters MORE, not less: this column's
+                        # whole purpose is to measure how far J drifts from 1,
+                        # so the quadrature must stay the SAME one the
+                        # positions use. A higher-order J against an RK4
+                        # position would attribute the scheme's own
+                        # inconsistency to the physics.
+                        divu_k1 = interpolate_scalar_single(
+                            pos, elem_k1, divu_field)
+
+                        # ⚠️ tau_ratio does NOT go in `inc`. It is a RUNNING
+                        # MINIMUM over the path, not a time integral, so
+                        # multiplying it by dt would be meaningless. It is
+                        # folded in separately below, after the dt scaling.
+                        tau_k1 = interpolate_scalar_single(
+                            pos, elem_k1, tauratio_field)
+
+                        inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1,
+                                         divu_k1, jnp.zeros_like(divu_k1)])
                 dmg_new = dmg + dt * inc
+                if use_detach:
+                    # Column 6 is the running min of Pi_1. jnp.minimum against
+                    # the carried value, AFTER the dt scaling left it at its
+                    # previous value (its `inc` entry is identically zero).
+                    # ⚠️ Initialised to +inf by the caller, so the first step
+                    # sets it rather than being clamped by a zero start.
+                    dmg_new = dmg_new.at[6].set(
+                        jnp.minimum(dmg[6], tau_k1))
 
                 # Freeze BOTH accumulators on any step the position also skipped:
                 # otherwise damage accrues on steps that never physically happened.
+                # ✅ This correctly covers the running-minimum column too: it
+                # reverts the WHOLE vector to `dmg`, so a Pi_1 sampled at a
+                # position the particle never legitimately occupied cannot
+                # latch the minimum. Order matters -- the min update above must
+                # come BEFORE this, which it does.
                 if use_skip_step_on_fail:
                     dmg_new = jnp.where(any_failed, dmg, dmg_new)
                 if use_skip_step_on_tool:
