@@ -89,8 +89,28 @@ def read_fields(path: str, pressure_field: str = "Pressure"):
     return pos, vtk_to_numpy(arr).astype(np.float64)
 
 
-def delta_p(pos, p, centre, r_pin, z_lo, z_hi, band, advancing_sign):
-    """Mean pressure difference between the two sides of the pin."""
+def delta_p(pos, p, centre, r_pin, z_lo, z_hi, band, advancing_sign,
+            sector_deg=30.0):
+    """Shi et al. (2022) contact-pressure difference B = P_max - P_min.
+
+    ⚠️ CORRECTED 2026-10-19 against the full text (Int. J. Mech. Sci. 241
+    (2023) 107969, Eq. 19). The paper defines
+
+        B = P_max - P_min,
+        P_max = maximum pressure IN FRONT of the tool  (theta = 0 deg)
+        P_min = minimum pressure IN THE REAR of the tool (theta = 180 deg)
+
+    and reports that voids form when B > 15 MPa.
+
+    ⚠️ That is a FRONT-TO-REAR difference along the travel direction. An earlier
+    version of this function computed an ADVANCING-TO-RETREATING difference
+    (splitting on dy, with points restricted to |dx| <= r_pin/2) -- a different
+    quantity, perpendicular to Shi's, to which the 15 MPa threshold does NOT
+    apply. Both are physically interesting, so both are returned, but only
+    `B` may be compared against the published criterion.
+
+    Returns (B, p_front, p_rear, n_used, dp_adv_ret).
+    """
     dx = pos[:, 0] - centre[0]
     dy = pos[:, 1] - centre[1]
     r = np.hypot(dx, dy)
@@ -98,17 +118,29 @@ def delta_p(pos, p, centre, r_pin, z_lo, z_hi, band, advancing_sign):
     sel = (r >= r_pin) & (r <= r_pin * (1.0 + band)) \
         & (pos[:, 2] >= z_lo) & (pos[:, 2] <= z_hi)
     if sel.sum() < 20:
-        return np.nan, np.nan, np.nan, int(sel.sum())
-    # ⚠️ Compare only points NEAR THE y AXIS (|dx| small), so the difference is
-    # across the tool rather than along the weld. Mixing in points ahead of and
-    # behind the pin would average the travel-direction gradient into Delta p.
+        return np.nan, np.nan, np.nan, int(sel.sum()), np.nan
+
+    # theta measured from +x (the travel direction): 0 deg is in FRONT.
+    theta = np.degrees(np.arctan2(dy, dx))
+    half = sector_deg * 0.5
+    front = sel & (np.abs(theta) <= half)
+    rear = sel & (np.abs(np.abs(theta) - 180.0) <= half)
+    if front.sum() < 10 or rear.sum() < 10:
+        return np.nan, np.nan, np.nan, int(sel.sum()), np.nan
+
+    # ⚠️ MAX in front and MIN in the rear, per Eq. (19) -- not sector means. A
+    # mean would understate B and make every case look safer than it is.
+    p_front = float(p[front].max())
+    p_rear = float(p[rear].min())
+
+    # The advancing/retreating contrast, kept as a SEPARATE diagnostic.
     near = sel & (np.abs(dx) <= r_pin * 0.5)
     adv = near & (advancing_sign * dy > 0)
     ret = near & (advancing_sign * dy < 0)
-    if adv.sum() < 10 or ret.sum() < 10:
-        return np.nan, np.nan, np.nan, int(near.sum())
-    pa, pr = float(p[adv].mean()), float(p[ret].mean())
-    return pa - pr, pa, pr, int(near.sum())
+    dp_ar = (float(p[adv].mean()) - float(p[ret].mean())
+             if adv.sum() >= 10 and ret.sum() >= 10 else np.nan)
+
+    return p_front - p_rear, p_front, p_rear, int(sel.sum()), dp_ar
 
 
 def main() -> int:
@@ -130,13 +162,30 @@ def main() -> int:
                     help="annulus thickness as a fraction of r_pin (0.6)")
     ap.add_argument("--pressure-field", default="Pressure")
     ap.add_argument("--out", default=None, help="write a per-step CSV here")
+    ap.add_argument("--n-snapshots", type=int, default=20,
+                    help="⚠️ Subsample this many snapshots EVENLY from the "
+                         "range (default 20; 0 = all). Delta p is an "
+                         "INSTANTANEOUS field diagnostic, not a time integral, "
+                         "so it needs only enough snapshots to average over the "
+                         "tool rotation and show the spread. One PVTU read is "
+                         "~205 s on LUMI at D2 scale, so all 166 would be 9.5 h "
+                         "per case (151 h for 16); 20 is 1.1 h per case.")
     args = ap.parse_args()
 
     files = find_pvtu(args.case, tuple(args.vel_range) if args.vel_range else None)
     if not files:
         print(f"  no PVTU found under {args.case}")
         return 1
-    print(f"  {len(files)} snapshots")
+    n_all = len(files)
+    if args.n_snapshots and 0 < args.n_snapshots < n_all:
+        # Evenly spaced INCLUDING both ends, so the sample spans the range
+        # rather than clustering at the start.
+        idx = np.unique(np.linspace(0, n_all - 1, args.n_snapshots).astype(int))
+        files = [files[i] for i in idx]
+        print(f"  {n_all} snapshots available, using {len(files)} evenly spaced "
+              f"(~{len(files) * 205 / 60:.0f} min at ~205 s/read)")
+    else:
+        print(f"  {len(files)} snapshots (all)")
 
     rpm = args.pin_rpm
     if rpm is None:
@@ -158,13 +207,19 @@ def main() -> int:
           f"z [{z_lo:.4g}, {z_hi:.4g}] m")
 
     rows = []
-    for f in files:
+    for i, f in enumerate(files, 1):
         pos, p = read_fields(f, args.pressure_field)
-        d, pa, pr, n = delta_p(pos, p, centre, r_pin, z_lo, z_hi,
-                               args.band, advancing_sign)
-        rows.append((os.path.basename(f), d, pa, pr, n))
+        d, pa, pr, n, dar = delta_p(pos, p, centre, r_pin, z_lo, z_hi,
+                                    args.band, advancing_sign)
+        rows.append((os.path.basename(f), d, pa, pr, n, dar))
+        # ⚠️ Progress line per snapshot. One PVTU read is ~205 s on LUMI's
+        # Lustre at D2 scale (2.8M nodes), so a silent loop looks hung for
+        # hours; this also makes a killed run show how far it got.
+        print(f"    [{i}/{len(files)}] {os.path.basename(f)}  "
+              f"B = {d * 1e-6:+.2f} MPa", flush=True)
 
     vals = np.array([r[1] for r in rows], dtype=np.float64)
+    vals_ar = np.array([r[5] for r in rows], dtype=np.float64)
     ok = np.isfinite(vals)
     if not ok.any():
         print("  no snapshot had enough points in the annulus — "
@@ -182,16 +237,29 @@ def main() -> int:
     print(f"    mean p advancing {pa:+.3f}   retreating {pr:+.3f}")
     frac_pos = float((vals[ok] > 0).mean())
     print(f"    sign consistency: {100.0 * frac_pos:.0f} % of snapshots positive")
+    _ok = np.isfinite(vals_ar)
+    if _ok.any():
+        print(f"    (separate diagnostic) advancing-retreating dp: median "
+              f"{np.median(vals_ar[_ok]) * MPa:+.3f} MPa")
     print()
-    print("  ⚠️  Reported as a MEASURED value and a ranking quantity. The "
-          "15 MPa\n      threshold of Shi et al. (2022) is unverified here and "
-          "alloy-specific.")
+    # ✅ Threshold VERIFIED against the full text 2026-10-19: Shi et al.,
+    # Int. J. Mech. Sci. 241 (2023) 107969, Eq. (19) and Fig. 21 -- "void
+    # defects formed in the joint when the value of B is greater than 15 MPa".
+    _med = float(np.median(vals[ok])) * MPa
+    print(f"  Shi et al. (2022) criterion: voids form when B > 15 MPa "
+          f"(Eq. 19, Fig. 21).")
+    print(f"    median B = {_med:+.2f} MPa  ->  "
+          f"{'EXCEEDS' if _med > 15.0 else 'below'} the threshold")
+    print("  ⚠️  The threshold was established for THEIR alloy and tool; treat "
+          "the\n      ranking across our cases as the primary result and the "
+          "absolute\n      pass/fail as indicative.")
 
     if args.out:
         with open(args.out, "w") as fh:
-            fh.write("file,delta_p_Pa,p_advancing_Pa,p_retreating_Pa,n_points\n")
-            for nm, d, a, r, n in rows:
-                fh.write(f"{nm},{d:.6e},{a:.6e},{r:.6e},{n}\n")
+            fh.write("file,B_Pa,p_front_Pa,p_rear_Pa,n_points,"
+                     "dp_adv_ret_Pa\n")
+            for nm, d, a, r, n, dar in rows:
+                fh.write(f"{nm},{d:.6e},{a:.6e},{r:.6e},{n},{dar:.6e}\n")
         print(f"  wrote {args.out}")
     return 0
 
