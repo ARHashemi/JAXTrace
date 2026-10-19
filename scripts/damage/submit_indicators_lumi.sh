@@ -6,6 +6,7 @@
 #   SUBMIT=1 bash submit_indicators_lumi.sh        # submit all 16
 #   SUBMIT=1 CASES="D2 B2" bash submit_indicators_lumi.sh
 #   SUBMIT=1 MODE=short bash submit_indicators_lumi.sh   # 200-step sanity pass
+#   SUBMIT=1 DETACHMENT=1 bash submit_indicators_lumi.sh # + det F and Pi_1_min
 #
 # HOW THIS WORKS, AND WHY IT DOES NOT WRITE A NEW RUN SCRIPT
 # -----------------------------------------------------------
@@ -24,7 +25,9 @@
 # The injected flags are exactly what the workstation validation run used:
 #   --damage --damage-driver models --damage-order 1
 #   --damage-indicators --residence-edot-threshold <thr>
-# See docs/damage/NEXT_STEPS_detachment_criterion.md Part A.
+# and, with DETACHMENT=1, additionally
+#   --damage-detachment --damage-tau-ref-edot <edot>
+# See docs/damage/NEXT_STEPS_detachment_criterion.md Part A and B.6f/B.6g.
 # =============================================================================
 set -uo pipefail
 
@@ -43,6 +46,23 @@ MODE="${MODE:-full}"
 RESIDENCE_THR="${RESIDENCE_THR:-1.0}"
 DAMAGE_ORDER="${DAMAGE_ORDER:-1}"
 SUBMIT="${SUBMIT:-0}"
+
+# ── Detachment groundwork (Part B) ───────────────────────────────────────────
+# DETACHMENT=1 appends --damage-detachment, adding two accumulator columns:
+#   ln_J    = integral(div(u) dt)  -> det F = exp(ln_J)   [the step-1 GATE]
+#   tau_min = running min of Pi_1 = sigma_eq / tau_yield_ref
+#
+# ⚠️ COST, measured on D2 (166 snapshots, 1.92M nodes): the field stack grows
+# 3 -> 5 slots, i.e. 3650 -> 6083 MB, +2433 MB on BOTH host and device. On
+# LUMI's MI250X (64 GB) that is comfortable; it was verified on a 32.6 GB
+# RTX 5090 at 12.2 GB total resident, 63 % free. Build time scales with the
+# slot count in the damage stage.
+#
+# ✅ tau_min is recorded as a MINIMUM, never thresholded in-kernel, so every
+# Pi_1_crit is a post-process on the npz and the sensitivity sweep costs no
+# extra jobs. Do NOT add a threshold knob here.
+DETACHMENT="${DETACHMENT:-0}"
+TAU_REF_EDOT="${TAU_REF_EDOT:-1.0}"
 
 # ⚠️ OUTPUT MUST NOT GO INTO THE CASE FOLDER.
 # The per-case scripts ship with OUTPUT_TARGET=case-flash, which writes results
@@ -89,6 +109,7 @@ echo "   mode       : $MODE"
 echo "   cases      : $CASES"
 echo "   driver     : models   order $DAMAGE_ORDER"
 echo "   t_res thr  : $RESIDENCE_THR 1/s"
+echo "   detachment : $([ "$DETACHMENT" = "1" ] && echo "ON  (ln_J + tau_min, tau_ref_edot $TAU_REF_EDOT 1/s, stack 3->5 slots)" || echo "off")"
 echo "   out root   : $OUT_ROOT  (OUTPUT_TARGET=scratch)"
 echo "   octree\$   : $([ "$OCTREE_CACHE_IN_CASE" = 1 ] && echo "beside each case (<case>.gid/octree_cache)" || echo "scratch")  format $OCTREE_CACHE_FORMAT"
 echo "   staged to  : $STAGE"
@@ -114,9 +135,11 @@ for c in $CASES; do
     # per-case conditional flags that follow ARGS=() keep working because
     # they also use ARGS+=().
     python3 - "$dst" "$DAMAGE_ORDER" "$RESIDENCE_THR" "$OUT_ROOT" "$c" \
-             "$OCTREE_CACHE_IN_CASE" "$OCTREE_CACHE_FORMAT" <<'PYEOF'
+             "$OCTREE_CACHE_IN_CASE" "$OCTREE_CACHE_FORMAT" \
+             "$DETACHMENT" "$TAU_REF_EDOT" <<'PYEOF'
 import re, sys
-path, order, thr, out_root, case, oc_in_case, oc_fmt = sys.argv[1:8]
+(path, order, thr, out_root, case, oc_in_case, oc_fmt,
+ detach, tau_ref) = sys.argv[1:10]
 s = open(path).read()
 
 # 1. Append the indicator flags right after the ARGS array literal closes.
@@ -135,6 +158,21 @@ inject = (
     f"  --residence-edot-threshold {float(thr)}\n"
     ")\n"
 )
+# ⚠️ Detachment appends SEPARATELY, so a run without it stages a script that is
+# byte-identical to the previous indicator runs -- the 16-case results stay
+# comparable rather than silently acquiring two columns.
+if detach == "1":
+    inject += (
+        "\n# ── Detachment groundwork (injected) ────────────────────────────\n"
+        "# ln_J = int(div u dt) -> det F; tau_min = running min of Pi_1.\n"
+        "# Pi_1 is a ratio to the Norton flow stress at TAU_REF_EDOT with the\n"
+        "# LOCAL temperature -- not the local flow stress, which on the models\n"
+        "# route IS sigma_eq and would make Pi_1 identically 1 everywhere.\n"
+        "ARGS+=(\n"
+        "  --damage-detachment\n"
+        f"  --damage-tau-ref-edot {float(tau_ref)}\n"
+        ")\n"
+    )
 s = s[:m.end()] + inject + s[m.end():]
 
 # 2. ⚠️ Force the output OUT of the case folder. The cases live under
