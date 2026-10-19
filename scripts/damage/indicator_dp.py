@@ -15,13 +15,23 @@ See docs/damage/NEXT_STEPS_detachment_criterion.md Part A.4.
 
 WHAT IT MEASURES
 ----------------
-    Delta p = < p >_advancing  -  < p >_retreating
+    B = P_max(theta=0 deg, FRONT)  -  P_min(theta=180 deg, REAR)
 
-evaluated in an annulus around the pin axis, within the pin's own z-extent. Shi et
-al. (2022) report Delta p < 15 MPa as a void-formation threshold.
+evaluated in an annulus around the pin axis, within the pin's own z-extent.
 
-⚠️ THE THRESHOLD IS NOT VERIFIED HERE. We have not read Shi et al. (2022), and the
-15 MPa value is alloy- and geometry-specific. This script reports the MEASURED
+✅ VERIFIED against the full text 2026-10-19: Shi et al., Int. J. Mech. Sci. 241
+(2023) 107969, Eq. (19) and Fig. 21 -- "void defects formed in the joint when the
+value of B is greater than 15 MPa". A sound joint forms when B is LOWER than the
+critical value. Shi states no second condition; B alone is the criterion.
+
+⚠️ TWO THINGS AN EARLIER VERSION OF THIS SCRIPT GOT WRONG:
+  * The inequality was inverted ("< 15 MPa for void formation").
+  * The quantity was an ADVANCING-TO-RETREATING difference, splitting on dy.
+    Eq. (19) is FRONT-TO-REAR along the travel direction, and uses the MAXIMUM
+    in front and the MINIMUM in the rear rather than sector means. The two are
+    perpendicular. Both are now reported, but only B may be compared to 15 MPa.
+
+⚠️ The 15 MPa value is from THEIR alloy and tool. This script reports the MEASURED
 value and the sign pattern across cases; it deliberately does not print a
 pass/fail verdict against a number we cannot yet stand behind. Use it to RANK
 cases first.
