@@ -1316,6 +1316,72 @@ not incompressible enough — `|det F − 1|` reaches the void's own order for
   line is misleading: it is `(max−min)/median`, which the hard zeros inflate.
   ⚠️ **That spread metric needs fixing before it is quoted anywhere.**
 
+### B.6n ✅ Performance audit — the analytic divergence is FREE, and export is already async
+
+#### ✅ The jacfwd divergence costs nothing. Measured, not estimated.
+
+| arm | Stage 7 | step/s |
+|---|---:|---:|
+| `field` (precomputed nodal P1 div) | 1577.9 s | 1.70 |
+| **`analytic` (jacfwd on the interpolant)** | **1561.1 s** | **1.72** |
+
+✅ **1 % FASTER, i.e. free within noise.** The concern that differentiating
+in-kernel would cost per-step time is resolved: it does not. The reason is that
+`interpolate_velocity_single` is **already called 4× per step per particle** for
+the RK4 stages, so 3 forward-mode tangents on one of those calls disappears
+into work the kernel was doing anyway — and it needs **no extra element
+search**, which is where the real cost lives.
+
+⚠️ **So the pre-stored 10-coefficients-per-element option (412 MB/frame on D2)
+is not worth building.** It would add a second hand-derived implementation of
+the HCT gradient that can drift from the evaluator, to save 0 %.
+
+#### ✅ Export is ALREADY asynchronous and multi-threaded — and deliberately 1 worker
+
+`VTKHDFExportThread` (`jaxtrace/io/vtkhdf_writer.py`) runs on a background
+thread with a 200-deep queue. ⚠️ **It is single-worker on purpose**, measured
+2026-10-16, for two independent reasons:
+
+1. **More workers would not help.** Checked against this cylA run: GPU step is
+   **582 ms**, export payload 13.4 MB, write time **119 ms** → a **20 % duty
+   cycle** with 463 ms spare. The writer hides entirely behind the GPU.
+2. ❌ **More workers would not be safe.** `write_step` appends to **one** HDF5
+   file and mutates shared state — `Steps/NSteps`, `PointOffsets`, and every
+   `PointData` dataset length, with each step's offset derived from the
+   *current* length. Concurrent writers would interleave offsets and corrupt
+   the archive. And `h5py` here is a **non-MPI build**, so HDF5's global lock
+   would serialise parallel writes anyway: corruption risk for zero throughput.
+
+✅ **So the throughput knob is the export CADENCE, not the thread count.**
+
+⚠️ **And that is the real finding of this audit.** cylA ran at `EXPORT_FREQ=1`
+and produced **26 GB** of particle output for a 2684-step run. The D2 indicator
+runs use `EXPORT_FREQ=50`. At 50 the same case writes ~0.5 GB and transfers
+0.23 GB instead of 11.7 GB. ⚠️ **For a det F / detachment study nothing needs
+per-step particle output** — the quantities of interest are the final
+accumulators in the npz. ✅ `EXPORT_FREQ=50` (or `NO_EXPORT=1`) should be the
+default for these runs.
+
+#### ⚠️ GPU is at 100 % — the kernel is the bottleneck, and it is already optimised
+
+Measured during the run: **GPU utilisation 100 %**, 8.7 GB. So the 582 ms/step
+is compute, not transfer, and not export. At 293,455 particles that is
+**1982 ns per particle per step** for 4 searches + 4 interpolations + 3 damage
+gathers.
+
+⚠️ **The search path has already been exhaustively optimised** — see
+`docs/dfamily/13_throughput_roadmap.md`, which measured and **rejected** nine
+candidates (finer cells, dynamic trip counts, level-loop reordering, two-tier
+kernels, per-lane early exit, 1×1×1 neighbourhoods) and states a **realistic
+ceiling of 1.13×**, already implemented via exact tet-box registration. ✅ The
+one candidate still open is **particle sorting into homogeneous batches**
+(~1.35× on a synthetic proxy, never measured for real).
+
+✅ **Conclusion: there is no large throughput win available in the kernel**, the
+divergence work is free, and the only easy gain is cutting export cadence.
+⚠️ I should not have implied the transfer was the bottleneck before checking
+GPU utilisation — it is not.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
