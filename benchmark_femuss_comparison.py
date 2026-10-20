@@ -737,6 +737,14 @@ def create_rk4_comparison(
     #              via jacfwd on interpolate_velocity_single. ✅ This is the one
     #              that responds to the reconstruction.
     damage_divergence: str = "field",
+    # ── Detachment kinematics (Part B, step 2) ───────────────────────────────
+    # A resolved jaxtrace.damage.detachment.DetachmentPolicy, or None.
+    # ⚠️ The kernel does NOT encode the rule: it receives pi1_crit and an
+    # integer mode and applies them. The policy object owns the physics and
+    # the validation, so a future change to the threshold or the post-
+    # detachment kinematics touches detachment.py alone. See
+    # docs/damage/NEXT_STEPS_detachment_criterion.md B.6r.
+    detachment_policy=None,
     # Gradient-recovery / higher-order velocity reconstruction. Two
     # methods supported; kernel picks by which arrays are non-None.
     #
@@ -821,6 +829,21 @@ def create_rk4_comparison(
             "damage_divergence must be 'field' or 'analytic', got "
             f"{damage_divergence!r}")
     use_analytic_div = (str(damage_divergence) == "analytic")
+    # Python bools/floats at trace time -> the branch and its constants are
+    # baked in, and the whole path vanishes when detachment is off.
+    _dp = detachment_policy
+    use_detach_kin = bool(_dp is not None and getattr(_dp, "enabled", False))
+    if use_detach_kin:
+        if not use_detach:
+            raise ValueError(
+                "detachment_policy is enabled but damage_detachment=False: "
+                "the kinematics needs the tau_ratio field (slot 4) that the "
+                "detachment columns supply.")
+        _pi1_crit = float(_dp.pi1_crit)
+        _detach_mode = int(_dp.mode)
+        _detach_latch = bool(_dp.latch)
+        _detach_axis = int(_dp.travel_axis)
+        _detach_vadv = float(_dp.v_adv) if _dp.v_adv is not None else 0.0
     if use_detach and not use_indicators:
         raise ValueError(
             "damage_detachment=True needs damage_indicators=True: the "

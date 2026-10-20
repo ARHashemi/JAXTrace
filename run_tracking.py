@@ -619,6 +619,47 @@ def parse_args():
                              "so the sensitivity sweep costs no extra runs. "
                              "Rationale: docs/damage/"
                              "NEXT_STEPS_detachment_criterion.md section B.6f.")
+    parser.add_argument("--detach", action="store_true", default=False,
+                        help="Enable the detachment criterion: a particle "
+                             "whose Pi_1 = sigma_eq/tau_yield_ref drops below "
+                             "--detach-pi1-crit stops following the velocity "
+                             "field. Needs --damage-detachment. ⚠️ The "
+                             "threshold is PROVISIONAL pending the divergence "
+                             "analysis; tau_min is recorded per particle so "
+                             "any other threshold is a post-process on the "
+                             "npz. Rule and kinematics live in "
+                             "jaxtrace/damage/detachment.py.")
+    parser.add_argument("--detach-pi1-crit", type=float, default=0.5,
+                        help="Detach when Pi_1 < this. Default 0.5. ⚠️ Not "
+                             "physically determined yet; on D2 and cylA the "
+                             "Pi_1 distribution is bimodal so thresholds in "
+                             "0.1..0.7 all select the same hard-zero "
+                             "population (see B.6m/B.6q).")
+    parser.add_argument("--detach-mode", type=str, default="v_adv",
+                        choices=["v_adv", "freeze", "flag-only"],
+                        help="What a detached particle does. 'v_adv' "
+                             "(default): carried by the workpiece's rigid "
+                             "translation at the advancing speed along the "
+                             "travel axis. 'freeze': stops in the lab frame. "
+                             "'flag-only': records detachment but keeps "
+                             "advecting — the DIAGNOSTIC mode, which isolates "
+                             "how many detach from what detaching does.")
+    parser.add_argument("--detach-travel-axis", type=int, default=0,
+                        choices=[0, 1, 2],
+                        help="Travel direction index for 'v_adv' mode "
+                             "(0=x, default; FSW cases travel +x).")
+    parser.add_argument("--detach-v-adv", type=float, default=None,
+                        help="Override the advancing speed [m/s]. Normally "
+                             "read per case from data/*.som.fix. ⚠️ dt and "
+                             "v_adv both vary between cases (O22), so never "
+                             "hard-code this across a cohort.")
+    parser.add_argument("--detach-allow-reattach", action="store_true",
+                        default=False,
+                        help="Allow a detached particle to re-attach when "
+                             "Pi_1 recovers. ⚠️ OFF by default: with it on, a "
+                             "particle re-attaching on every stress "
+                             "fluctuation gives a void map that is really a "
+                             "map of threshold crossings.")
     parser.add_argument("--damage-divergence", type=str, default="analytic",
                         choices=["field", "analytic"],
                         help="Which divergence ln_J integrates. 'analytic' "
@@ -1937,6 +1978,25 @@ def main():
                     "which makes Pi_1 scale-free and unable to carry a "
                     "physical threshold.")
             print(f"  [damage] detachment: tau_yield_ref from {_mc[0].name}")
+
+    # ⚠️ Build and VALIDATE the detachment policy here -- before the mesh load,
+    # which costs ~28 min on D2. A bad v_adv or an out-of-range threshold must
+    # fail in the first second, not after half an hour.
+    detach_policy = None
+    if args.detach:
+        from jaxtrace.damage.detachment import policy_from_args
+        if not args.damage_detachment:
+            raise SystemExit(
+                "--detach needs --damage-detachment: the rule reads tau_min "
+                "from the detachment accumulator columns.")
+        # _case_params is read near the top of main() from data/*.som.fix.
+        _v_adv_for_detach = (
+            args.detach_v_adv if args.detach_v_adv is not None
+            else _case_params.get("v_adv"))
+        try:
+            detach_policy = policy_from_args(args, _v_adv_for_detach)
+        except ValueError as _e:
+            raise SystemExit(f"--detach: {_e}")
         if args.residence_edot_threshold <= 0.0:
             raise SystemExit(
                 "--residence-edot-threshold must be > 0 "
@@ -2714,6 +2774,7 @@ def main():
         residence_edot_threshold=args.residence_edot_threshold,
         damage_detachment=args.damage_detachment,
         damage_divergence=args.damage_divergence,
+        detachment_policy=detach_policy,
     )
     # create_rk4_comparison returns just rk4_step by default; when
     # --hit-stats-log is set, it returns (rk4_step, closures) so we can
@@ -2919,6 +2980,82 @@ def main():
         latch_and_advance_escape = _latch_and_advance_escape
     else:
         latch_and_advance_escape = None
+
+    # ── Detachment kinematics (Part B step 2) ────────────────────────────────
+    # ⚠️ Deliberately a POST-STEP override, not a change inside the RK4 kernel,
+    # and modelled on the ballistic/freeze escape latch above. Reasons:
+    #   * the rule needs tau_ratio at the particle's CURRENT position, which the
+    #     damage accumulator already samples -- no new gather;
+    #   * overriding the position after the step keeps the RK4 graph untouched,
+    #     so a detached particle costs exactly what an attached one costs and
+    #     the kernel stays byte-identical when detachment is off;
+    #   * the escape latch proves the pattern works under vmap at this scale.
+    #
+    # ⚠️ The STATE is per particle and latched: once detached, stays detached
+    # (unless --detach-allow-reattach). A particle that re-attaches on every
+    # stress fluctuation would give a void map that is really a map of
+    # threshold crossings. See jaxtrace/damage/detachment.py.
+    apply_detachment = None
+    detached_gpu = None
+    if detach_policy is not None and detach_policy.enabled:
+        from jaxtrace.damage.detachment import (
+            MODE_VADV, MODE_FREEZE, MODE_FLAG_ONLY,
+        )
+        detached_gpu = jnp.zeros(n_particles, dtype=jnp.bool_)
+        _pi1_crit_host = float(detach_policy.pi1_crit)
+        _mode_host = int(detach_policy.mode)
+        _latch_host = bool(detach_policy.latch)
+        # Travel direction as a unit vector, built once on the host.
+        _tdir = np.zeros(3, dtype=config.FLOAT_DTYPE_NP)
+        _tdir[detach_policy.travel_axis] = 1.0
+        _tdir_gpu = jax.device_put(_tdir)
+        _vadv_host = float(detach_policy.v_adv or 0.0)
+
+        @jax.jit
+        def _apply_detachment(positions_post, positions_pre, element_ids,
+                              damage_acc, detached_prev, dt):
+            """Latch newly-detached particles and override their motion.
+
+            ⚠️ Reads tau_min from the damage accumulator (column 6), which is
+            the RUNNING MINIMUM of Pi_1 along the path -- not the instantaneous
+            value. That is the right trigger for a LATCHED rule: it fires the
+            first time the path dips below the threshold and stays fired, which
+            is exactly the latch semantics, and it needs no extra field.
+            """
+            tau_min = damage_acc[:, 6]
+            # ⚠️ Guard the +inf initial value: a particle that has taken no
+            # step has tau_min = +inf and must not be considered.
+            below = jnp.isfinite(tau_min) & (tau_min < _pi1_crit_host)
+            if _latch_host:
+                detached_new = detached_prev | below
+            else:
+                detached_new = below
+
+            if _mode_host == MODE_FLAG_ONLY:
+                # ✅ Diagnostic mode: record, change nothing. This isolates
+                # "how many detach and where" from "what detaching does".
+                return positions_post, element_ids, detached_new
+
+            if _mode_host == MODE_VADV:
+                # Carried by the workpiece's rigid translation past the tool.
+                # ⚠️ From positions_PRE, not positions_post: the kernel has
+                # already advected this particle with the flow field it is no
+                # longer following, so post is the wrong starting point.
+                moved = positions_pre + dt * _vadv_host * _tdir_gpu[None, :]
+            else:  # MODE_FREEZE
+                moved = positions_pre
+            positions_out = jnp.where(detached_new[:, None], moved,
+                                      positions_post)
+            # ⚠️ Keep the host element id. A detached particle is still INSIDE
+            # the mesh and we still want its indicators sampled -- unlike an
+            # escapee, which has left the domain. Zeroing it here would stop
+            # the damage accumulators and make detachment indistinguishable
+            # from escape in the output.
+            return positions_out, element_ids, detached_new
+
+        apply_detachment = _apply_detachment
+        print()
+        print(detach_policy.describe())
 
     print(f"  Compiling...")
     t_compile = time.time()
@@ -3178,6 +3315,16 @@ def main():
         if args.track_max_temperature:
             max_temperature_gpu = new_max
 
+    def _collect_detach_extras(extras: dict) -> None:
+        """Add the per-particle detached flag to an export.
+
+        ✅ Exported as UInt8 beside Escaped, so ParaView can colour by it and
+        the two can be told apart -- a detached particle is INSIDE the mesh,
+        an escaped one has left.
+        """
+        if detached_gpu is not None:
+            extras['Detached'] = np.asarray(detached_gpu, dtype=np.uint8)
+
     def _collect_temperature_extras(extras: dict) -> None:
         """Pull whichever temperature fields are enabled into ``extras``."""
         if args.export_temperature and temperature_gpu is not None:
@@ -3281,6 +3428,7 @@ def main():
             # those fields are enabled).
             _run_temperature_step(positions_gpu, element_ids_initial, 0)
             _collect_temperature_extras(init_extras)
+            _collect_detach_extras(init_extras)
         exporter.enqueue_export(0, pos_cpu, particle_ids=particle_ids,
                                 element_ids=eid_cpu,
                                 extra_scalars=init_extras or extra_scalars)
@@ -3310,6 +3458,11 @@ def main():
         # restore. Reference assignment — free when unused.
         if latch_and_advance_escape is not None:
             positions_pre_step = positions_gpu
+        # ⚠️ Detachment needs its OWN pre-step snapshot: a detached particle is
+        # advanced from where it was BEFORE the kernel moved it with a flow
+        # field it no longer follows. Reference assignment, so free.
+        if apply_detachment is not None:
+            positions_pre_step_detach = positions_gpu
         if args.damage:
             positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
                 positions_gpu, element_ids_gpu, DT, velocity_sequence_gpu,
@@ -3352,6 +3505,15 @@ def main():
                     positions_gpu, positions_pre_step, element_ids_gpu,
                     escape_mode_gpu, escape_vel_gpu, last_vel_gpu, DT,
                 )
+        # ⚠️ Detachment AFTER the escape latch, deliberately. An escaped
+        # particle has left the domain and has no valid tau_min to test; a
+        # detached one is still inside the mesh. Running detachment first
+        # would let an escapee's stale accumulator latch a detachment.
+        if apply_detachment is not None:
+            positions_gpu, element_ids_gpu, detached_gpu = apply_detachment(
+                positions_gpu, positions_pre_step_detach, element_ids_gpu,
+                damage_gpu, detached_gpu, DT,
+            )
         # Update per-step trajectory flags on GPU (cheap, fully fused).
         if args.export_escaped_flag:
             escaped_ever_gpu = _update_escaped(
@@ -3461,6 +3623,7 @@ def main():
                         escaped_ever_gpu, dtype=np.uint8,
                     )
                 _collect_temperature_extras(step_extras)
+                _collect_detach_extras(step_extras)
                 if rho_part_np is not None and not args.density_no_particle_density:
                     step_extras['Density'] = rho_part_np
                 # ⚠️ Damage as PointData on the exported particles, so ParaView can
@@ -3705,6 +3868,19 @@ def main():
             print(f"  [damage] value : median {float(np.median(dmg_cpu)):.4g}  "
                   f"mean {float(dmg_cpu.mean()):.4g}  max {float(dmg_cpu.max()):.4g}")
         print(f"  [damage] alive at end: {int(alive.sum()):,}/{len(dmg_cpu):,}")
+        if detached_gpu is not None:
+            _det = np.asarray(detached_gpu, dtype=bool)
+            print(f"  [detach] detached at end: {int(_det.sum()):,}/"
+                  f"{len(_det):,} ({100.0 * _det.mean():.3f} %)  "
+                  f"rule Pi_1 < {detach_policy.pi1_crit:g}, "
+                  f"mode {detach_policy.mode_name}")
+            if _det.all():
+                print("  [detach]   ⚠️  EVERY particle detached — the "
+                      "threshold is too HIGH to discriminate.")
+            elif not _det.any():
+                print("  [detach]   ⚠️  NO particle detached — the threshold "
+                      "is too LOW. tau_min's minimum is "
+                      f"{float(np.nanmin(dmg_cpu[:, 6])):.4g}.")
         if n_moved == 0:
             # A silent no-op accumulator would otherwise look like a clean run.
             print("  [damage] WARNING: nothing accumulated — the damage path "
@@ -3735,6 +3911,17 @@ def main():
             # analysis scripts should not have to re-derive the layout from the
             # driver string and a flag.
             columns=np.array(_dmg_columns, dtype=object),
+            # ✅ The detached flag and the rule that produced it travel WITH
+            # the data. A npz whose threshold is only in a shell script is
+            # unreproducible once the script changes.
+            **({} if detached_gpu is None else {
+                "detached": np.asarray(detached_gpu, dtype=np.uint8),
+                "detach_pi1_crit": np.float64(detach_policy.pi1_crit),
+                "detach_mode": np.array(detach_policy.mode_name, dtype=object),
+                "detach_v_adv": np.float64(detach_policy.v_adv or 0.0),
+                "detach_travel_axis": np.int32(detach_policy.travel_axis),
+                "detach_latched": np.bool_(detach_policy.latch),
+            }),
             residence_edot_threshold=np.float64(args.residence_edot_threshold),
             n_steps=np.int64(N_STEPS),
             dt=np.float64(DT),
