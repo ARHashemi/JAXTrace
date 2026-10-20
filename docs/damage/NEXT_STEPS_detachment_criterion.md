@@ -1570,6 +1570,84 @@ relative on a sub-mesh, it will not on 10.8 M elements either, and we learn that
 for a day instead of weeks. ✅ This also surfaces the boundary-condition work
 early, which is the part most likely to be underestimated.
 
+### B.6q ⚠️ SV feasibility test: the LOCAL version gives 1.00×. Answers Q3 though.
+
+Run on cylA snapshot 159, 100,000 contiguous elements
+(`scripts/damage/test_scott_vogelius_submesh.py`).
+
+| | before (raw P1) | after (local Alfeld projection) |
+|---|---:|---:|
+| \|div u\|/\|D\| median | 2.014e-03 | **2.014e-03** |
+| p90 | 3.824e-02 | 3.824e-02 |
+| frac rel > 1e-2 | 35.75 % | **35.75 %** |
+
+❌ **Reduction 1.00×.** The centroid velocity moved by only **6.3e-08**
+relative — the least-squares solution is essentially the P1 value it was
+regularised toward.
+
+#### ⚠️ Two bugs of mine on the way here, both caught by sanity tests
+
+1. ❌ **A transposed shape-function gradient.** I built `grad N` as
+   `transpose(inv(J))`; with `J = [e1 e2 e3]` as **columns**, `grad_x N_i` is
+   the i-th **row of `inv(J)` used as-is**. ⚠️ `tet_shape_gradients` warns about
+   precisely this: *"transposing here is a subtle and silent error (it only
+   shows up on skewed elements, and it breaks incompressibility)"*. The bug made
+   the projection look **47× worse** (2.0e-03 → 9.4e-02), and I nearly reported
+   that as a method failure. ✅ Caught by testing an exactly-representable field:
+   a linear div-free field gave `|div| = 1.3e+04` instead of ~0, and `u=(x,y,z)`
+   gave 1.07 instead of 3. After the fix: 4.1e-12, and 3.000000 exactly.
+2. ❌ **A wrong explanation.** I hypothesised that the volume-weighted total
+   divergence is invariant to an interior DOF by the divergence theorem.
+   ⚠️ **Measured false**: varying `u_vc` changes `Σ div_s·V_s` (0.0 → 1.6e-02 →
+   1.44 for P1-mean, random, 100× random). So the DOF *can* change the total;
+   the reason the fit does not use it is **not** a conservation identity, and I
+   do not currently have a verified explanation.
+
+⚠️ **Honest status: the local projection does not work on our data, and I have
+not established why.** The most likely candidate is the regularisation
+(`lam = 1e-6 * w`) dominating a nearly-singular normal matrix, which would mean
+the test under-explores the method rather than refuting it. ✅ **That is worth one
+more measurement** — sweep `lam` and check the condition number of `A` — before
+concluding anything about SV proper.
+
+#### ❌ What this does NOT establish
+
+This is a **local, per-element** projection with one extra DOF — the cheapest
+thing in the SV family, not SV. ⚠️ **A global SV solve couples elements through
+the continuity of the velocity space and uses a P2 velocity space (SV needs
+k ≥ 2); it can only do better on divergence while costing more.** So this result
+rules out the *easy* version, not the method.
+
+#### ✅ Q3 ANSWERED: PREBUILT, decisively — and this part is solid
+
+The cost measurement is independent of whether the projection works, because it
+is the same linear algebra either way: **1.63 µs/element**.
+
+| case | elements | snapshots | solve/snapshot | total solve | store/snapshot | store all |
+|---|---:|---:|---:|---:|---:|---:|
+| cylA | 3,050,196 | 1 | 5.0 s | 0.1 min | 34.9 MB | 0.03 GB |
+| **D2** | 10,807,677 | 166 | **17.6 s** | **48.7 min** | **123.7 MB** | **20.05 GB** |
+
+✅ **Prebuild it, do not do it in-step.** Three reasons, all measured:
+
+1. **17.6 s per snapshot against a 1710 s mesh load** — the projection is ~1 %
+   of a stage we already pay. 48.7 min total on D2 is real but modest against a
+   3.4 h run.
+2. ✅ **The stored object is tiny: 3 floats per element** (the centroid
+   velocity), **124 MB/snapshot** — ⚠️ **24× cheaper than HCT's Bernstein array**
+   (240 B/element, 2928 MB on cylA alone). A per-snapshot rebuild is unnecessary
+   when the result is this small.
+3. ⚠️ **20 GB for all 166 snapshots of D2 does not fit in GPU memory**
+   alongside the existing 28.4 GB footprint (§B.6n), so the realistic pattern is
+   **prebuild to disk once per case, then stream or hold one snapshot at a
+   time** — exactly how the velocity stack is already handled.
+
+✅ **And in-step is ruled out on a stronger ground than cost:** the projection is
+a *per-element solve*, not a per-particle evaluation. Doing it inside the step
+would redo identical work for every particle in the same element — 288,000
+particles over 10.8 M elements means the same 3×3 solve repeated many times per
+element per step.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
