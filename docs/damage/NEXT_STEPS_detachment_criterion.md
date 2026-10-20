@@ -2101,9 +2101,13 @@ detached at end : 2,950 / 293,455  (1.005 %)
 Pi_1 min        : median 0.8216   min 0.8016   max 0.9177
 ```
 
-✅ **1.005 % against a targeted 1st percentile** — the threshold does exactly
-what the explorer predicted from the previous run's archive, confirming the
-sweep-from-npz approach works.
+⚠️ **SUPERSEDED BY §B.6z — this is NOT a valid showcase.** The detached
+particles were already moving at v_adv before detaching, so the override
+changed nothing physical. The numbers below are reproduced as the record of
+what was run; the interpretation was wrong.
+
+~~1.005 % against a targeted 1st percentile — the threshold does exactly
+what the explorer predicted from the previous run's archive.~~
 
 #### ✅ Three checks that make this a result rather than a picture
 
@@ -2151,6 +2155,91 @@ frame.
   works end to end on a production case.
 
 Figure: `docs/damage/figs_detach/fig_detach_cylA_crit0.8077.png`.
+
+### B.6z ❌ Π₁ IS THE WRONG METRIC — it measures deceleration, not detachment
+
+⚠️ **The user's objection was right and the diagnosis is worse than the
+objection.** The showcase does not demonstrate the mechanism.
+
+#### The evidence, in order
+
+**1. The detached particles were already moving at `v_adv`.** Measured from the
+per-step exports, over the two exports *before* each particle detached:
+
+```
+|v| before detaching : median 6.611 mm/s
+v_adv                : 6.667 mm/s
+ratio                : 0.992
+```
+
+❌ **The override replaced a velocity with itself.** The 0.026 mm median
+displacement §B.6y reported as "surgical" was simply the residual of swapping
+`v_adv` for something 0.8 % away from `v_adv`.
+
+**2. They detach at the very end of the run.** Detachment step index: min 89,
+**median 103**, max 108, of 109 exports. ⚠️ And *every* detached particle has
+x ≥ 41.14 mm with a hard cutoff — a spatial band, not a material state.
+
+**3. Π₁ falls monotonically with distance travelled — for ATTACHED particles
+too:**
+
+| export | Π₁ (detached-to-be) | x | Π₁ (attached) |
+|---|---|---|---|
+| 24 | 0.897 | 10.3 mm | 0.875 |
+| 48 | 0.838 | 20.0 mm | 0.847 |
+| 72 | 0.819 | 29.8 mm | 0.831 |
+| 96 | 0.810 | 39.7 mm | 0.818 |
+
+⚠️ Both populations follow the same downward drift. ✅ `corr(Π₁, x) = −0.40`.
+**Π₁ is tracking position downstream, not a material transition.**
+
+#### ❌ The root cause — Π₁ reduces to something trivial
+
+The Norton law is $\sigma_{eq} = \mu_0(T)\,\dot\gamma^{\,m}$, and §B.6r built
+$\tau_{yield}^{ref}$ as the Norton stress at a reference strain rate **with the
+same local temperature**. So:
+
+$$\Pi_1=\frac{\sigma_{eq}(\dot\varepsilon_{loc},T)}{\sigma_{eq}(\dot\varepsilon_{ref},T)}
+=\frac{\mu_0(T)\,\dot\varepsilon_{loc}^{\,m}}{\mu_0(T)\,\dot\varepsilon_{ref}^{\,m}}
+=\left(\frac{\dot\varepsilon_{loc}}{\dot\varepsilon_{ref}}\right)^{m}$$
+
+❌ **$\mu_0(T)$ cancels exactly.** Π₁ is not a yield-stress ratio at all — it
+is the **strain-rate ratio raised to the Norton exponent**, and the temperature
+dependence that was supposed to carry the softening physics is gone.
+
+✅ **This explains every symptom quantitatively.** With $m\approx0.1$–$0.25$ the
+power law compresses enormous strain-rate variation into almost nothing:
+measured Π₁ spans 0.8016–2.2399, a ratio of **2.79**, which implies an
+underlying $\dot\varepsilon$ ratio of **60× to 29,000×** depending on $m$. ⚠️ So
+the narrow 0.80–0.92 band in §B.6m/§B.6s was never a property of the material —
+it is a weak power law flattening the dynamic range.
+
+⚠️ **And §B.6r's warning was aimed at the wrong trap.** I wrote that dividing by
+the *local* flow stress would give Π₁ ≡ 1, and used a reference strain rate to
+avoid it. ❌ But holding the temperature local re-introduced the same
+degeneracy in a subtler form: instead of 1, we get a weak monotone function of
+$\dot\varepsilon$ alone.
+
+#### ✅ What a real criterion needs
+
+Π₁ must compare the local stress against something that is **not built from
+the same local state**. Candidates, in order:
+
+1. ✅ **A reference temperature, not the local one.** $\tau_{yield}^{ref} =
+   \sigma_{eq}(\dot\varepsilon_{ref}, T_{ref})$ with $T_{ref}$ fixed per case —
+   e.g. solidus, or the far-field temperature. Then $\mu_0$ does **not** cancel
+   and Π₁ carries the thermal softening that Buck's Bingham number is really
+   about. ⚠️ One-line change to the `_tau_ref` construction; everything else
+   stands.
+2. ⚠️ **A genuine Bingham number**, $Bu = \tau_y/(\mu\dot\gamma)$, which is what
+   Buck & Langerman actually use (§B.6d). ⚠️ Needs a yield stress $\tau_y$ that
+   is *independent* of the Norton fit, which the `.mat` tables may not provide.
+3. ⚠️ **Drop the stress route entirely** and use the kinematic group from
+   Mendez's shear-layer thickness (§B.6j), which has no constitutive
+   cancellation to worry about.
+
+❌ **Until one of these is in place, no threshold on the current Π₁ means
+anything**, and the §B.6u threshold curves describe a deceleration detector.
 
 ### B.6b Full texts needed before the derivation — in priority order
 
