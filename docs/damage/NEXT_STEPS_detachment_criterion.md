@@ -2369,6 +2369,89 @@ Full cylA run (2684 steps) launched to produce the real distributions. ⚠️ **
 chosen from the data. Detaching at a guessed threshold first would repeat the
 §B.6z mistake of picking a number before knowing what it selects.
 
+### B.6ac ✅ Full cylA with A+T_ref, and the τ_y search — both landed
+
+#### ✅ The gate holds on the full run, and the geometry is now right
+
+cylA 2684 steps, exit 0, 0 lost:
+
+```
+entered the shear layer : 45,652 / 293,455  (15.56 %)
+their final positions   : y -10.6 .. 8.1 mm   (all: -23.0 .. 23.0)
+                          z  -5.5 .. -0.0 mm  (all: -10.0 ..  0.0)
+```
+
+✅ **The candidate set is now a physically sensible population**: 15.6 % of
+particles, confined to **|y| < 11 mm** and the **upper 5.5 mm** — i.e. the
+material that actually passed through the tool. ⚠️ Contrast §B.6z, where the
+"detached" set was every particle that had drifted past x = 41 mm.
+
+#### ⚠️ Π₁ is still narrow; Bu is better but not by much
+
+| | min | p1 | median | max | spread |
+|---|---:|---:|---:|---:|---:|
+| **Π₁_min** | 1.3623 | 1.3763 | 1.4773 | 2.0774 | **1.53×** |
+| **Bu_min** | 0.1678 | 0.1758 | 0.2511 | 0.3817 | **2.27×** |
+
+⚠️ **Neither has a gap.** Both are smooth unimodal distributions, so *any*
+threshold is still a chosen percentile. ✅ Bu's 2.27× spread is 1.5× wider than
+Π₁'s, which is a real but modest improvement.
+
+#### ✅ THE DECISIVE RESULT — the two criteria select DIFFERENT MATERIAL
+
+Mean position of the lowest 1 % by each criterion:
+
+| | x | y | z |
+|---|---:|---:|---:|
+| lowest 1 % by **Π₁** | **36.75 mm** | −3.67 | −1.31 |
+| lowest 1 % by **Bu** | **14.59 mm** | +0.68 | −0.10 |
+
+❌ **Π₁ still points downstream** (x ≈ 37 mm, far behind the tool) even with the
+gate and T_ref. ✅ **Bu points at x ≈ 15 mm, near the top surface (z ≈ −0.1 mm)**
+— material just leaving the tool, at the surface, which is where FSW voids and
+galling actually initiate.
+
+✅ **rank corr = +0.358** confirms these are not the same test. ⚠️ **Option B is
+physically the better criterion**, and the reason is structural, exactly as
+§B.6aa predicted: Bu diverges in quiescent material while Π₁ decays.
+
+#### ⚠️ But the τ_y search says Bu rests on sand
+
+Undermind, 111 papers. ❌ **No validated, temperature-resolved Bingham yield
+stress for AA6061/AA6063 exists in the located literature.** Specifically:
+
+- ⚠️ **Buck & Langerman give the Bingham framework but no alloy-specific τ_y.**
+  The one paper we built on does not supply the number it needs.
+- ✅ **The best anchor is proof stress, not yield stress**: Su & Young (2019)
+  report 0.2 % proof stress to 600 °C for aluminium alloys. Converting,
+  $\tau_y = \sigma_y/\sqrt3$ (von Mises) or $\sigma_y/2$ (Tresca).
+- ⚠️ **Hot-compression studies** (Ding 2021 — *6061 at FSW temperatures*,
+  Mohammadi 2021 — *AA6061 and AA6063*, Rudnytskyj 2020) cover the right range
+  but report **rate- and strain-dependent flow curves, not a separately
+  identified yield threshold.**
+- ❌ **On whether a Bingham τ_y is even well posed near 0.9 T_solidus, the
+  literature does not settle it** — neither a unique intrinsic threshold nor
+  merely a numerical regulariser.
+
+✅ **The magnitude check is reassuring**: our 24 MPa von Mises flow stress at
+457 °C / 1 s⁻¹ corresponds to a **shear scale of ~14 MPa** (12 MPa by Tresca),
+so a plausible τ_y is the *same order* as the placeholder 20 MPa. ✅ **Bu will
+not be degenerate**, which was the §B.6ab risk.
+
+⚠️ **Consequence: τ_y must be reported as an assumption with a stated source
+and a sensitivity sweep, not as a material constant.** Bu scales linearly in
+τ_y, so the *ranking* above — the result that actually matters — is unaffected
+by the choice.
+
+#### Full texts wanted
+
+| paper | why |
+|---|---|
+| **Ding, Shi & Chen (2021)**, *Metals* | ✅ "Flow Stress of 6061 at Typical Temperatures during FSW" — our alloy, our temperatures, our process |
+| **Su & Young (2019)**, *Thin-Walled Structures* | ✅ the proof-stress-vs-temperature dataset to 600 °C |
+| **Mohammadi & Ashtiani (2021)** | ✅ covers **both** AA6061 and AA6063 |
+| Rudnytskyj (2020), *Materials & Design* | large-strain constitutive fit, 80 citations |
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
