@@ -1894,6 +1894,37 @@ chosen, not derived. For a demonstration the defensible choice is a stated
 percentile — **1 % of the wake box** — giving 0.7919 (D2) and 0.8077 (cylA),
 with the arbitrariness said out loud.
 
+### B.6v ✅ Π₁ is now exported per particle PER STEP — the threshold is sweepable
+
+`Damage_Pi1` (VTU/VTKHDF) and `pi1` (npz), accumulator column 7: the
+**instantaneous** Π₁ at the particle's current position, overwritten each step.
+
+⚠️ **Why `tau_min` was not enough.** It is a running *minimum*, so it answers
+*"did this particle ever qualify"* but cannot answer *"where was it when it
+did"* — a minimum carries no time and no place. ✅ Judging a threshold needs the
+**trajectory** of Π₁, so a pathline can be coloured by it in ParaView and the
+approach to any candidate cut seen directly.
+
+✅ Verified on a 40-step cylA run: npz carries all 8 columns, and the invariant
+**`pi1 >= tau_min` holds elementwise** — the instantaneous value can never sit
+below the running minimum. The VTKHDF export carries `Damage_Pi1`,
+`Damage_tauMin`, `Damage_lnJ` and `Detached` alongside `Group`, so every
+quantity the criterion uses is visible per step.
+
+⚠️ `pi1` is `+inf` where there is no valid material, the same convention
+`tau_min` uses. Writing 0 there would be indistinguishable from genuine zero
+flow stress — **exactly the confusion that caused the artefact fixed in
+`2d29bbc`**.
+
+#### Showcase run launched
+
+cylA, 2684 steps, **Π₁_crit = 0.8077**, `--export-freq 25`.
+
+⚠️ **0.8077 is the 1st percentile of the wake-box distribution, not a derived
+value.** It is chosen so the mechanism is visible. ❌ D2 needs **0.7919** for
+the same 1 %, and that per-case difference is itself the argument for the
+dimensionless form (§B.6u). Both facts belong in the meeting with the figure.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
