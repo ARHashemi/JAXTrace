@@ -1839,6 +1839,61 @@ derived from physics — which is exactly the free-parameter problem §B.6f step
 inherited from Wang 2021, and exactly what step 3's dimensionless form is meant
 to remove.
 
+### B.6u ❌ The D2 re-run will detach nothing — kill it, the answer is already known
+
+⚠️ **Do not wait for it.** Two independent checks say the outcome before it
+finishes.
+
+**1. The trajectories are already bit-identical to the baseline.** Particle
+loss at every checkpoint of the in-flight run matches the 2026-10-19
+no-detachment run exactly:
+
+| step | post-fix detach run | baseline |
+|---|---:|---:|
+| 2000 | 4 | 4 |
+| 3000 | 227 | 227 |
+| 4000 | 1,235 | 1,235 |
+| 4800 | 2,160 | 2,160 |
+
+✅ Identical loss means no override has fired — a detached particle follows
+`v_adv` instead of the flow and would change the loss pattern immediately.
+
+**2. D2 cannot reach Π₁ = 0.5.** The guard only ever *raises* `tau_min` (it
+replaces an invalid-element 0 with +inf), so the post-fix minimum is **≥** the
+pre-fix one. Excluding the artefact zeros, the baseline's genuine floor is:
+
+```
+D2 tau_min, NONZERO only : min 0.785851   p1 0.792042   median 0.815311
+particles below 0.5      : 0
+```
+
+❌ **Zero particles can reach 0.5**, so the finished run will report 0 detached
+and be identical to the baseline — exactly as cylA was (§B.6s).
+
+#### ✅ Both cases' threshold curves, from existing archives
+
+Wake box, D2 at x ≥ 7.4 mm, cylA at x ≥ 12.7 mm:
+
+| detached | D2 Π₁_crit | cylA Π₁_crit |
+|---:|---:|---:|
+| 0.1 % | 0.787494 | 0.803802 |
+| 1 % | 0.791905 | 0.807664 |
+| 5 % | 0.796876 | 0.812899 |
+| 10 % | 0.799729 | 0.814637 |
+| 50 % | 0.814854 | 0.821539 |
+
+⚠️ **The two cases need DIFFERENT thresholds for the same detached fraction**
+— D2's 1 % cut is 0.7919, cylA's is 0.8077. ❌ **That is a serious objection to
+Π₁ as it stands**: a criterion whose threshold must be retuned per case cannot
+predict anything about a case it has not seen. ✅ It is also exactly what a
+*dimensionless* form is supposed to fix, which strengthens the case for
+§B.6f step 3 rather than undermining the approach.
+
+✅ **Both distributions are smooth with no gap**, so any showcase threshold is
+chosen, not derived. For a demonstration the defensible choice is a stated
+percentile — **1 % of the wake box** — giving 0.7919 (D2) and 0.8077 (cylA),
+with the arbitrariness said out loud.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
