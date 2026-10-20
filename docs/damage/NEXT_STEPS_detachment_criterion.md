@@ -1648,6 +1648,81 @@ would redo identical work for every particle in the same element — 288,000
 particles over 10.8 M elements means the same 3×3 solve repeated many times per
 element per step.
 
+### B.6r ✅ Detachment implemented end to end — and the threshold, measured
+
+`--detach` with the rule and threshold isolated in
+`jaxtrace/damage/detachment.py`. ⚠️ **One file owns the policy** because the
+threshold is the method's one free parameter and is not settled; the kernel
+receives a resolved float and an integer mode and encodes no physics.
+
+**Rule:** $\Pi_1 = \sigma_{eq}/\tau_{yield}^{ref} < \Pi_1^{crit}$ (Buck &
+Langerman's yield-stress group).
+**Kinematics:** `v_adv` (default) — the particle is carried by the workpiece's
+rigid translation along the travel axis. ✅ Parameter-free: `v_adv` is already a
+per-case quantity. Also `freeze`, and `flag-only` as the **diagnostic** mode
+that records detachment without changing any trajectory.
+
+Implemented as a **post-step override** modelled on the existing
+ballistic/freeze escape latch, not inside the RK4 kernel: the trigger
+(`tau_min`) is already sampled, the RK4 graph is untouched, and the kernel stays
+byte-identical when detachment is off.
+
+⚠️ **Three details that would be silent bugs otherwise:**
+- Detachment runs **after** the escape latch — an escapee has no valid
+  `tau_min` and would latch a detachment from a stale accumulator.
+- A detached particle advances from its **pre-step** position; the kernel has
+  already moved it with a field it no longer follows.
+- Its host element id is **kept**, unlike an escapee's, so its indicators keep
+  being sampled and detachment stays distinguishable from escape.
+
+#### ✅ THE THRESHOLD: 0.5 for both cases, and it is not a tuned number
+
+Measured $\Pi_1^{min}$ distributions on the two completed full runs:
+
+| | cylA (2684 steps) | D2 (8000 steps) |
+|---|---|---|
+| exact zeros | 117 (**0.040 %**) | 3,588 (**1.260 %**) |
+| smallest NONZERO | 0.8017 | 0.7859 |
+| p1 / median | 0.8076 / 0.8216 | 0.0 / 0.8151 |
+
+❌ **Π₁ is NOT a tunable continuum.** The distribution is a hard-zero spike plus
+a band ~1.5 % wide. The detached fraction as the threshold moves:
+
+| $\Pi_1^{crit}$ | cylA | D2 |
+|---|---:|---:|
+| 0.10 – 0.78 | **0.040 %** | **1.260 %** |
+| 0.80 | 0.040 % | 11.37 % |
+| 0.82 | 41.01 % | 63.48 % |
+| 0.85 | 99.38 % | 97.50 % |
+
+⚠️ **The fraction jumps 1.3 % → 63 % → 98 % over a 0.03 change.** So there is no
+meaningful tuning range: the threshold is a **switch** between the hard-zero
+population and essentially the whole mesh.
+
+✅ **Hence $\Pi_1^{crit} = 0.5$ for both cases.** Any value in (0, 0.785) gives
+an identical answer, so 0.5 sits mid-way through that dead zone — ✅ **one value
+for two very different cases, with no per-case tuning**, which is the honest
+thing to present. ✅ **And §B.6f step 4's "stability over a decade of threshold"
+is satisfied**: 0.1 → 0.78 is more than a decade with a constant answer.
+
+⚠️ **What it selects, and the caveat for the meeting.** $\Pi_1 = 0$ means
+$\sigma_{eq} = 0$ — material carrying **no flow stress**, the cleanest possible
+detachment signal. ⚠️ **But that population has not been independently
+identified.** It is plausibly outside the active material or at a level-set
+boundary, and until that is checked **"1.26 % detached" must not be presented as
+a void fraction.** Present it as *"the criterion fires on a physically
+identifiable population, and here is where"*, not as a quantitative prediction.
+
+#### ⚠️ A real finding from the first launch: cylA's `v_adv` is not auto-detected
+
+cylA keeps its `som.fix` under `data/0eule/`, not in the case parent where
+`read_case_solver_params` looks, so auto-detection returns `None`. ✅ **The
+policy validation refused to guess and failed in 1 second** rather than after a
+mesh load — which is exactly what the fail-early design is for. The value, read
+from the `Faces` constraint `111 6.6666666667e-03`, is **6.667e-03 m/s =
+400 mm/min** and is now passed explicitly. ⚠️ D2's auto-detection works
+(`v_adv=0.01 m/s`), so this is a cylA path quirk, not a general break.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
