@@ -1777,6 +1777,68 @@ material is worked hardest. ✅ That is consistent with §B.6i–§B.6o — the
 divergence error is largest where the deformation is largest, i.e. exactly
 where a void would form.
 
+### B.6t ✅ Two user observations, both confirmed by measurement
+
+#### 1 ✅ "The detachment mechanism did not work" — correct, and it is a null result
+
+The cylA detachment run is **bit-for-bit equivalent** to a run without
+detachment, because **0 of 293,455 particles detached**. The override never
+fired, so every trajectory is the plain advection result. ✅ Nothing is broken;
+the criterion simply never triggered at Π₁_crit = 0.5 once the `tau_min`
+artefact was removed (§B.6s).
+
+⚠️ **This is the honest state and it must be presented as such**: the machinery
+is implemented and verified end to end, and the *threshold* is unresolved.
+
+#### 2 ✅ "The original velocity already produces voids, which should not happen in a divergence-free field" — correct, and it is the sharper point
+
+Measured on the cylA wake box (291,137 particles, 160×60 yz occupancy grid):
+
+```
+EMPTY cells inside the occupied region : 3,202 of 9,600  (33.4 %)
+median occupancy of a NON-empty cell   : 53 particles
+```
+
+⚠️ **One third of the interior is empty, against a median of 53 particles per
+occupied cell.** Those are large holes, not sampling noise.
+
+❌ **And with $\nabla\!\cdot u = 0$ and full entrainment this is impossible.**
+$\det F \equiv 1$ means the particle density is preserved along every
+trajectory, so an initially uniform seed cannot develop interior holes. ✅ **The
+holes are therefore direct, independent evidence of the divergence error**
+measured in §B.6i–§B.6o — they are the *same* defect seen in position space
+rather than in $\ln J$.
+
+✅ **This matters more than the detachment null result**, for two reasons:
+
+1. ⚠️ **It invalidates "void = particle-density deficit" as currently
+   implemented.** A deficit is already present *without* any detachment rule,
+   so a deficit measured *with* one cannot be attributed to detachment. The
+   signal and the artefact are the same observable.
+2. ✅ **It gives a far cheaper diagnostic than $\det F$.** Interior occupancy on
+   a yz grid is a single histogram — no accumulator, no extra field — and it
+   reports the same problem in units anyone can read ("a third of the
+   cross-section is empty").
+
+⚠️ **So the divergence work is not optional and not deferrable.** §B.6p ranked
+Scott–Vogelius first on the grounds that it attacks the cause; this result says
+the cause is already corrupting the primary observable, not merely adding
+noise to a secondary one.
+
+#### ⚠️ What this means for the threshold discussion
+
+Raising Π₁_crit until particles detach is **possible and worth doing for a
+demonstration**, but it must be labelled honestly:
+
+- at ~0.82, roughly half the particles detach
+- at ~0.85, almost all do
+
+✅ Either produces a visibly different result for a showcase. ❌ **Neither is a
+prediction.** The number would be chosen to make the mechanism visible, not
+derived from physics — which is exactly the free-parameter problem §B.6f step 4
+inherited from Wang 2021, and exactly what step 3's dimensionless form is meant
+to remove.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
