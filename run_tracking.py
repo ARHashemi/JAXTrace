@@ -3073,7 +3073,7 @@ def main():
         if args.damage_driver != "models":
             _n_acc = 1
         elif args.damage_indicators:
-            _n_acc = 7 if args.damage_detachment else 5
+            _n_acc = 8 if args.damage_detachment else 5
         else:
             _n_acc = 2
         if _n_acc == 1:
@@ -3086,7 +3086,11 @@ def main():
             # begin at +inf for the first jnp.minimum to take the real sample.
             # The other six columns are integrals and correctly start at zero.
             if args.damage_detachment:
+                # Col 6 = running MIN (needs +inf so the first sample wins).
+                # Col 7 = INSTANTANEOUS Pi_1, also +inf until first written, so
+                # a particle that has taken no step is not reported at 0.
                 damage_gpu = damage_gpu.at[:, 6].set(jnp.inf)
+                damage_gpu = damage_gpu.at[:, 7].set(jnp.inf)
         positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
             positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0,
             damage_gpu,
@@ -3650,8 +3654,13 @@ def main():
                                   'Damage_tres', 'Damage_wbond',
                                   'Damage_Aedot']
                         if args.damage_detachment:
+                            # ✅ Pi1 is the INSTANTANEOUS value at this step --
+                            # the one that makes a threshold sweep judgeable,
+                            # because tauMin (a running minimum) cannot say
+                            # WHERE or WHEN a particle qualified.
                             _names = _names + ['Damage_lnJ',
-                                               'Damage_tauMin']
+                                               'Damage_tauMin',
+                                               'Damage_Pi1']
                         for _i in range(_dmg.shape[1]):
                             _nm = (_names[_i] if _i < len(_names)
                                    else f'Damage_col{_i}')
@@ -3894,7 +3903,7 @@ def main():
             if args.damage_detachment:
                 # ln_J  : integral(div(u) dt)   -> det F = exp(ln_J)
                 # tau_min: running min of Pi_1 = sigma_eq/tau_yield_ref
-                _dmg_columns = _dmg_columns + ["ln_J", "tau_min"]
+                _dmg_columns = _dmg_columns + ["ln_J", "tau_min", "pi1"]
         dmg_path = args.damage_out
         if dmg_path is None:
             dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"

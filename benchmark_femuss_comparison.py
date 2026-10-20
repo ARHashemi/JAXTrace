@@ -854,8 +854,14 @@ def create_rk4_comparison(
             "damage_detachment=True needs a 5-slot "
             "[edot, eta, s1_ratio, div_u, tau_ratio] stack, got "
             f"{n_damage_slots} slots.")
+    # ⚠️ Column 7 is NOT an accumulator: it holds the INSTANTANEOUS Pi_1 at the
+    # current position, overwritten every step. tau_min (col 6) is the running
+    # minimum and answers "did this particle ever qualify"; it cannot answer
+    # "where was it when it did", because a minimum carries no time or place.
+    # Exporting the instantaneous value per step gives the trajectory of Pi_1
+    # itself, which is what a threshold sweep needs to be judged against.
     n_damage_acc = (1 if not use_damage_models
-                    else ((7 if use_detach else 5) if use_indicators else 2))
+                    else ((8 if use_detach else 5) if use_indicators else 2))
     residence_thr = float(residence_edot_threshold)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
@@ -1888,7 +1894,8 @@ def create_rk4_comparison(
                             jnp.asarray(jnp.inf, dtype=tau_k1.dtype))
 
                         inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1,
-                                         divu_k1, jnp.zeros_like(divu_k1)])
+                                         divu_k1, jnp.zeros_like(divu_k1),
+                                         jnp.zeros_like(divu_k1)])
                 dmg_new = dmg + dt * inc
                 if use_detach:
                     # Column 6 is the running min of Pi_1. jnp.minimum against
@@ -1898,6 +1905,12 @@ def create_rk4_comparison(
                     # sets it rather than being clamped by a zero start.
                     dmg_new = dmg_new.at[6].set(
                         jnp.minimum(dmg[6], tau_k1))
+                    # Column 7: the instantaneous Pi_1, OVERWRITTEN each step.
+                    # ⚠️ Stored as +inf where there is no valid material, the
+                    # same convention tau_k1 already uses, so a consumer can
+                    # tell "no sample" from "a low value" -- writing 0 instead
+                    # would be indistinguishable from genuine zero flow stress.
+                    dmg_new = dmg_new.at[7].set(tau_k1)
 
                 # Freeze BOTH accumulators on any step the position also skipped:
                 # otherwise damage accrues on steps that never physically happened.
