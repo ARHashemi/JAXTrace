@@ -1723,6 +1723,60 @@ from the `Faces` constraint `111 6.6666666667e-03`, is **6.667e-03 m/s =
 400 mm/min** and is now passed explicitly. ⚠️ D2's auto-detection works
 (`v_adv=0.01 m/s`), so this is a cylA path quirk, not a general break.
 
+### B.6s ⚠️ After the `tau_min` fix: cylA detaches NOTHING. The threshold is unresolved.
+
+Re-run with the §B.6r guard (commit `2d29bbc`), cylA 2684 steps, 293,455
+particles, 0 lost, exit 0 in 1557 s:
+
+```
+Pi_1 min   median 0.8216   min 0.8017   max 0.9177   (293,455 finite)
+detached   0 / 293,455  (0.000 %)   rule Pi_1 < 0.5
+```
+
+❌ **The hard-zero population is GONE.** Before the fix cylA reported 117 zeros
+(0.040 %) and D2 reported 3,588 (1.260 %); after it, cylA's minimum Π₁ is
+**0.8017** and nothing is below 0.5.
+
+⚠️ **So §B.6r's threshold recommendation is void.** Π₁_crit = 0.5 was chosen to
+select exactly the hard-zero spike — and that spike was the artefact the guard
+removed. The reasoning ("any value in (0, 0.785) gives an identical answer")
+was correct arithmetic applied to contaminated data.
+
+#### ✅ What the measurement actually shows now
+
+Π₁ is a **narrow, well-behaved field**: 0.8017 … 0.9177, a 14 % spread with no
+outlier population. ⚠️ **There is no natural threshold in it.** Any Π₁_crit has
+to be placed inside a continuum, which means:
+
+- below ~0.80 → **nothing detaches** (the cylA result)
+- at ~0.82 → roughly half the particles detach
+- above ~0.85 → **almost everything** detaches
+
+❌ **This is not a criterion yet.** It is a smoothly varying field that needs a
+*physically derived* cut, which is precisely what §B.6f step 3 — the
+dimensionless form — was supposed to supply and which is **not yet
+implemented**.
+
+✅ **But the panel figure shows Π₁ has real spatial structure**, and that is the
+useful result: low Π₁ (dark) concentrates in the stir zone and along the
+advancing-side shear band, higher Π₁ (green/yellow) sits in the undeformed far
+field and at depth. ✅ **The field knows where the tool worked the material.**
+What is missing is the number that turns that structure into a defect call.
+
+#### ✅ The figure (`docs/damage/figs_detach/fig_detach_cylA.png`)
+
+Five panels on the project's standard yz convention (observer at the origin
+looking +x, +y left). ⚠️ Wake clip **scaled, not copied**: D2's 7.4 mm is
+0.2523 of its downstream reach, giving **12.70 mm** on cylA, which keeps
+268,148 of 293,455 particles. A literal 7.4 mm would have kept 99.5 % and
+isolated nothing.
+
+⚠️ **det F structure is visible and it is a warning, not a result**: the
+non-unit values cluster exactly in the stir zone, with ±7 % swings where the
+material is worked hardest. ✅ That is consistent with §B.6i–§B.6o — the
+divergence error is largest where the deformation is largest, i.e. exactly
+where a void would form.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
