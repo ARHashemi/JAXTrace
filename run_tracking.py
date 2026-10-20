@@ -672,6 +672,25 @@ def parse_args():
                              "reconstruction and was measured identical with "
                              "and without HCT. Keep 'field' only to reproduce "
                              "those earlier numbers.")
+    parser.add_argument("--damage-tau-ref-temp", type=float, default=None,
+                        help="Reference TEMPERATURE [deg C] for tau_yield_ref. "
+                             "⚠️ Without it the reference uses the LOCAL "
+                             "temperature, and mu0(T) then cancels exactly "
+                             "between numerator and denominator -- Pi_1 "
+                             "collapses to (edot/edot_ref)^m, a weak function "
+                             "of strain rate alone (B.6z). ⚠️ Do NOT use the "
+                             "solidus: the measured field peaks at 509 C on "
+                             "cylA, below the AA6xxx solidus, so every node "
+                             "would sit on one side of it. A value near the "
+                             "peak weld temperature is the usable choice.")
+    parser.add_argument("--damage-tau-y", type=float, default=None,
+                        help="Yield stress tau_y [Pa] for the Bingham number "
+                             "Bu = tau_y/(mu*gamma_dot), recorded ALONGSIDE "
+                             "Pi_1 for comparison (B.6aa option B). ⚠️ Not "
+                             "available from the Norton .mat tables, which "
+                             "hold no yield stress -- supply a literature "
+                             "value. Omitted => the Bingham columns are not "
+                             "built and the run is unchanged.")
     parser.add_argument("--damage-tau-ref-edot", type=float, default=1.0,
                         help="Reference strain rate [1/s] at which the Norton "
                              "flow stress is evaluated to give tau_yield_ref "
@@ -2379,6 +2398,8 @@ def main():
         # evaluation per timestep at the reference strain rate.
         if args.damage_detachment:
             slots = slots + ["div_u", "tau_ratio"]
+            if args.damage_tau_y is not None:
+                slots = slots + ["bingham"]
 
         if want_models and pressure_sequence is None:
             raise RuntimeError(
@@ -2446,19 +2467,31 @@ def main():
                         "temperature field to build tau_yield_ref.")
                 _edot_ref = np.full(n_nod, float(args.damage_tau_ref_edot),
                                     dtype=np.float64)
-                _tau_ref = build_sigma_eq("norton", _edot_ref, T_t,
+                # ⚠️ The reference TEMPERATURE decides whether Pi_1 means
+                # anything. With T_ref=None the local T is used and mu0(T)
+                # cancels exactly, collapsing Pi_1 to (edot/edot_ref)^m with
+                # m ~ 0.02..0.20 -- a weak monotone function of strain rate
+                # that drifts downstream and detects deceleration, not
+                # detachment. Measured and diagnosed in B.6z.
+                _T_ref_arr = (T_t if args.damage_tau_ref_temp is None
+                              else np.full(n_nod,
+                                           float(args.damage_tau_ref_temp),
+                                           dtype=np.float64))
+                _tau_ref = build_sigma_eq("norton", _edot_ref, _T_ref_arr,
                                           mat_path=mat_path)[0]
             f = build_damage_fields(
                 node_positions, connectivity,
                 velocity_sequence[_t], pressure_sequence[_t],
                 verbose=False, geom=_geom, sigma_eq_from_edot=_sig,
-                tau_yield_ref=_tau_ref)
+                tau_yield_ref=_tau_ref, tau_y=args.damage_tau_y)
             stack[0, _t] = f["edot"]
             stack[1, _t] = f["eta"]
             stack[2, _t] = f["s1_ratio"]
             if args.damage_detachment:
                 stack[3, _t] = f["div_u"]
                 stack[4, _t] = f["tau_ratio"]
+                if args.damage_tau_y is not None:
+                    stack[5, _t] = f["bingham"]
 
         damage_scalars_gpu = jax.device_put(stack)
         print(f"  [damage] driver='{args.damage_driver}'  slots={slots}  "
@@ -3073,7 +3106,7 @@ def main():
         if args.damage_driver != "models":
             _n_acc = 1
         elif args.damage_indicators:
-            _n_acc = 8 if args.damage_detachment else 5
+            _n_acc = 10 if args.damage_detachment else 5
         else:
             _n_acc = 2
         if _n_acc == 1:
@@ -3089,8 +3122,11 @@ def main():
                 # Col 6 = running MIN (needs +inf so the first sample wins).
                 # Col 7 = INSTANTANEOUS Pi_1, also +inf until first written, so
                 # a particle that has taken no step is not reported at 0.
-                damage_gpu = damage_gpu.at[:, 6].set(jnp.inf)
-                damage_gpu = damage_gpu.at[:, 7].set(jnp.inf)
+                # ⚠️ Cols 6/8 are running MINIMA and 7/9 instantaneous
+                # values; all four start at +inf so the first valid sample
+                # wins and "never sampled" stays distinguishable from zero.
+                for _c in (6, 7, 8, 9):
+                    damage_gpu = damage_gpu.at[:, _c].set(jnp.inf)
         positions_gpu, element_ids_gpu, damage_gpu = rk4_step(
             positions_gpu, element_ids_initial, DT, velocity_sequence_gpu, 0,
             damage_gpu,
@@ -3660,7 +3696,9 @@ def main():
                             # WHERE or WHEN a particle qualified.
                             _names = _names + ['Damage_lnJ',
                                                'Damage_tauMin',
-                                               'Damage_Pi1']
+                                               'Damage_Pi1',
+                                               'Damage_BuMin',
+                                               'Damage_Bu']
                         for _i in range(_dmg.shape[1]):
                             _nm = (_names[_i] if _i < len(_names)
                                    else f'Damage_col{_i}')
@@ -3873,6 +3911,41 @@ def main():
                     for _thr in (0.1, 0.2, 0.3, 0.5, 0.7, 0.9):
                         print(f"  [damage]     Pi_1_crit {_thr:4.2f} -> "
                               f"{100.0 * float((_tm < _thr).mean()):6.2f} %")
+                # ── Option B, measured in parallel (B.6aa) ─────────────────
+                if dmg_cpu.shape[1] >= 10:
+                    _bu = dmg_cpu[_al, 8]
+                    _bf = np.isfinite(_bu)
+                    if _bf.any():
+                        _b = _bu[_bf]
+                        print(f"  [damage] Bu min along path       : median "
+                              f"{float(np.median(_b)):.4g}  "
+                              f"min {float(_b.min()):.4g}  "
+                              f"max {float(_b.max()):.4g}  "
+                              f"({int(_bf.sum()):,}/{len(_bu):,} finite)")
+                        # ✅ The decisive comparison: does Bu rank particles
+                        # DIFFERENTLY from Pi_1? If the rank correlation is
+                        # ~1 the two criteria are the same test wearing
+                        # different units, and option B buys nothing.
+                        _tm_all = dmg_cpu[_al, 6]
+                        _common = _bf & np.isfinite(_tm_all)
+                        if int(_common.sum()) > 10:
+                            _ra = np.argsort(np.argsort(
+                                _tm_all[_common])).astype(np.float64)
+                            _rb = np.argsort(np.argsort(
+                                _bu[_common])).astype(np.float64)
+                            _rr = float(np.corrcoef(_ra, _rb)[0, 1])
+                            print(f"  [damage]   rank corr(Pi_1min, Bu_min) : "
+                                  f"{_rr:+.4f}")
+                            if abs(_rr) > 0.95:
+                                print("  [damage]   ⚠️  |corr| > 0.95: Bu and "
+                                      "Pi_1 rank particles almost identically "
+                                      "— option B buys nothing over option A.")
+                            else:
+                                print("  [damage]   ✅ the two criteria rank "
+                                      "particles DIFFERENTLY — worth deciding "
+                                      "between them on physics.")
+                    else:
+                        print("  [damage] Bu min: n/a — no finite sample")
         else:
             print(f"  [damage] value : median {float(np.median(dmg_cpu)):.4g}  "
                   f"mean {float(dmg_cpu.mean()):.4g}  max {float(dmg_cpu.max()):.4g}")
@@ -3903,7 +3976,8 @@ def main():
             if args.damage_detachment:
                 # ln_J  : integral(div(u) dt)   -> det F = exp(ln_J)
                 # tau_min: running min of Pi_1 = sigma_eq/tau_yield_ref
-                _dmg_columns = _dmg_columns + ["ln_J", "tau_min", "pi1"]
+                _dmg_columns = _dmg_columns + ["ln_J", "tau_min", "pi1",
+                                               "bu_min", "bu"]
         dmg_path = args.damage_out
         if dmg_path is None:
             dmg_path = output_subdir / f"damage_{args.damage_driver}.npz"

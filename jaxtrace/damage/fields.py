@@ -162,6 +162,7 @@ def build_damage_fields(
     geom: Optional[tuple] = None,
     sigma_eq_from_edot=None,
     tau_yield_ref=None,
+    tau_y=None,
 ) -> dict:
     """Build the nodal damage-driver scalars for ONE timestep.
 
@@ -249,6 +250,7 @@ def build_damage_fields(
             "div_u": div_u.astype(np.float32),
             "sigma_m": None, "sigma_eq": None,
             "eta": None, "s1_over_seq": None, "tau_ratio": None,
+            "bingham": None,
             "n_active": int((edot > edot_floor).sum()),
             "n_inverted": int((volume < 0).sum()),
         }
@@ -338,6 +340,37 @@ def build_damage_fields(
     else:
         tau_ratio = None
 
+    # ── Pi_2: Buck & Langerman's ACTUAL Bingham number ──────────────────────
+    #     Bu = tau_y / (mu_eff * gamma_dot)
+    # ⚠️ Why this is measured alongside Pi_1 rather than instead of it. Pi_1 is
+    # a ratio of STATES (local stress vs a reference stress), so it is small
+    # wherever the material is hot and slow -- i.e. in the WAKE, where material
+    # has already arrived and consolidated. Measured consequence: the first
+    # showcase detached only particles that were already moving at v_adv, far
+    # downstream (B.6z, B.6aa).
+    #
+    # ✅ Bu is a ratio of competing RATES. As gamma_dot -> 0 in the wake,
+    # Bu -> +inf, NOT zero -- so a LOW-Bu criterion cannot fire on quiescent
+    # material. The wake exclusion is built into the formula instead of being
+    # bolted on by a shear-layer gate.
+    #
+    # mu_eff * gamma_dot IS the local shear stress, so with tau_y supplied
+    #     Bu = tau_y / sigma_eq_shear
+    # and no separate viscosity is needed.
+    #
+    # ⚠️ tau_y does NOT come from the .mat tables, which hold a Norton fit and
+    # no yield stress. The caller must supply it; when it does not, this field
+    # is None rather than silently substituting the Norton stress (which would
+    # make Bu == 1 by construction, the same degeneracy as B.6z).
+    if tau_y is not None and sigma_eq is not None:
+        _sig_safe = np.maximum(np.abs(sigma_eq), sigeq_floor)
+        # Clipped above: in genuinely still material Bu is unbounded, and an
+        # inf would poison any running statistic. 1e3 is far above any
+        # threshold of interest (Buck's range is 0.1 .. 5.0).
+        bingham = np.clip(float(tau_y) / _sig_safe, 0.0, 1.0e3)
+    else:
+        bingham = None
+
     if verbose:
         print("  damage fields:")
         print(f"    incompressibility |tr D|/|D| (median) : {incompressibility:.3e}")
@@ -360,6 +393,8 @@ def build_damage_fields(
         "s1_ratio": s1_ratio.astype(np.float32),
         "tau_ratio": (None if tau_ratio is None
                       else tau_ratio.astype(np.float32)),
+        "bingham": (None if bingham is None
+                    else bingham.astype(np.float32)),
         "diagnostics": {
             "incompressibility": incompressibility,
             "n_active": int(active.sum()),

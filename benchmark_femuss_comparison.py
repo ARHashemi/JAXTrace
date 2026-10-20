@@ -849,6 +849,9 @@ def create_rk4_comparison(
             "damage_detachment=True needs damage_indicators=True: the "
             "detachment columns are appended after the indicator columns, "
             "and splitting them would renumber the existing npz layout.")
+    # Python bool at trace time: the Bingham path vanishes when the 6th slot
+    # is absent, so a run without tau_y compiles exactly as before.
+    use_bingham = bool(use_detach and n_damage_slots >= 6)
     if use_detach and n_damage_slots < 5:
         raise ValueError(
             "damage_detachment=True needs a 5-slot "
@@ -860,8 +863,11 @@ def create_rk4_comparison(
     # "where was it when it did", because a minimum carries no time or place.
     # Exporting the instantaneous value per step gives the trajectory of Pi_1
     # itself, which is what a threshold sweep needs to be judged against.
+    # Columns 8/9 carry the Bingham alternative (B.6aa option B), measured
+    # ALONGSIDE Pi_1 in the same run so the two can be compared on identical
+    # trajectories rather than across runs.
     n_damage_acc = (1 if not use_damage_models
-                    else ((8 if use_detach else 5) if use_indicators else 2))
+                    else ((10 if use_detach else 5) if use_indicators else 2))
     residence_thr = float(residence_edot_threshold)
     use_skip_step_on_tool = (levelset_mode == 'skip_step')
 
@@ -1617,6 +1623,11 @@ def create_rk4_comparison(
                 if use_detach:
                     divu_field = damage_scalars_gpu[3, _dti]
                     tauratio_field = damage_scalars_gpu[4, _dti]
+                    # ⚠️ Slot 5 is the Bingham field. It is ONLY present when
+                    # the caller supplied tau_y; the stack is built 5-slot
+                    # otherwise, so this read must be guarded at trace time.
+                    if use_bingham:
+                        bingham_field = damage_scalars_gpu[5, _dti]
             # Real-valued physical time at the start of this step.
             # The mesh provider ignores it (slice already picked above);
             # the analytic provider uses it when is_time_dependent=True.
@@ -1889,13 +1900,28 @@ def create_rk4_comparison(
                         if use_levelset_mask:
                             _ls_at_pos = _levelset_at(pos, elem_k1)
                             _tau_ok = _tau_ok & (_ls_at_pos >= 0.0)
+                        # ── FIX A: the SHEAR-LAYER GATE ───────────────
+                        # ⚠️ Without this, the running minimum latches
+                        # wherever Pi_1 is lowest -- and Pi_1 is lowest where
+                        # the material is hot and slow, i.e. in the WAKE.
+                        # Measured: the first showcase detached only particles
+                        # already moving at v_adv, 41+ mm downstream (B.6z).
+                        #
+                        # ✅ A particle resting in the wake is CONSOLIDATED,
+                        # not detached: it arrived, filled its place and
+                        # cooled. Detachment must mean the material FAILED TO
+                        # ARRIVE, which is a statement about material WHILE it
+                        # is being worked. So only sample Pi_1 inside the
+                        # shear layer, reusing the same `in_layer` test that
+                        # t_res already uses -- no new field, no new gather.
+                        _tau_ok = _tau_ok & (edot_k1 > residence_thr)
                         tau_k1 = jnp.where(
                             _tau_ok, tau_k1,
                             jnp.asarray(jnp.inf, dtype=tau_k1.dtype))
 
+                        _z = jnp.zeros_like(divu_k1)
                         inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1,
-                                         divu_k1, jnp.zeros_like(divu_k1),
-                                         jnp.zeros_like(divu_k1)])
+                                         divu_k1, _z, _z, _z, _z])
                 dmg_new = dmg + dt * inc
                 if use_detach:
                     # Column 6 is the running min of Pi_1. jnp.minimum against
@@ -1911,6 +1937,20 @@ def create_rk4_comparison(
                     # tell "no sample" from "a low value" -- writing 0 instead
                     # would be indistinguishable from genuine zero flow stress.
                     dmg_new = dmg_new.at[7].set(tau_k1)
+                    # ── Option B: Bingham, measured in parallel ───────────
+                    # Col 8 = running MIN of Bu, col 9 = instantaneous Bu.
+                    # ⚠️ Gated identically to Pi_1 so the comparison is like
+                    # for like: a difference between the two columns is then a
+                    # property of the FORMULA, not of where each was sampled.
+                    if use_bingham:
+                        bu_k1 = interpolate_scalar_single(
+                            pos, elem_k1, bingham_field)
+                        bu_k1 = jnp.where(
+                            _tau_ok, bu_k1,
+                            jnp.asarray(jnp.inf, dtype=bu_k1.dtype))
+                        dmg_new = dmg_new.at[8].set(
+                            jnp.minimum(dmg[8], bu_k1))
+                        dmg_new = dmg_new.at[9].set(bu_k1)
 
                 # Freeze BOTH accumulators on any step the position also skipped:
                 # otherwise damage accrues on steps that never physically happened.
