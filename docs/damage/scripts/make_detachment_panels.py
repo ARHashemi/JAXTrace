@@ -40,6 +40,10 @@ from matplotlib.colors import LogNorm, TwoSlopeNorm
 D2_X_CUT_MM = 7.4
 D2_X_MAX_MM = 29.328
 DZ_FRAC = 0.08          # drop the top slice: the shoulder-contact layer
+# ⚠️ Vertical exaggeration of the yz panels. 1.0 would be true proportion, but
+# the wake box is ~4.6x wider than deep and equal aspect wastes most of the
+# figure. 2.5 fills the frame while keeping the stir zone recognisable.
+ASPECT = 2.5
 
 
 def load(path: Path) -> dict:
@@ -57,6 +61,35 @@ def load(path: Path) -> dict:
         if k in z.files:
             out[k] = z[k].item() if z[k].ndim == 0 else z[k]
     return out
+
+
+def read_group(run_dir: Path, n_expect: int):
+    """Per-particle Group from the run's exported particles, or None.
+
+    ✅ Group is the SEEDING SLAB each particle came from, assigned by
+    run_tracking from the initial x. It is exported with the particles, so it
+    is read rather than reconstructed.
+    """
+    import glob
+    try:
+        import vtk
+        from vtk.util.numpy_support import vtk_to_numpy
+    except Exception:
+        return None
+    vtus = sorted(glob.glob(str(run_dir / "**" / "particles_step_*.vtu"),
+                            recursive=True))
+    if not vtus:
+        return None
+    r = vtk.vtkXMLUnstructuredGridReader()
+    r.SetFileName(vtus[-1])
+    r.Update()
+    arr = r.GetOutput().GetPointData().GetArray("Group")
+    if arr is None:
+        return None
+    g = vtk_to_numpy(arr)
+    # ⚠️ An export written at a different cadence can hold a different count;
+    # silently broadcasting a mismatched array would mis-colour every point.
+    return g if len(g) == n_expect else None
 
 
 def wake_mask(pos: np.ndarray, x_cut: float) -> np.ndarray:
@@ -100,11 +133,14 @@ def main() -> int:
     tau = d["dmg"][m, cols.index("tau_min")] if "tau_min" in cols else None
     lnJ = d["dmg"][m, cols.index("ln_J")] if "ln_J" in cols else None
 
-    # Seed group from the INITIAL x, the same definition run_tracking uses.
-    # ⚠️ Groups are by initial position, so they must come from a field that
-    # survives the run; positions here are FINAL, so we fall back to ordering
-    # by particle index, which for a grid seed is monotone in x.
-    gid = (np.arange(len(m))[m] * args.n_groups) // len(m)
+    # ⚠️ Group is assigned from the INITIAL x by run_tracking, and the npz
+    # stores only FINAL positions -- so it cannot be reconstructed here. An
+    # earlier version faked it by binning the particle INDEX, which is
+    # meaningful only for a grid seed and is simply wrong for the femuss seed
+    # cylA uses. Read the real array from the run's exported particles, as
+    # make_case_indicator_panels.py does, and say so plainly when it is absent.
+    gid = read_group(args.npz.parent, len(m))
+    gid = gid[m] if gid is not None else None
 
     base = load(args.baseline) if args.baseline else None
     n_panels = 4 + (1 if base is not None else 0)
@@ -116,9 +152,14 @@ def main() -> int:
 
     # ── 1 Group ─────────────────────────────────────────────────────────
     a = axes[0]
-    a.scatter(y, zz, c=gid, cmap="tab10", s=6, alpha=0.25, lw=0)
-    a.scatter(y, zz, c=gid, cmap="tab10", s=2, lw=0)
-    a.set_title(f"{args.tag} — seed group (detachment run)", fontsize=10)
+    if gid is not None:
+        a.scatter(y, zz, c=gid, cmap="tab10", s=6, alpha=0.25, lw=0)
+        a.scatter(y, zz, c=gid, cmap="tab10", s=2, lw=0)
+        a.set_title(f"{args.tag} — seed group (detachment run)", fontsize=10)
+    else:
+        a.scatter(y, zz, c="#78909c", s=2, lw=0)
+        a.set_title(f"{args.tag} — particles (⚠️ Group not in this run's "
+                    f"exports; not reconstructable from the npz)", fontsize=9)
 
     # ── 2 Detached flag ─────────────────────────────────────────────────
     a = axes[1]
@@ -127,9 +168,21 @@ def main() -> int:
         a.scatter(y[det], zz[det], c="#c0392b", s=10, lw=0,
                   label=f"detached ({det.sum():,})")
     crit = d.get("detach_pi1_crit", float("nan"))
-    a.set_title(f"DETACHED — $\\Pi_1<{crit:g}$, "
-                f"{100*det.mean():.3f} % of the wake box", fontsize=10)
-    a.legend(loc="upper right", fontsize=7, markerscale=2, framealpha=0.9)
+    if det.any():
+        a.set_title(f"DETACHED — $\\Pi_1<{crit:g}$, "
+                    f"{100*det.mean():.3f} % of the wake box", fontsize=10)
+        a.legend(loc="upper right", fontsize=7, markerscale=2, framealpha=0.9)
+    else:
+        # ✅ An empty panel must state WHY, or it reads as a broken figure.
+        a.set_title(f"DETACHED — NONE. $\\Pi_1^{{\\min}}$ never drops below "
+                    f"{crit:g}", fontsize=10)
+        a.text(0.5, 0.5,
+               f"no particle detached\n"
+               f"min $\\Pi_1$ in box = {np.nanmin(tau[np.isfinite(tau)]):.4f}"
+               if tau is not None and np.isfinite(tau).any() else
+               "no particle detached",
+               transform=a.transAxes, ha="center", va="center",
+               fontsize=11, color="#c0392b")
 
     # ── 3 Pi_1 min ──────────────────────────────────────────────────────
     a = axes[2]
@@ -152,10 +205,17 @@ def main() -> int:
         # ⚠️ Clip ln_J before exp: it reaches +-1800 on these runs, which
         # overflows to inf/0 and makes the panel unreadable. The clip is a
         # DISPLAY choice and is stated in the title.
+        # ⚠️ Scale on PERCENTILES, not min/max. det F has a heavy tail
+        # (|det F - 1| reaches 1e2 on a handful of particles), so a min/max
+        # range renders ~99 % of the field as flat white and hides the
+        # structure the panel exists to show.
+        _lo = float(np.percentile(detF, 2))
+        _hi = float(np.percentile(detF, 98))
+        _half = max(1.0 - _lo, _hi - 1.0, 1e-3)
         sc = a.scatter(y, zz, c=detF, s=2, lw=0, cmap="RdBu_r",
                        norm=TwoSlopeNorm(vcenter=1.0,
-                                         vmin=max(detF.min(), 1e-2),
-                                         vmax=min(detF.max(), 1e2)))
+                                         vmin=1.0 - _half,
+                                         vmax=1.0 + _half))
         fig.colorbar(sc, ax=a, pad=0.01).set_label(r"$\det F=e^{\ln J}$",
                                                    fontsize=8)
         a.set_title(r"$\det F$  (⚠️ $\ln J$ clipped to $\pm5$ for display; "
@@ -166,10 +226,15 @@ def main() -> int:
         a = axes[4]
         bpos = base["pos"]
         bm = wake_mask(bpos, x_cut)
-        bgid = (np.arange(len(bm))[bm] * args.n_groups) // len(bm)
-        a.scatter(bpos[bm, 1], bpos[bm, 2], c=bgid, cmap="tab10",
-                  s=6, alpha=0.25, lw=0)
-        a.scatter(bpos[bm, 1], bpos[bm, 2], c=bgid, cmap="tab10", s=2, lw=0)
+        bgid = read_group(args.baseline.parent, len(bm))
+        if bgid is not None:
+            bgid = bgid[bm]
+            a.scatter(bpos[bm, 1], bpos[bm, 2], c=bgid, cmap="tab10",
+                      s=6, alpha=0.25, lw=0)
+            a.scatter(bpos[bm, 1], bpos[bm, 2], c=bgid, cmap="tab10",
+                      s=2, lw=0)
+        else:
+            a.scatter(bpos[bm, 1], bpos[bm, 2], c="#78909c", s=2, lw=0)
         a.set_title(f"{args.tag} — BASELINE (no detachment), "
                     f"{bm.sum():,} in box", fontsize=10)
 
@@ -177,7 +242,12 @@ def main() -> int:
         # Observer at the origin looking +x, so +y is on the LEFT.
         a.set_xlim(yhi, ylo)
         a.set_ylim(zlo, zhi)
-        a.set_aspect("equal")
+        # ⚠️ NOT aspect='equal'. The wake box is ~46 mm wide by ~10 mm deep on
+        # cylA, so an equal aspect letterboxes each panel into a thin strip
+        # with most of the figure empty. A fixed moderate stretch keeps the
+        # cross-section readable; z is still linear and labelled, so no
+        # geometry is misrepresented -- only the drawn proportion.
+        a.set_aspect(ASPECT)
         a.set_ylabel("z [mm]", fontsize=8)
         a.tick_params(labelsize=7)
     axes[-1].set_xlabel("y [mm]   (+y left: observer at origin looking +x)",
