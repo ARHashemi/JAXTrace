@@ -1925,6 +1925,88 @@ value.** It is chosen so the mechanism is visible. ❌ D2 needs **0.7919** for
 the same 1 %, and that per-case difference is itself the argument for the
 dimensionless form (§B.6u). Both facts belong in the meeting with the figure.
 
+### B.6w ✅ What was wrong with the first SV attempt — it was a THEOREM, not a bug
+
+Diagnosed properly (`/tmp/diag_sv.py`, `/tmp/diag2.py`). Three candidate causes
+tested; the first two are **ruled out**:
+
+| check | result | verdict |
+|---|---|---|
+| normal matrix singular? | cond(A) median **52**, p99 1.8e+05 | ❌ not a conditioning problem |
+| the 4 $g_s$ vectors rank-deficient? | rank **3** on 4000/4000 elements | ❌ not a rank problem |
+| regularisation dominating? | unregularised solve gives the **same** answer | ❌ not my `lam` |
+
+✅ **The actual cause, and it is exact:**
+
+```
+sum_s V_s * g_s        = 2.5e-16   (== 0)
+||grad of the objective at u_p1||  = 2.5e-15   (== 0)
+```
+
+1. ⚠️ **$\sum_s V_s\,g_s = 0$ identically.** The volume-weighted total
+   divergence is **independent of $u_{vc}$** — the divergence theorem again: an
+   *interior* degree of freedom cannot change the net flux through the parent
+   element's boundary.
+2. ⚠️ **The P1 centroid value is ALREADY the least-squares minimiser.** The
+   objective is stationary at $u_{p1}$ by construction, so the "optimal"
+   $u_{vc}$ *is* the P1 value and the projection is the identity.
+
+❌ **So the 1.00× was a theorem, not a bug.** Adding one centroid DOF to a P1
+velocity cannot reduce divergence in a least-squares sense. ✅ **And this
+vindicates the divergence-theorem hypothesis I raised and then wrongly
+retracted in §B.6q** — my retraction test used inconsistent sub-tet volumes.
+
+#### ⚠️ Why it could never have worked — what real SV requires
+
+From the literature: Scott–Vogelius is $P_k$ velocity / $P_{k-1}$
+**discontinuous** pressure, and on an Alfeld split it is inf-sup stable for
+**$k \ge 3$ in three dimensions** (k ≥ 2 only in 2D). ❌ **I attempted $k=1$
+with one extra node.** That is not an under-resolved SV — it is **not SV at
+all**, and the failure is structural rather than numerical.
+
+Real 3D SV needs **P3 velocity on the Alfeld split**: 4 vertices + 2 per edge
++ 1 per face + interior, per sub-tet. ⚠️ That is a genuine FEM assembly with a
+global saddle-point solve, far beyond the per-element closed form I tried.
+
+#### ✅ A BETTER OPTION, from the literature: RTN₀ projection for particle tracking
+
+**Selzer & Cirpka (2020), *Computational Geosciences***, solves almost exactly
+our problem: a projection mapping a **non-conforming, element-wise velocity
+field onto a conforming field in lowest-order Raviart–Thomas–Nédélec (RTN₀)
+space**, specifically **for particle tracking on triangles and tetrahedra**.
+
+✅ **Why this fits us better than SV:**
+
+| | Scott–Vogelius | **RTN₀ projection** |
+|---|---|---|
+| order needed in 3D | ❌ P3 on Alfeld split | ✅ **lowest order** |
+| what it guarantees | pointwise div-free | ✅ **zero divergence element-wise + continuous normal flux** |
+| built for | solving Stokes | ✅ **particle tracking**, explicitly |
+| solve | global saddle point | ⚠️ minimisation vs the FEM gradients, element-wise mass conservation |
+| our mesh | tets ✅ | tets ✅ |
+| bonus | — | ✅ **semi-analytical trajectories** per element |
+
+⚠️ **The honest caveat:** RTN₀ gives a velocity that is div-free *in the RTN₀
+sense* — constant normal flux per face, divergence zero per element. It is
+lower order than our P1 field in the tangential components, so **it trades
+some velocity accuracy for exact mass conservation.** ✅ For *our* purpose that
+trade is the right way round: we need $\det F \equiv 1$, and §B.6t showed the
+density holes are the primary observable being corrupted.
+
+#### ✅ Revised ranking
+
+| rank | option | why |
+|---|---|---|
+| **1** | **RTN₀ projection (Selzer & Cirpka 2020)** | lowest order, built for particle tracking, element-wise mass conservation, tets |
+| 2 | Scott–Vogelius, **P3** on the Alfeld split | exact pointwise div-free, but a real FEM solve and 3D needs k≥3 |
+| 3 | Constrained LSQ | ⚠️ measured **1.57×** (§B.6p) — diagnostic only |
+| ❌ | one centroid DOF | **proven identity, 1.00×** |
+
+✅ **Next step: read Selzer & Cirpka in full** before writing anything. ⚠️ The
+open question their abstract does not answer is whether their projection
+assumes a *Darcy* velocity (their application is hydrogeology, where the flux
+is the primary unknown) or works on a general FEM velocity like ours.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
