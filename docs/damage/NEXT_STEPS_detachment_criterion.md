@@ -2007,6 +2007,91 @@ open question their abstract does not answer is whether their projection
 assumes a *Darcy* velocity (their application is hydrogeology, where the flux
 is the primary unknown) or works on a general FEM velocity like ours.
 
+### B.6x ✅ Selzer & Cirpka READ — it fits, with one adaptation and one real cost
+
+Full text read (`s10596-020-09969-y.pdf`). ✅ **The open question from §B.6w is
+answered favourably.**
+
+#### ✅ It targets our exact defect, in our exact words
+
+Their abstract: *"Accurate particle tracking requires element-wise
+mass-conservative, conforming velocity fields. **This condition is not
+fulfilled by the standard linear Galerkin finite element method (FEM)**."*
+
+✅ That is precisely §B.6i and §B.6t — our P1 field is non-conforming, and the
+consequence is the density holes. They built the fix **for particle tracking**,
+on **triangles and tetrahedra**, from a **P1 Galerkin** input. Same
+discretisation, same application, same defect.
+
+#### The method, as actually formulated
+
+Unknowns are the **normal fluxes on faces** $q_{F_m}^\perp$. Minimise the
+squared difference between the P1 gradients at element centroids and those
+implied by the RTN₀ field (their Eq. 22), **subject to element-wise mass
+conservation** (Eq. 24), via **Lagrange multipliers** (Eq. 26) — one multiplier
+per element. The result is a sparse **saddle-point system**.
+
+✅ **Plus a bonus we had not counted on:** §2.4 gives **semi-analytical
+element-wise trajectories** — exit point from entry point by hyperplane
+intersection, for divergent *and* non-divergent flow in 3D. ⚠️ That is a
+different integrator from our RK4 and is not a drop-in, but it is the natural
+companion to an RTN₀ field and would make $\det F$ exact by construction rather
+than approximately.
+
+#### ⚠️ The one adaptation needed
+
+Their objective minimises the mismatch in **hydraulic gradients**, with
+$\mathbf{N}$ built from $\mathbf{K}^{-1}_{E_i}\psi_{F_m}(x_c)$ — the inverse
+**hydraulic conductivity** tensor (their Eq. 23). ⚠️ **We have no $K$.** Our
+velocity is a computed FSW flow field, not a Darcy flux driven by a head
+gradient.
+
+✅ **But the adaptation is small and obvious**: set $K = I$, which reduces their
+objective to *"find the RTN₀ field whose centroid velocity is closest to the P1
+centroid velocity, subject to element-wise mass conservation"*. ✅ That is
+exactly the projection we want, and it is their formulation with the physics
+constant removed, not a new method.
+
+⚠️ **What we lose by doing that:** their weighting makes the projection
+physically optimal for heterogeneous media. With $K=I$ it becomes a plain
+least-squares projection. ✅ For a single-material FSW workpiece that is the
+right choice anyway.
+
+#### ⚠️ The real cost, sized on our meshes
+
+| | cylA | **D2** |
+|---|---:|---:|
+| elements | 3,050,196 | 10,807,677 |
+| unknowns (face fluxes) | ~6.1 M | ~21.6 M |
+| constraints (elements) | 3.05 M | 10.8 M |
+| saddle-point system | ~9.2 M² | **~32.4 M²** |
+| nonzeros | ~24 M | ~86 M (**~1 GB**) |
+
+✅ **Memory is fine** — ~1 GB of nonzeros is comparable to the octree we already
+build and cache. ⚠️ **The cost is the SOLVE**: a global sparse saddle-point
+system **per snapshot**, and D2 has **166 snapshots**. This is not the
+per-element closed form that failed in §B.6w; it is a real linear solve needing
+a suitable preconditioner.
+
+⚠️ **And it changes the answer to the prebuilt-vs-in-step question.** §B.6q
+concluded "prebuild" on the basis of a 1.63 µs/element closed form. ✅ A global
+solve makes prebuilding **mandatory**, not merely preferable — it cannot
+possibly run inside a step. ✅ Storage is unchanged and small: one scalar flux
+per face, ~21.6 M floats = **86 MB/snapshot** on D2, **14 GB** for all 166,
+which streams exactly like the velocity stack.
+
+#### ✅ Recommended plan
+
+1. ✅ **Prove it on a sub-mesh first**, as §B.6p recommended and as the failed
+   attempt should have done: assemble the $K=I$ saddle-point system on ~10⁵
+   contiguous elements of one cylA snapshot, solve it directly, and measure the
+   resulting pointwise divergence. ⚠️ **If it does not reach ~1e-10 relative —
+   the constraint is enforced exactly, so it should — the implementation is
+   wrong.** That is a much sharper pass/fail than the 1e-6 I guessed before.
+2. Then the boundary conditions, which remain unbudgeted (§B.6p) and are the
+   part most likely to be underestimated.
+3. Then a preconditioner and the full-mesh solve.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
