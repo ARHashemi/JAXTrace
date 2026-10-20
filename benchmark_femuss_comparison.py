@@ -1329,6 +1329,31 @@ def create_rk4_comparison(
 
         return jnp.where(valid, vel, jnp.zeros(3, dtype=config.FLOAT_DTYPE_JNP))
 
+    # ---- Raw barycentric level-set value, UNMASKED ----
+    # ⚠️ Exists because interpolate_scalar_single masks its result by the level
+    # set, so it cannot be used to TEST the level set: inside the tool it
+    # returns 0.0, and `0.0 >= 0.0` passes. The detachment guard needs the
+    # genuine sign, so this samples it without the mask.
+    def _levelset_at(pos, elem_id):
+        valid = (elem_id >= 0) & (elem_id < len(connectivity))
+        nodes_idx = connectivity[elem_id]
+        ls = levelset_gpu[nodes_idx]
+        if use_direct_inverse:
+            bary = M_inv_gpu[elem_id] @ (pos - p0_gpu[elem_id])
+            b1, b2, b3 = bary[0], bary[1], bary[2]
+        else:
+            nd = node_positions[nodes_idx]
+            v0, v1, v2 = nd[1] - nd[0], nd[2] - nd[0], nd[3] - nd[0]
+            M = jnp.stack([v0, v1, v2], axis=1)
+            bary = jnp.linalg.solve(
+                M + jnp.eye(3, dtype=M.dtype) * 1e-30, pos - nd[0])
+            b1, b2, b3 = bary[0], bary[1], bary[2]
+        b0 = 1.0 - b1 - b2 - b3
+        val = b0*ls[0] + b1*ls[1] + b2*ls[2] + b3*ls[3]
+        # ⚠️ An invalid element must read as INSIDE the tool (negative), so the
+        # caller rejects it rather than accepting a value read from element 0.
+        return jnp.where(valid, val, jnp.asarray(-1.0, dtype=val.dtype))
+
     # ---- Divergence of the ACTUAL velocity reconstruction ----
     # ⚠️ WHY THIS EXISTS, and why it is not a nodal scalar like the rest.
     #
@@ -1824,6 +1849,43 @@ def create_rk4_comparison(
                         # folded in separately below, after the dt scaling.
                         tau_k1 = interpolate_scalar_single(
                             pos, elem_k1, tauratio_field)
+                        # ⚠️ interpolate_scalar_single returns 0.0 for an
+                        # INVALID element and for a point inside the tool
+                        # (level-set mask). Both mean "no material here", NOT
+                        # "zero flow stress" -- but a running MINIMUM cannot
+                        # tell them apart and latches 0 permanently.
+                        #
+                        # Measured consequence on D2: 100 % of the 3,190
+                        # escaped particles reported tau_min == 0, and the
+                        # hard-zero spike that the detachment threshold selects
+                        # was therefore part artefact. A particle that leaves
+                        # the domain or passes through the tool region would be
+                        # classified as detached for the wrong reason.
+                        #
+                        # ✅ So feed the minimum +inf on those steps: it then
+                        # ignores them instead of latching, exactly as the
+                        # +inf initialisation already does for step 0.
+                        # ⚠️ Detect "no material" the SAME way the sampler
+                        # does, not with a stricter test of my own: the sampler
+                        # masks on the BARYCENTRIC level-set value at the
+                        # point, so a min over the 4 nodes would exclude
+                        # legitimate points in boundary elements. Sampling the
+                        # level set with the same interpolator reproduces its
+                        # test exactly and costs one more 4-float gather.
+                        # ⚠️ Do NOT sample the level set through
+                        # interpolate_scalar_single: that function MASKS its
+                        # own output by the level set, returning 0.0 inside the
+                        # tool -- and `0.0 >= 0.0` is True, so the guard would
+                        # silently pass exactly the points it must reject.
+                        # Compute the barycentric level-set value directly,
+                        # reusing the k1 barycentrics the velocity stage has.
+                        _tau_ok = (elem_k1 >= 0) & (elem_k1 < len(connectivity))
+                        if use_levelset_mask:
+                            _ls_at_pos = _levelset_at(pos, elem_k1)
+                            _tau_ok = _tau_ok & (_ls_at_pos >= 0.0)
+                        tau_k1 = jnp.where(
+                            _tau_ok, tau_k1,
+                            jnp.asarray(jnp.inf, dtype=tau_k1.dtype))
 
                         inc = jnp.stack([dlogphi, dC, in_layer, dw, edot_k1,
                                          divu_k1, jnp.zeros_like(divu_k1)])
