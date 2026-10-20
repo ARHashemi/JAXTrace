@@ -177,7 +177,10 @@ def main() -> int:
     lam = 1.0e-6 * np.maximum(w_tot, 1e-30)
     A += lam[:, None, None] * np.eye(3)[None]
     b += lam[:, None] * u_p1_vc
-    u_vc = np.linalg.solve(A, b)                      # (m, 3)
+    # ⚠️ np.linalg.solve batches as (m,3,3) x (m,3,1) -> (m,3,1). Passing
+    # (m,3) makes it read the LAST axis as the batch and fail with a core
+    # dimension mismatch.
+    u_vc = np.linalg.solve(A, b[:, :, None])[:, :, 0]  # (m, 3)
     t_solve = time.time() - t1
     print(f"     closed-form 3x3 per element: {t_solve:.2f}s for {m:,} elements")
     print(f"     = {1e6*t_solve/m:.3f} us/element")
