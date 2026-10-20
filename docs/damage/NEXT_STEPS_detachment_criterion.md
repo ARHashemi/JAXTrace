@@ -1451,6 +1451,125 @@ them.
    degenerate (§B.6m: thresholds 0.1–0.4 all select the same 117 particles), so
    this needs the `tau_min == 0` population explained first.
 
+### B.6p ✅ Divergence-free methods compared — on OUR meshes, with measurements
+
+#### The mesh facts that constrain every option
+
+Verified on cylA snapshot 159 (same structure on every family):
+
+| | |
+|---|---|
+| cells | **100 % tetrahedra** (VTK type 10), no mixed elements |
+| velocity | **P1 nodal** (`Displacement`, 3 comps at nodes) |
+| pressure | **P1 nodal** (`Pressure`, 1 comp at nodes) — ⚠️ so the FOM is P1/P1 |
+| extra | `Temperature`, `LEVEL` nodal; `Stress`, `Strain` per cell |
+| boundary | ⚠️ **no boundary-node extraction exists in the codebase** |
+| Alfeld split | ✅ **already built** by `build_alfeld_geometry` for HCT |
+
+⚠️ **Two of these dominate the comparison.** Pure tets make every tet-based
+method applicable. ❌ But no boundary-node set exists, and **every global
+projection needs boundary conditions** — that is unbudgeted work in options 1
+and 3 below.
+
+#### ✅ Option A — Scott–Vogelius. Your first choice, and I agree.
+
+**Why it fits us specifically:** SV is $P_k$ velocity / $P_{k-1}$ discontinuous
+pressure on a **barycentrically refined (Alfeld) mesh**, where it is
+**pointwise divergence-free**. ✅ **We already build exactly that split** — HCT's
+`build_alfeld_geometry` computes the parent centroid, sub-tet vertices, edge
+midpoints and sub-tet volumes per element. The geometric prerequisite is done
+and cached.
+
+| | |
+|---|---|
+| accuracy on our meshes | ✅ **pointwise div-free**, the only option that is |
+| effect on det F | ✅ should drive `ln_J` to integration error alone |
+| speed | ⚠️ one global solve per snapshot; ~10.8 M elements on D2 → **the dominant cost** |
+| effort | ⚠️ **large**: assemble a Stokes-like projection, pick an iterative solver + preconditioner, extract boundaries |
+| modifications | new module; HCT's Alfeld geometry reused; velocity representation changes to P2-on-sub-tets |
+| risk | ⚠️ SV needs $k\ge 2$ for stability (P2/P1-disc is the usual choice). Our data is P1, so **we would be inventing the P2 field**, not projecting one. |
+
+⚠️ **The honest caveat:** SV gives a div-free field *in its own space*. Feeding
+it P1 data means solving a projection problem whose answer is only as good as
+the P1 input — it cannot recover information the FOM never computed. ✅ It would
+still remove the *discretisation* divergence, which is the 48 % problem.
+
+#### ⚠️ Option B — Constrained least-squares. Measured: 1.57×, and that is not enough.
+
+Your second choice, and I tested it rather than estimating. The natural form is
+to constrain the recovered **nodal gradient** to be trace-free.
+
+✅ **The constraint itself is trivial and nearly free:** project each nodal
+gradient onto the trace-free subspace, $G_a \leftarrow G_a - \tfrac{1}{3}\mathrm{tr}(G_a)I$.
+Measured on cylA: `|tr Gc|` max **3.1e-13** (exactly satisfied), and the
+gradient moves by only **7.9e-04** relative at the median — a small correction,
+so the fit stays faithful to the data.
+
+❌ **But it cannot fix the divergence, and here is the measurement.** The
+`vertex_taylor` interpolant's divergence splits into two terms:
+
+$$\nabla\!\cdot u = \underbrace{\sum_a \nabla N_a\cdot(v_a + G_a(x-x_a))}_{\text{TERM 1, from VELOCITIES}} + \underbrace{\sum_a N_a\,\mathrm{tr}(G_a)}_{\text{TERM 2, from GRADIENTS}}$$
+
+At element centroids on cylA (400 k sample):
+
+| term | median | p99 |
+|---|---:|---:|
+| TERM 1 (velocities) | **1.173** | 150.9 |
+| TERM 2 (gradients) | 0.148 | 47.1 |
+| total | 1.836 | — |
+
+⚠️ **TERM 2 is only 13.6 % of TERM 1.** Constraining the gradient zeroes TERM 2
+and leaves TERM 1 **untouched**, giving a reduction of **1.57×** — median
+1.836 → 1.173.
+
+❌ **1.57× does not close a 48 % gap.** Scaling arm 2's fraction-over-1e-2 by
+that factor lands near 30 %, i.e. roughly where HCT already is (33 %), which
+also failed the gate. ⚠️ **And for raw P1 the method does not apply at all**:
+there is no recovered gradient in that path, so there is nothing to constrain.
+
+✅ **Verdict: cheap (hours, ~20 lines in `gradient_recovery`), zero risk, and
+genuinely useful as a diagnostic — but insufficient as the fix.** Worth doing
+only if combined with something that attacks TERM 1.
+
+#### ⚠️ Option C — Helmholtz/Hodge projection
+
+| | |
+|---|---|
+| accuracy | ⚠️ div-free **in the discrete norm of the Laplacian used** — not pointwise. That detail decides whether it helps us, and it is exactly the P1 weak-sense property we already have. |
+| effect | ⚠️ **uncertain**: it enforces the same weak constraint the FOM already satisfied. It may barely move the pointwise error. |
+| speed | one Poisson solve per snapshot — cheaper than SV, still global |
+| effort | medium; needs boundary conditions ❌ which we do not have |
+| risk | ⚠️ high chance of measuring ~1× after real work |
+
+#### ❌ Option D — Raviart–Thomas / BDM
+
+Div-free by construction in H(div), structurally the correct answer — ❌ but it
+requires **changing the FOM's velocity discretisation**, not post-processing it.
+Out of scope: we do not own the solver.
+
+#### ❌ Option E — Stream function / vector potential
+
+$u=\nabla\times\psi$ is identically div-free. ⚠️ In 3D $\psi$ is a vector field,
+recovering it from $u$ is itself an ill-posed global solve, and boundary
+handling is awkward. Worse effort-to-benefit than SV with no accuracy advantage.
+
+#### ✅ Recommended order — and one cheap test first
+
+| rank | option | gain | effort | verdict |
+|---|---|---|---|---|
+| **1** | **Scott–Vogelius** | ✅ pointwise div-free | ⚠️ large | the only option that attacks the cause; Alfeld split already built |
+| 2 | Constrained LSQ | ⚠️ **1.57× measured** | ✅ hours | do it for the diagnostic, not as the fix |
+| 3 | Helmholtz/Hodge | ⚠️ uncertain | medium | likely ~1× — same weak constraint we already have |
+| ❌ | RT/BDM | ✅ exact | ❌ needs FOM change | out of scope |
+| ❌ | Stream function | ✅ exact | ❌ ill-posed in 3D | dominated by SV |
+
+✅ **Before building SV, run one cheap test (~1 day):** take ONE cylA snapshot,
+assemble the SV projection on a **small sub-mesh** (say 10⁵ elements), and
+measure the resulting pointwise divergence. ⚠️ If it does not reach ~1e-6
+relative on a sub-mesh, it will not on 10.8 M elements either, and we learn that
+for a day instead of weeks. ✅ This also surfaces the boundary-condition work
+early, which is the part most likely to be underestimated.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
