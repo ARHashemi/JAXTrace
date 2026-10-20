@@ -160,7 +160,13 @@ def main() -> int:
         ok = np.abs(detJ) > 1e-30
         Jinv = np.zeros_like(Jm)
         Jinv[ok] = np.linalg.inv(Jm[ok])
-        gpv = np.transpose(Jinv, (0, 2, 1))           # (m,3,3): g for p1,p2,p3
+        # ⚠️ NO TRANSPOSE. With J = [e1 e2 e3] as COLUMNS, grad_x N_i is the
+        # i-th ROW of inv(J), used as-is. tet_shape_gradients says so
+        # explicitly: "transposing here is a subtle and silent error (it only
+        # shows up on skewed elements, and it breaks incompressibility)".
+        # I transposed it, and the sanity test caught it: a linear div-free
+        # field gave |div| = 1.3e+04 instead of ~0.
+        gpv = Jinv                                    # (m,3,3): row i = grad N_{p_i}
         gvc = -gpv.sum(axis=1)                        # (m,3): grad N_vc
         # residual from the three parent-vertex contributions
         r = np.einsum('mai,mai->m', gpv, un[:, pv, :])
@@ -198,7 +204,7 @@ def main() -> int:
         Jm = np.stack([e1, e2, e3], axis=2)
         Jinv = np.zeros_like(Jm)
         Jinv[ok] = np.linalg.inv(Jm[ok])
-        gpv = np.transpose(Jinv, (0, 2, 1))
+        gpv = Jinv                                    # rows, NOT transposed
         gvc = -gpv.sum(axis=1)
         d = (np.einsum('mai,mai->m', gpv, un[:, pv, :])
              + np.einsum('mi,mi->m', gvc, u_vc))
