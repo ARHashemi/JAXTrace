@@ -2241,6 +2241,85 @@ the same local state**. Candidates, in order:
 ❌ **Until one of these is in place, no threshold on the current Π₁ means
 anything**, and the §B.6u threshold curves describe a deceleration detector.
 
+### B.6aa ⚠️ T_ref fixes the BUG but not the PHYSICS — the wake problem is structural
+
+#### What the material tables actually say
+
+Read from `cylA.mat` / `A2.mat` (identical tables):
+
+| | range |
+|---|---|
+| $\mu_0(T)$ | 1.131e8 → 6.505e6 Pa·sᵐ over 25 → 675 °C — a **17.4×** lever |
+| $m(T)$ | **0.0233 → 0.197** — even smaller than assumed in §B.6z |
+
+⚠️ **The measured temperature field peaks at 509 °C** (p50 458, p1 298), well
+below the AA6xxx solidus (~582 °C). ❌ **So solidus is NOT a usable $T_{ref}$**:
+every node sits on the same side of it, giving no discrimination at all.
+
+#### ✅ What $T_{ref}$ buys — and the limit I did not expect
+
+With $T_{ref}$ fixed, $\mu_0(T_{loc})$ stops cancelling and the spread widens
+from **2.8× to 53×** across the realistic $(T,\dot\varepsilon)$ box. ✅ Real
+improvement, and it fixes the §B.6z cancellation.
+
+❌ **But $T_{ref}$ is a CONSTANT divisor, so it cannot reorder particles.**
+Verified: for $T_{ref}\in\{450, 509, 582\}$ the Π₁ *ranking* is byte-identical;
+only the scale moves. ⚠️ **So Π₁-with-$T_{ref}$ ranks particles exactly as
+$\sigma_{eq}$ alone does**, and the criterion reduces to *"detach where
+$\sigma_{eq}$ is low"*.
+
+Over the realistic range $\sigma_{eq}$ spans only **8.4×** — 2.7× from
+temperature, 3.8× from strain rate. ⚠️ **And low $\sigma_{eq}$ means hot AND
+slow, which is the WAKE.** ❌ **The same failure mode returns**, with a wider
+numerical range but the same spatial bias toward downstream particles.
+
+#### ❌ The structural problem, stated plainly
+
+⚠️ **Any criterion of the form $f(\text{local state}) < \text{threshold}$ will
+fire in the wake**, because the wake is where material is hot and still.
+
+❌ **But a particle resting in the wake is not detached — it is
+CONSOLIDATED.** It arrived, filled its place and cooled. ✅ **Detachment must
+mean the material FAILED TO ARRIVE**, which is a statement about the material
+*while it is being dragged around the tool*, not after it has settled.
+
+#### ✅ Two fixes, and they compose
+
+**A — gate the criterion on being in the shear layer.** ✅ We already compute
+`in_layer = (edot > residence_edot_threshold)` for $t_{res}$, so the change is:
+
+```
+detach when  (Pi_1 < Pi_1_crit)  AND  in_layer
+```
+
+✅ One line, reuses an existing quantity, and makes "failed to arrive"
+literal — only material currently being worked can fail to be carried.
+⚠️ It introduces a second free parameter (`residence_edot_threshold`), but that
+one is already swept and reported.
+
+**B — use a ratio of competing RATES, not of states.** ✅ Buck & Langerman's
+actual Bingham number is
+
+$$Bu = \frac{\tau_y}{\mu\,\dot\gamma}$$
+
+⚠️ **As $\dot\gamma \to 0$ in the wake, $Bu \to \infty$, not zero.** ✅ **So a
+low-$Bu$ criterion CANNOT fire in a quiescent wake** — the wake exclusion is
+built into the formula rather than bolted on. ❌ The obstacle is $\tau_y$: the
+`.mat` tables give a Norton fit, not a yield stress, so $\tau_y$ must come from
+elsewhere (a literature value for AA6xxx at temperature, or the Norton stress
+at a *fixed* reference rate — which reintroduces an arbitrary constant).
+
+#### ✅ Recommendation
+
+1. ✅ **Do A first**: gate on `in_layer`, and keep $T_{ref}$ as well since it
+   fixes a genuine cancellation bug. Together these cost one line each and
+   directly target the measured failure.
+2. ⚠️ **Then evaluate B properly** — it is the physically correct form and the
+   one Buck actually derives, but it needs a defensible $\tau_y$ and that is a
+   literature question, not a coding one.
+3. ❌ **Do not re-run the showcase until A is in**, or it will reproduce the
+   same downstream band.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
