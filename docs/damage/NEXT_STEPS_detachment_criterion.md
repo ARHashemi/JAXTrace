@@ -2320,6 +2320,55 @@ at a *fixed* reference rate — which reintroduces an arbitrary constant).
 3. ❌ **Do not re-run the showcase until A is in**, or it will reproduce the
    same downstream band.
 
+### B.6ab ✅ A + T_ref implemented, Bingham measured in parallel — smoke test is decisive
+
+60-step cylA smoke test, `--damage-tau-ref-temp 500 --damage-tau-y 2.0e7`:
+
+```
+slots : [edot, eta, s1_ratio, div_u, tau_ratio, bingham]
+Pi_1 min : median 2.28   min 2.141  max 2.412   (67/293,455 finite)
+Bu   min : median 0.2459 min 0.2051 max 0.2651  (67/293,455 finite)
+rank corr(Pi_1min, Bu_min) : +0.3442
+```
+
+**1. ✅ The shear-layer gate works, decisively.** Only **67 of 293,455**
+particles have a finite Π₁ after 60 steps — previously **all** of them did.
+✅ The other 293,388 never entered the shear layer and are now correctly
+*excluded* rather than ranked by how far downstream they had drifted. ⚠️ That
+single change removes the §B.6z failure mode at its root.
+
+**2. ✅ T_ref changed the scale as predicted.** Π₁ median **2.28**, against
+0.90 before. With $T_{ref}=500$ °C fixed, $\mu_0(T_{loc})$ no longer cancels,
+so particles in the *hot* shear layer read above 1 instead of being compressed
+into the 0.80–0.92 band.
+
+**3. ⚠️ rank corr(Π₁, Bu) = +0.344 — NOT ≈ 1.** ✅ **The two criteria rank
+particles differently**, so option B is not a relabelling of option A. The
+choice between them is a genuine physics decision rather than a cosmetic one,
+which is exactly what the literature search is for.
+
+⚠️ **The τ_y = 2.0e7 Pa used here is a PLACEHOLDER**, chosen as the same order
+as the Norton flow stress at 457 °C / 1 s⁻¹ (2.4e7 Pa) so Bu lands near unity
+and the column is exercised. ❌ **It is not a material value and no Bu result
+may be quoted until the literature search returns one.** Since Bu scales
+linearly in τ_y, a corrected value rescales the whole column — the *ranking*
+reported above is unaffected, which is why the rank correlation is already
+meaningful.
+
+#### Deep search launched
+
+Undermind, for a defensible τ_y for AA6061/AA6063 at 350–510 °C: measured
+shear yield stress vs temperature; what τ_y other Bingham/Herschel–Bulkley FSW
+models actually use and where it came from; ⚠️ **whether a Bingham yield stress
+is even well posed for AA6xxx near 0.9 T_solidus**, or whether the literature
+treats it as a numerical regularisation; and the order of magnitude to expect
+against our 2.4e7 Pa Norton stress.
+
+Full cylA run (2684 steps) launched to produce the real distributions. ⚠️ **No
+`--detach` on this run deliberately** — it *measures* so the threshold can be
+chosen from the data. Detaching at a guessed threshold first would repeat the
+§B.6z mistake of picking a number before knowing what it selects.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
