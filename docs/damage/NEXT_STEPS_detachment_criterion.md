@@ -2092,6 +2092,66 @@ which streams exactly like the velocity stack.
    part most likely to be underestimated.
 3. Then a preconditioner and the full-mesh solve.
 
+### B.6y ✅ SHOWCASE RESULT — the mechanism fires, and it fires in the right place
+
+cylA, 2684 steps, Π₁_crit = 0.8077, mode `v_adv`, exit 0 in 1557 s.
+
+```
+detached at end : 2,950 / 293,455  (1.005 %)
+Pi_1 min        : median 0.8216   min 0.8016   max 0.9177
+```
+
+✅ **1.005 % against a targeted 1st percentile** — the threshold does exactly
+what the explorer predicted from the previous run's archive, confirming the
+sweep-from-npz approach works.
+
+#### ✅ Three checks that make this a result rather than a picture
+
+**1. The override is surgical.** Displacement against the no-detachment
+baseline:
+
+| | median displacement |
+|---|---:|
+| detached particles | **0.026 mm** |
+| attached particles | **0.000000 mm** |
+| ⚠️ max among attached | **0.000000 mm** |
+
+✅ **Attached trajectories are bit-identical to the baseline.** The mechanism
+touches only the particles it flags — no side effects, and the comparison
+against the previous run is exact rather than approximate.
+
+**2. The detached population is spatially coherent, not scattered.** Final
+positions:
+
+| axis | detached range | full domain |
+|---|---|---|
+| x | **41.1 … 50.4 mm** | −9.0 … 50.4 |
+| y | −8.5 … 6.5 mm | −23.0 … 23.0 |
+| z | **−2.4 … −0.1 mm** | −10.0 … 0.0 |
+
+✅ They form a **compact band in the upper 2.4 mm, downstream, offset toward
+the advancing side** — not a random 1 % of the mesh. ⚠️ The z range is the
+telling one: detachment occurs **near the top surface**, which is where FSW
+voids and surface galling actually appear.
+
+**3. The figure separates the two populations cleanly** (panel 2, red against
+grey), and panels 3–4 show Π₁'s structure and the det F problem in the same
+frame.
+
+#### ⚠️ What must be said alongside it
+
+- ❌ **0.8077 is the 1st percentile, chosen to make the mechanism visible — not
+  derived.** D2 needs 0.7919 for the same fraction (§B.6u).
+- ❌ **The 1.005 % is not a void fraction.** It is "the fraction we asked for".
+- ⚠️ **det F still fails its gate** (§B.6o) and the field still produces density
+  holes without any detachment (§B.6t), so the *quantitative* void claim
+  remains blocked until the RTN₀ projection (§B.6x) lands.
+- ✅ **What IS demonstrated:** the full pipeline — criterion, per-particle
+  state, altered kinematics, export, and a reproducible threshold sweep —
+  works end to end on a production case.
+
+Figure: `docs/damage/figs_detach/fig_detach_cylA_crit0.8077.png`.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
