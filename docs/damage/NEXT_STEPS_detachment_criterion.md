@@ -1382,6 +1382,75 @@ divergence work is free, and the only easy gain is cutting export cadence.
 ⚠️ I should not have implied the transfer was the bottleneck before checking
 GPU utilisation — it is not.
 
+### B.6o ❌ DOES HCT FIX det F? NO. The answer, finally measured correctly.
+
+Three arms on cylA, 2684 steps, 293,455 particles, 0 escaped, all exit 0.
+
+| arm | reconstruction | divergence | median \|det F−1\| | p99 | frac > 1e-2 | Stage 7 |
+|---|---|---|---:|---:|---:|---:|
+| 1 | raw P1 | `field` | **1.87e-03** | 2.76e-01 | **12.67 %** | 1577.9 s |
+| 2 | raw P1 | `analytic` | 9.51e-03 | 9.46e-01 | **48.45 %** | 1561.1 s |
+| 3 | **hct_cubic** | `analytic` | 5.59e-03 | 1.99e+00 | **33.42 %** | 1564.5 s |
+
+❌ **The gate fails in all three.** HCT does not rescue it.
+
+#### ✅ But the comparison that matters is arm 3 vs arm 2, not arm 3 vs arm 1
+
+Arms 2 and 3 measure **the same quantity** — the divergence of the interpolant
+actually moving the particles. On that fair comparison HCT **does** help:
+
+- median: 9.51e-03 → **5.59e-03** (1.7× better)
+- fraction over 1e-2: 48.45 % → **33.42 %** (1.45× better)
+
+⚠️ **Arm 1 is not comparable to either.** Its `field` divergence is the P1
+element-wise `tr(D)` **scattered to nodes and re-interpolated linearly**, which
+*smooths* the divergence before integrating it. That is why it looks best: the
+smoothing hides the error rather than reducing it. ✅ **Arm 2 is the honest
+measurement of what the P1 tracking field actually does**, and it is 48 % of
+particles over 1e-2 — four times worse than the nodal-smoothed number we had
+been quoting since §B.6i.
+
+❌ **So the situation is worse than previously recorded, not better.** The
+§B.6i/§B.6m figures (3.2e-03 on D2, 1.9e-03 on cylA) understate the true
+divergence error because they were computed from a smoothed field.
+
+#### ⚠️ And HCT's tail is WORSE even though its bulk is better
+
+p99 rises 9.46e-01 → 1.99e+00 and p01 of `ln_J` goes −0.83 → −3.63. ✅ Expected:
+a C¹ cubic has larger derivatives between nodes than a piecewise-constant
+gradient, so where the field is badly behaved the cubic's divergence is bigger.
+⚠️ **HCT improves the median and the bulk fraction while making the extremes
+worse** — it is not a uniform improvement, and a void criterion reading the tail
+would be hurt by it.
+
+#### ✅ Cost: confirmed negligible
+
+1564.5 s vs 1561.1 s — HCT costs **0.2 %** in Stage 7, plus 2928 MB for the
+Bernstein array and 2.78 s to assemble. ✅ The expensive part of HCT is memory,
+not time.
+
+#### ❌ Verdict on the det F route
+
+Three independent measurements now say the same thing: **the discrete FOM
+velocity field is not divergence-free enough to support a void defined as a
+particle-density deficit from det F.** Raw P1 is 48 % over the void's own order;
+HCT reduces that to 33 %; neither is usable. ⚠️ A 15× reduction in the *recovered
+gradient's* divergence (§B.6j) did **not** translate into a 15× reduction in the
+*interpolant's* divergence — the two are different quantities and I conflated
+them.
+
+✅ **What remains open, in order of promise:**
+
+1. ⚠️ **Accept that det F is not the observable** and define detachment's effect
+   some other way. ❌ But §B.6d's contribution claim rests on a density deficit,
+   so this needs the claim restated, not just the metric swapped.
+2. ✅ **A genuine divergence-free projection** (§3 of the user's question, parked):
+   Scott–Vogelius is the natural fit since it uses the **same Alfeld split** HCT
+   already builds. This is the only route that attacks the cause.
+3. ⚠️ **Π₁ alone as a binary classifier**, with no det F at all. The sweep is
+   degenerate (§B.6m: thresholds 0.1–0.4 all select the same 117 particles), so
+   this needs the `tau_min == 0` population explained first.
+
 ### B.6b Full texts needed before the derivation — in priority order
 
 ⚠️ **The code is ~1 day; the derivation is the work.** §B.3b established that
