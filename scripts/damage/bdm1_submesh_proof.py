@@ -55,6 +55,12 @@ def main() -> int:
     ap.add_argument("--field", default="Displacement")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--reg", type=float, default=1e-6,
+                    help="Tikhonov weight toward the P1 normal trace, as a "
+                         "fraction of |N|^2. ⚠️ Needed because N^T N is "
+                         "rank deficient: 9 of each element's 12 DOF are "
+                         "invisible to a centroid-velocity objective. 0 "
+                         "reproduces the unregularised (ill-posed) system.")
     args = ap.parse_args()
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -184,8 +190,41 @@ def main() -> int:
     rhs_f = rhs_f * cs
     print(f"  constraint rows scaled by {cs:.3e}")
 
-    A = sp.bmat([[Nf.T @ Nf, Mf.T], [Mf, None]], format='csc')
-    b = np.concatenate([Nf.T @ rhs_g, rhs_f])
+    # ⚠️ N^T N IS SINGULAR BY CONSTRUCTION, and this is the fix.
+    # The objective sees only the 3-component centroid velocity per element,
+    # while the element carries 12 DOF. So 9 directions per element are
+    # invisible to it and are pinned only through face sharing -- which is
+    # why preservation degraded 0.010 -> 1.62 as the sub-mesh grew while the
+    # divergence stayed at 1e-16: the constraint was satisfied and the
+    # objective was free to wander in the null space.
+    #
+    # ✅ Tikhonov term pulling every DOF toward its P1 normal trace. That is
+    # the natural prior -- "stay as close to the input field as the
+    # divergence constraint allows" -- and it makes the objective block
+    # positive definite, so the saddle point is well posed.
+    # ⚠️ Selzer & Cirpka never meet this because RTN0 has ONE dof per face
+    # (4 per element), so their objective is not rank deficient.
+    qp1 = np.zeros(n_dof)
+    for f in range(4):
+        for k in range(3):
+            vid = fverts[:, f, k]
+            np.add.at(qp1, 3*fidx[:, f] + k,
+                      np.einsum('mi,mi->m', vel[vid], nout[:, f]))
+    # average the (up to 2) contributions per DOF
+    ndup = np.zeros(n_dof)
+    for f in range(4):
+        for k in range(3):
+            np.add.at(ndup, 3*fidx[:, f] + k, 1.0)
+    qp1 /= np.maximum(ndup, 1.0)
+
+    nscale = float(np.sqrt((Nf.multiply(Nf)).sum() / max(Nf.nnz, 1)))
+    eps = args.reg * nscale ** 2
+    R = sp.diags(np.full(len(free), eps), format='csr')
+    print(f"  Tikhonov toward the P1 trace: eps = {eps:.3e} "
+          f"(--reg {args.reg:g} x |N|^2)")
+
+    A = sp.bmat([[Nf.T @ Nf + R, Mf.T], [Mf, None]], format='csc')
+    b = np.concatenate([Nf.T @ rhs_g + eps * qp1[free], rhs_f])
     print(f"  saddle-point {A.shape[0]:,} x {A.shape[1]:,}, nnz {A.nnz:,}")
 
     t2 = time.time()
