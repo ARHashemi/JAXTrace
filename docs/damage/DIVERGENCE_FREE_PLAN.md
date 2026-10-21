@@ -678,6 +678,86 @@ and the occupancy check on the BDM₁ field. If they pass, SV-P₃ buys nothing 
 
 ---
 
+## 4h. ✅ The solver question — diagnosed, and the literature found a FOURTH option
+
+### ✅ The null space is characterised exactly
+
+On a 1,500-element block: $\operatorname{rank}(\mathbf M)=1{,}498$ of 1,500,
+**deficiency exactly 2**, with two singular values at 5.17e-12. ⚠️ The left
+null vectors were **not** the constant vector, so it is *not* the classic
+enclosed-domain pressure mode.
+
+✅ **Cause found and it matches exactly: 2 elements have all four faces on the
+sub-mesh cut.** Every DOF is pinned, so the $\nabla\!\cdot\mathbf u=0$ row acts
+on no free unknown and is identically zero. ✅ **Dropping those rows is exact,
+not a regularisation** — they carry no information. ⚠️ **And on a FULL mesh
+they cannot occur**: an element with four true-boundary faces would be a
+detached tetrahedron. A sub-mesh artefact.
+
+### ⚠️ But that was not what blocked ILU
+
+❌ At 20,000 elements there are **no** empty rows and ILU still fails
+*"exactly singular"*. ✅ A synthetic saddle point of the same block structure
+factorises fine (cond 8.2e+02, ILU succeeds at three drop tolerances). ⚠️ **So
+our matrix is a CONDITIONING problem, not a structural one**, and more
+preconditioner tuning is the wrong response.
+
+### ✅ What the literature says (Undermind, 146 papers)
+
+> *"At this scale, the best-supported direction is a matrix-free Krylov method
+> for the constrained least-squares KKT system, with a problem-specific Schur-
+> complement preconditioner; Stokes/Darcy H(div) solvers are useful design
+> precedents, not drop-in preconditioners for your distinct $N^TN+\epsilon I$
+> block."*
+
+Key points:
+- ✅ $\mathbf A$ is **positive definite for $\epsilon>0$**, so the natural
+  reduced operator is the Schur complement
+  $\mathbf S=\mathbf M\mathbf A^{-1}\mathbf M^{\mathsf T}$.
+- ⚠️ *"The Jacobi stall indicates that a diagonal scaling alone is
+  inadequate"* — confirming our measurement.
+- ✅ **Hybridisation + AMG** [Dob18, Lee16] and **auxiliary-space AMG for
+  H(div)** [Kol12] have scalable results, including parallel implementations;
+  ✅ matrix-free GPU saddle-point solvers for H(div) exist [Paz23].
+- ✅ **"The repeated snapshots share the operator, making setup reuse and
+  Krylov recycling especially valuable"** — 166 snapshots on one mesh, so one
+  factorisation amortises 166×. ⚠️ **We had not exploited this.**
+
+### ✅✅ THE FOURTH OPTION — local patchwise reconstruction, no global solve
+
+⚠️ **This was not among the three I offered, and it may be better than all of
+them.** [Led16] and [Coc07] construct **divergence-free $H(\mathrm{div})$
+reconstruction operators patchwise** — element-local or vertex-patch problems
+that assemble into a globally conforming, exactly divergence-free field.
+
+✅ **If it applies, it removes the global solve entirely**: tiny dense local
+solves, embarrassingly parallel, no preconditioner, no conditioning problem,
+and it runs per snapshot at near-zero cost.
+
+⚠️ **The caveat the search states plainly:** patchwise reconstructions *"do not
+generally reproduce this global least-squares minimiser"* — the field would be
+divergence-free and close to P1, but not the *closest*. ✅ For our purpose that
+is acceptable: we need $\det F=1$ and a faithful field, not optimality.
+
+⚠️ Also found: [Scu16b] *"Mass-conservative reconstruction of Galerkin velocity
+fields for transport simulations"* and [Cor92] on continuous velocity fields
+and path lines in finite elements — **both are our exact application**, and
+neither was in the earlier searches.
+
+### Revised plan
+
+| rank | route | why |
+|---|---|---|
+| **1** | ✅ **Local patchwise reconstruction** [Led16, Coc07, Scu16b] | no global solve at all; needs full texts to confirm applicability |
+| 2 | ✅ Schur-complement CG with setup reuse across 166 snapshots | the literature's direct recommendation; $\mathbf A$ is SPD for $\epsilon>0$ |
+| 3 | ⚠️ Hybridisation + AMG [Dob18, Lee16] | proven scalable, but a larger implementation |
+| 4 | ⚠️ Domain decomposition with the proven LU | pragmatic fallback, overlap error |
+| ❌ | more ILU tuning | the matrix is ill-conditioned, not singular |
+
+**Full texts wanted:** [Led16], [Coc07], [Scu16b], [Dob18].
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
