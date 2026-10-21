@@ -144,16 +144,22 @@ def main() -> int:
     for f in range(4):
         # psi_F(x_c) = |F| / (3 V) * (x_c - x_opp)
         d = xc - p[:, f]                        # vertex f is opposite face f
-        coef = (area[:, f] / (3.0 * np.abs(V)))[:, None] * d   # (m,3)
+        # ⚠️ NO |F| factor. The degree of freedom q_F is the FLUX through the
+        # face, not the flux density, so psi_F(x) = (x - x_opp)/(3V). Verified
+        # on a unit test: with |F| included, RTN0 reproduces a CONSTANT field
+        # with 50% error; without it, 3.5e-17. RTN0 contains the constants, so
+        # that test is decisive and it caught the bug immediately.
+        coef = (1.0 / (3.0 * np.abs(V)))[:, None] * d          # (m,3)
         coef = coef * sgn[:, f][:, None]
         for comp in range(3):
             rows_N.append(3 * np.arange(m) + comp)
             cols_N.append(idx[:, f])
             vals_N.append(coef[:, comp])
-        # mass: flux out of E through F is q_F * sgn, times |F| folded in
+        # mass: with q_F the FLUX itself, the outflow through F is just
+        # +-q_F -- the area is already inside it, matching the basis above.
         rows_M.append(np.arange(m))
         cols_M.append(idx[:, f])
-        vals_M.append(sgn[:, f] * area[:, f])
+        vals_M.append(sgn[:, f] * np.ones(m))
 
     N = sp.csr_matrix(
         (np.concatenate(vals_N),
@@ -226,7 +232,9 @@ def main() -> int:
     q = np.zeros(n_f); q[free] = sol[:len(free)]; q[bfac] = qb[bfac]
 
     # ── VERDICT 1: divergence ───────────────────────────────────────────
-    div = (M @ q) / np.abs(V)            # 1/s, per element
+    # M q is the NET FLUX out of each element [m^3/s]; divide by volume for
+    # the mean divergence [1/s].
+    div = (M @ q) / np.abs(V)
     L = velocity_gradient_per_element(vel, c, gN)
     D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
     trD = np.trace(D, axis1=1, axis2=2)
@@ -254,7 +262,7 @@ def main() -> int:
     u_rtn = np.zeros((m, 3))
     for f in range(4):
         d = xc - p[:, f]
-        u_rtn += ((area[:, f] / (3.0 * np.abs(V)))[:, None] * d
+        u_rtn += ((1.0 / (3.0 * np.abs(V)))[:, None] * d
                   * (sgn[:, f] * q[idx[:, f]])[:, None])
     u_p1 = vel[c].mean(axis=1)
     du = np.linalg.norm(u_rtn - u_p1, axis=1)
