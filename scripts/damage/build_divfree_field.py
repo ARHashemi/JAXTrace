@@ -67,16 +67,16 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=8,
                     help="threads for the PVTU read")
     ap.add_argument("--jobs", type=int, default=16,
-                    help="⚠️ PROCESSES for the patch solves. splu is 99.5%% of "
-                         "the cost and single-threaded, so this is the main "
-                         "lever; 1 disables parallelism.")
+                    help="⚠️ PROCESSES for the patch solves. splu is 99.5 "
+                         "percent of the cost and single-threaded, so this is "
+                         "the main lever; 1 disables parallelism.")
     ap.add_argument("--seed-size", type=int, default=10000,
                     help="split seeds to about this many elements. 10,000 "
                          "is the MEASURED knee over 4 positions per size: "
                          "preservation p50 0.342/0.237/0.106/0.092 at "
                          "2k/5k/10k/20k for 59/80/144/352 s per cylA "
-                         "snapshot on 16 threads. ⚠️ 10k->20k buys only 13 % "
-                         "preservation for 2.4x the cost, and 10k has the "
+                         "snapshot on 16 threads. ⚠️ 10k->20k buys only 13 "
+                         "percent preservation for 2.4x the cost, and 10k has the "
                          "tightest spread (std 0.038 vs 0.324 at 2k). 0 "
                          "keeps the FEMUSS pieces whole (~720 s).")
     ap.add_argument("--out", type=Path, default=None)
