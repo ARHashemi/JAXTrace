@@ -66,6 +66,14 @@ def main() -> int:
                     help="ILU drop tolerance. Smaller = stronger "
                          "preconditioner, more memory.")
     ap.add_argument("--ilu-fill", type=float, default=20.0)
+    ap.add_argument("--objective", choices=["faces", "centroid"],
+                    default="faces",
+                    help="'faces' (default): match the P1 field at the 4 FACE "
+                         "centroids -- 12 equations for the element's 12 DOF, "
+                         "so N^T N is full rank. 'centroid': the original "
+                         "3-equation objective, which leaves a 9-dimensional "
+                         "null space per element and defeated every "
+                         "preconditioner.")
     ap.add_argument("--precond", choices=["pazner", "ilu"], default="pazner",
                     help="'pazner' (default): block-diagonal with the "
                          "M-matrix graph-Laplacian Schur complement of "
@@ -164,19 +172,42 @@ def main() -> int:
     Tinv = np.linalg.inv(T)              # (m,12,12) DOF values -> coeffs
     print(f"     done in {time.time()-t1:.1f}s")
 
+    # ⚠️ THE OBJECTIVE WAS UNDER-DETERMINED, and that -- not the solver --
+    # is what defeated four preconditioners.
+    #
+    # N maps 12 DOF per element to the 3 components of the CENTROID velocity,
+    # so N^T N has rank <= 3 against 12 unknowns: a 9-dimensional null space
+    # PER ELEMENT, closed only through face sharing. Measured: eig(D^-1 A)
+    # spans -2.07 .. +8.11, i.e. the scaled block is not even positive
+    # definite, so Pazner's Props 2.1-2.3 (which need spectral equivalence to
+    # the diagonal, as holds for their MASS matrix) simply do not apply.
+    #
+    # ✅ The fix is to match the P1 field at the 4 FACE CENTROIDS instead of
+    # the single element centroid: 4 faces x 3 components = 12 equations for
+    # 12 unknowns, so N^T N becomes full rank per element and the Tikhonov
+    # term returns to being a safeguard rather than the only thing holding
+    # the system together.
     # ── objective: u(x_c) = A x_c + b, linear in the DOFs ───────────────
     # u_i(x_c) = sum_j Tinv[(i*3+j), r] * xc_j * dof_r  + Tinv[9+i, r]*dof_r
     rows_N, cols_N, vals_N = [], [], []
-    for i in range(3):
-        coef = (np.einsum('mrj,mj->mr', Tinv[:, i*3:(i+1)*3, :].transpose(0,2,1)
-                          .reshape(m, 12, 3), xc)
-                + Tinv[:, 9 + i, :])
-        rows_N.append(np.repeat(3*np.arange(m) + i, 12))
-        cols_N.append(dof_of.ravel())
-        vals_N.append(coef.ravel())
+    if args.objective == "centroid":
+        pts = [xc]
+    else:
+        # ✅ the 4 face centroids: 12 equations per element, matching the 12 DOF
+        pts = [p[:, OPP[f]].mean(axis=1) for f in range(4)]
+    for ip, xq in enumerate(pts):
+        for i in range(3):
+            coef = (np.einsum('mrj,mj->mr',
+                              Tinv[:, i*3:(i+1)*3, :].transpose(0, 2, 1)
+                              .reshape(m, 12, 3), xq)
+                    + Tinv[:, 9 + i, :])
+            rows_N.append(np.repeat(
+                (3*len(pts))*np.arange(m) + 3*ip + i, 12))
+            cols_N.append(dof_of.ravel())
+            vals_N.append(coef.ravel())
     N = sp.csr_matrix((np.concatenate(vals_N),
                        (np.concatenate(rows_N), np.concatenate(cols_N))),
-                      shape=(3*m, n_dof))
+                      shape=(3*len(pts)*m, n_dof))
 
     # ── constraint: tr(A) = Tinv[0,:] + Tinv[4,:] + Tinv[8,:] ───────────
     trc = Tinv[:, 0, :] + Tinv[:, 4, :] + Tinv[:, 8, :]      # (m,12)
@@ -184,7 +215,12 @@ def main() -> int:
                        (np.repeat(np.arange(m), 12), dof_of.ravel())),
                       shape=(m, n_dof))
 
-    g = vel[c].mean(axis=1).reshape(-1)
+    if args.objective == "centroid":
+        g = vel[c].mean(axis=1).reshape(-1)
+    else:
+        g = np.concatenate(
+            [vel[c[:, OPP[f]]].mean(axis=1) for f in range(4)], axis=1
+        ).reshape(m, 4, 3).reshape(-1)
 
     # ── boundary DOFs pinned to the P1 normal trace ─────────────────────
     isb_face = cnt == 1
