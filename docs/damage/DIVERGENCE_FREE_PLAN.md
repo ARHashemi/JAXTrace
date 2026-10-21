@@ -1103,13 +1103,55 @@ neighbour query on data we already hold.
 itself — we use their element lists as seeds and build our own overlap. That
 is still a saving: it removes the need to partition 10.8 M elements ourselves.
 
+### ✅ HOW MANY OVERLAP LAYERS? Measured, not guessed — the answer is 3
+
+⚠️ **Concern raised: pieces are partitioned by element COUNT, so a piece in a
+refined region covers a tiny physical volume — would 1–2 layers be enough
+there?** ✅ **Measured, and it changed the number.**
+
+**First, the refinement is real.** Across 12 FEMUSS pieces the median element
+size is **identical (0.0787 mm)** — but *within* a single piece sizes span up
+to **32×** (0.0787 → 2.52 mm). ⚠️ And **56–86 % of seam-touching elements sit
+in the fine region**, where 2 layers buys only **0.157 mm** of physical
+overlap against ~5 mm in a coarse region.
+
+**Then, the decisive measurement** — preservation as a function of layer depth
+from the cut boundary (20 k sub-mesh, `--reg 1e-8`):
+
+| layer | n | p50 | vs asymptote |
+|---|---:|---:|---:|
+| 0 | 5,833 | 0.1851 | **2.72×** |
+| 1 | 4,781 | 0.1409 | **2.07×** |
+| 2 | 3,849 | 0.1000 | **1.47×** |
+| **3** | 2,214 | **0.0686** | **1.01×** ✅ |
+| 4 | 1,417 | 0.0706 | 1.04× |
+| ≥5 | 1,674 | 0.0681 | — |
+
+✅ **Converged by layer 3.** ❌ **So 1–2 layers is NOT enough** — my first
+proposal would have retained elements 1.5–2.1× worse than interior.
+
+### ✅ And the refinement worry resolves favourably
+
+⚠️ The right unit turns out to be **elements, not millimetres**: the
+contamination propagates through **face adjacency**, and the pinning decays
+**per element**, not per unit distance. ✅ **So 3 layers is 3 layers regardless
+of local $h$** — a refined region has more elements per mm, but it also needs
+more elements to carry the perturbation the same number of hops.
+
+⚠️ **This must still be verified on a deliberately refined patch** before
+trusting it at full scale; the table above is one 20 k block. ✅ **Recorded as
+a required check, not assumed.**
+
 ### Revised step 1
 
 1. Load and deduplicate the global mesh (already done for tracking).
 2. Read the 64 piece element lists as **seeds**.
-3. Grow each seed by 2 element layers via face adjacency → **overlapping patch**.
+3. Grow each seed by **3 element layers** (measured, see above) via face
+   adjacency → **overlapping patch**.
 4. Solve BDM₁ on each patch independently (direct LU, ~25 s at 50 k).
-5. Keep only the **seed** elements' DOFs; discard the overlap ring.
+5. Keep only the **seed** elements' DOFs; discard the 3-layer overlap ring.
+   ⚠️ Verify the layer-depth profile on a REFINED patch — 3 is measured on one
+   20 k block and the refinement case is untested.
 6. ⚠️ **Verify at the seam**: measure the normal-flux jump across
    piece interfaces on the assembled field. It should be ~0 by construction;
    anything else means the discard rule is wrong.
