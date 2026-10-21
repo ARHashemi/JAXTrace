@@ -1296,6 +1296,61 @@ and that is what made it trustworthy.
 
 ---
 
+## 4q. ✅ PATCH SIZE SETTLED — 10,000, measured over positions
+
+⚠️ The single-sample numbers in §4p were **noise**. Averaging 4 random
+positions per size gives a clean monotone trend:
+
+| seed | solve | preservation p50 | **std** | cylA, 16 threads |
+|---:|---:|---:|---:|---:|
+| 2,000 | 0.62 s | 0.342 | **0.324** ⚠️ | **59 s** |
+| 5,000 | 2.09 s | 0.237 | 0.081 | 80 s |
+| **10,000** | 7.54 s | **0.106** | **0.038** ✅ | **144 s** |
+| 20,000 | 36.85 s | 0.092 | 0.059 | 352 s |
+| 55,000 (FEMUSS piece) | 131.8 s | — | — | ~720 s |
+
+✅ **Preservation improves monotonically with size** (0.342 → 0.237 → 0.106 →
+0.092) once position is averaged out. ⚠️ At 2,000 the **spread is 0.324** —
+larger than the difference between any two sizes — which is why one sample per
+size was worthless and gave the non-monotone 0.202/0.140/0.180/0.019.
+
+✅ **Divergence is 8–10e-17 at every size and every position.** The property
+being bought is completely insensitive to patch size; only *fidelity* trades.
+
+### ✅ The choice: 10,000
+
+⚠️ **Diminishing returns past it:** 10k → 20k improves preservation by **13 %**
+for **2.4× the cost**. ✅ And 10,000 has the **tightest spread** (std 0.038),
+i.e. it is the most predictable.
+
+✅ **Against the FEMUSS piece size it is 5× faster** (144 s vs ~720 s) **and
+better characterised** — the piece size was never position-sampled at all.
+
+### ✅ Parallelism, the other half
+
+`splu` is 99.5 % of the cost and **single-threaded**, so the patches — which
+are completely independent — are now solved in a `ProcessPoolExecutor`
+(`--jobs`, default 16).
+
+⚠️ **Two implementation traps, both hit:**
+- A **closure cannot be pickled** for a ProcessPool. The worker is module-level
+  and reads fork-inherited globals; passing the mesh through the pickle
+  boundary would copy ~1 GB **per patch**.
+- The original loop **interleaved VTK reading with solving**, so nothing could
+  overlap. Seeds are now all mapped first, then dispatched.
+
+### Net effect
+
+| | before | **after** |
+|---|---:|---:|
+| patch size | 55,000 (FEMUSS piece) | **10,000** |
+| parallelism | ❌ none (1 core) | ✅ 16 processes |
+| **cylA, per snapshot** | **~720 s** | **~144 s** |
+
+✅ **5× faster, with preservation measured and its spread known.**
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
