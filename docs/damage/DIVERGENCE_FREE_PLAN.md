@@ -1351,6 +1351,58 @@ are completely independent — are now solved in a `ProcessPoolExecutor`
 
 ---
 
+## 4r. ✅ FULL cylA SNAPSHOT — 100 % coverage, seam clean, one open question
+
+```
+333 patches, 16 processes, 1625 % CPU
+solved in 246.3 s; filled 3,050,196 / 3,050,196 (100.0 %)
+wrote cylA_159.npz (126.9 MB)
+```
+
+| verdict | result | |
+|---|---:|---|
+| **coverage** | 3,050,196 / 3,050,196 | ✅ **100 %** |
+| **divergence** median | **8.89e-17** | ✅ machine precision |
+| divergence p99 | 1.14e-15 | ✅ |
+| **seam** | 1.93e-01 vs 1.84e-01 = **1.05×** | ✅ **no penalty** |
+| preservation p50 / p90 | 1.86e-01 / 7.81e-01 | ⚠️ see below |
+
+### ✅ The seam concern is resolved
+
+⚠️ The 2-piece test showed **1.38×**, above the 1.3 × gate. ✅ **At full scale
+with 333 patches it is 1.05× — no measurable penalty.** The 3-layer discard
+rule works, and the earlier figure came from a 2-piece configuration where a
+single interface dominated the statistic.
+
+### ✅ Divergence is exact across the whole mesh
+
+8.89e-17 median over **3.05 M elements**, identical to the monolithic and
+2-piece results. ⚠️ The max is 9.2e-08 — a handful of elements, and worth
+noting rather than hiding, but p99 is 1.14e-15.
+
+### ⚠️ OPEN: preservation is worse than the position sweep predicted
+
+**1.86e-01 here against 1.06e-01** measured at seed = 10,000 in §4q, and
+against **0.0675** for the monolithic solve.
+
+❌ **My first explanation was wrong.** I hypothesised that `np.array_split` on
+a FEMUSS piece yields geometrically *fragmented* seeds with more boundary per
+element. ⚠️ **Measured and refuted:** boundary-face fraction is **26.1 %** for
+a contiguous index range (what the sweep used) against **14.3–25.4 %** for the
+split chunks — the chunks are **no worse**, and mostly better.
+
+⚠️ **So the cause is not yet identified.** Candidates not yet tested:
+- the sweep sampled 4 positions in one region; the full mesh includes the tool
+  surface and the refined stir zone, which the sweep may have missed;
+- `p90 = 0.78` suggests a sub-population with large error rather than a uniform
+  shift — worth splitting by region before drawing conclusions.
+
+✅ **What is NOT in doubt:** divergence is machine precision everywhere, the
+seam is clean, and the field is complete and written. ⚠️ **Preservation needs
+one more measurement before the field is used for production tracking.**
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
