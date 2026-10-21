@@ -901,6 +901,81 @@ remaining work is its solver, for which [Paz23] is the literature's answer.
 
 ---
 
+## 4k. ❌ The LOCAL-PATCH family is closed — tested, not assumed
+
+⚠️ The question was whether [Led16]'s **local vertex-patch** reconstruction —
+or any patch method — could replace the global solve. ✅ **It is decided by one
+measurement, and the answer is no.**
+
+### The premise, and why it is testable
+
+[Led16] construct *"a velocity reconstruction operator that maps **discretely
+divergence-free** test functions to **exactly divergence-free** ones … based on
+local $H(\mathrm{div})$-conforming flux equilibration on **vertex patches**"*.
+
+⚠️ **"Discretely divergence-free" means** $\int_\Omega(\nabla\!\cdot
+\mathbf u_h)\,q_h=0$ for all $q_h$ in the pressure space — the divergence
+vanishes *weakly* against the discrete pressures, even though it is nonzero
+pointwise. ✅ **That is the operator's entire premise**: it has something to
+map only if the input already satisfies it.
+
+### ❌ Our field does not satisfy it
+
+`scripts/damage/test_discrete_divergence.py`, whole cylA mesh (571,533 nodes,
+3,050,196 elements). With $\nabla\!\cdot\mathbf u$ constant per element and
+$\int_T\phi_i=V/4$:
+
+$$b_i=\int_\Omega(\nabla\!\cdot\mathbf u)\,\phi_i=\sum_{T\ni i}\frac{(\nabla\!\cdot\mathbf u)_T\,V_T}{4}$$
+
+relative to the same sum taken with $\lvert\nabla\!\cdot\mathbf u\rvert$:
+
+| | |
+|---|---:|
+| p50 | **1.06e-01** |
+| p75 | 4.95e-01 |
+| p90 … p100 | **1.00** |
+| mean | **3.03e-01** |
+
+❌ **Not discretely divergence-free.** At the median, 10 % of the local
+divergence survives the weak test; above p90 it survives **entirely** —
+meaning the divergence does not change sign within those patches at all, so
+nothing cancels.
+
+### ⚠️ The pattern, and the lesson
+
+This is the **third** method whose premise our data fails, and the failures are
+all the same shape:
+
+| method | premise | our field |
+|---|---|---|
+| Larson–Niklasson [Scu16b] | face fluxes **discontinuous** | ❌ exactly continuous |
+| Lederer–Schöberl [Led16] | **discretely** divergence-free | ❌ 10–100 % residual |
+| Pazner [Paz23] | (1,1) block ≈ its diagonal | ❌ eig spans −2.07 … +8.11 |
+
+✅ **Each was found by one cheap measurement**, and each would have been found
+*before* implementation had I tested the premise first. ⚠️ **That is now the
+standing rule for this work.**
+
+⚠️ **The common cause is worth stating:** our FOM is a **P1/P1 velocity–
+pressure** discretisation, which is **not inf-sup stable** and must be
+stabilised. Its velocity is therefore *neither* pointwise *nor* discretely
+divergence-free — it satisfies a **stabilised** continuity equation, which is a
+weaker condition than any of these three methods assume. ✅ **That is why a
+global constrained projection is needed: there is no weak structure to exploit
+locally.**
+
+### ✅ Conclusion: domain decomposition IS the right approach
+
+❌ No local or patchwise method applies. ✅ **BDM₁ with the centroid objective
+remains the only method measured to fix our defect** (8.5e-17 divergence,
+~7 % field change, verified to 50 k elements), and its ill-conditioning is
+intrinsic to the under-determined objective that *gives* the good preservation
+(§4f). ✅ **Domain decomposition with the proven direct LU is therefore the
+correct route, not a fallback** — 61 subdomains × 25 s = **1.6 min/snapshot on
+16 threads**.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
