@@ -230,6 +230,14 @@ def main() -> int:
     us = np.linalg.norm(vel[c].mean(axis=1), axis=1)
     surf = area.sum(axis=1)
     print()
+    # ⚠️ THE IDENTITY THAT MAKES THIS MEASURABLE, verified on a random tet:
+    #     net face flux (face-centroid quadrature)  ==  div(u) * |V|
+    # exactly, to 5.6e-17 -- the divergence theorem is EXACT for a P1 field
+    # under this quadrature. So the net flux IS the divergence, and the only
+    # question is the normalisation. Dividing by |u|*area gives a
+    # dimensionless number comparable across element sizes; dividing by
+    # |V|^(2/3) instead makes a nonzero residual LOOK like machine zero,
+    # which cost an hour of chasing a non-existent bug.
     print("  ── DIVERGENCE, dimensionless |net flux| / (|u| * area) ──")
     b0 = np.abs(r) / np.maximum(us * surf, 1e-300)
     b1 = np.abs(r2) / np.maximum(us * surf, 1e-300)
