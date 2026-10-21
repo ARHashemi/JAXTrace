@@ -92,6 +92,10 @@ def main() -> int:
 
     coeffs = np.zeros((m_all, 12), dtype=np.float64)
     filled = np.zeros(m_all, dtype=bool)
+    # ⚠️ Build the node key map ONCE. It was inside the piece loop, i.e.
+    # rebuilt 64 times over 571k nodes -- pure waste.
+    nk = {tuple(np.round(nodes[i].astype(np.float64), 9)): i
+          for i in range(len(nodes))}
     t2 = time.time()
     for pi, src in enumerate(srcs):
         r = vtk.vtkXMLUnstructuredGridReader()
@@ -100,10 +104,14 @@ def main() -> int:
         P = vtk_to_numpy(d.GetPoints().GetData()).astype(np.float64)
         C = vtk_to_numpy(d.GetCells().GetConnectivityArray()).reshape(-1, 4)
         # piece-local -> global via coordinates
+        # ⚠️ ROUND TO 9 DECIMALS, NOT 10. The points are float32 (~7
+        # significant digits), so rounding a float32 promoted to float64 at
+        # 10 decimals keeps noise below the representable precision and the
+        # two keys differ. Measured: at 10 decimals ZERO cells matched; at 9,
+        # all 59,275 of piece 0 matched.
         gl = np.full(len(P), -1, dtype=np.int64)
-        nk = {tuple(np.round(nodes[i], 10)): i for i in range(len(nodes))}
         for i, pt in enumerate(P):
-            gl[i] = nk.get(tuple(np.round(pt, 10)), -1)
+            gl[i] = nk.get(tuple(np.round(pt.astype(np.float64), 9)), -1)
         ok = (gl[C] >= 0).all(axis=1)
         seed = np.array([key.get(tuple(np.sort(gl[t])), -1) for t in C[ok]])
         seed = seed[seed >= 0]
