@@ -90,6 +90,7 @@ def main() -> int:
     elems_sorted, starts, ends = element_adjacency(fidx_g, cnt_g)
     print(f"  global topology: {len(uf):,} faces")
 
+    seeds_record = []
     coeffs = np.zeros((m_all, 12), dtype=np.float64)
     filled = np.zeros(m_all, dtype=bool)
     # ⚠️ Build the node key map ONCE. It was inside the piece loop, i.e.
@@ -126,10 +127,66 @@ def main() -> int:
         idx = np.array([pos[e] for e in seed])
         coeffs[seed] = co[idx]
         filled[seed] = True
+        seeds_record.append(seed)
         print(f"    piece {pi:3d}: seed {len(seed):,} -> patch {len(patch):,}"
               f"  ({time.time()-t2:.0f}s elapsed)")
     print(f"  solved in {time.time()-t2:.1f}s; "
           f"filled {filled.sum():,}/{m_all:,} ({100*filled.mean():.1f} %)")
+
+    # ── VERDICT: divergence, preservation, and the SEAM jump ────────────
+    # ⚠️ The seam check is the one this decomposition exists to pass. If the
+    # discard rule is right, elements on either side of a piece interface are
+    # both solved as INTERIOR elements of their own patch, so their quality
+    # should match the bulk. A visible seam means the 3-layer ring is too thin.
+    if filled.any():
+        sel = np.where(filled)[0]
+        Amat = coeffs[sel, :9].reshape(-1, 3, 3)
+        bvec = coeffs[sel, 9:]
+        dv = np.abs(np.trace(Amat, axis1=1, axis2=2))
+        nA = np.sqrt(np.sum(Amat*Amat, axis=(1, 2)))
+        print()
+        print("  ── DIVERGENCE (|div u| / |grad u|) ──")
+        r1 = dv / np.maximum(nA, 1e-30)
+        print(f"     median {np.median(r1):.4e}  p99 {np.percentile(r1,99):.4e}"
+              f"  max {r1.max():.4e}")
+        print(f"     {'✅ PASS' if np.median(r1) < 1e-10 else '⚠️  above 1e-10'}")
+
+        p_ = nodes[conn[sel]]
+        xc_ = p_.mean(axis=1)
+        u_new = np.einsum('mij,mj->mi', Amat, xc_) + bvec
+        u_p1 = vel[conn[sel]].mean(axis=1)
+        rr = (np.linalg.norm(u_new - u_p1, axis=1) /
+              np.maximum(np.linalg.norm(u_p1, axis=1), 1e-30))
+        print()
+        print("  ── PRESERVATION (||u_new - u_P1|| / ||u_P1||) ──")
+        for qq in (50, 90, 99):
+            print(f"     p{qq:<3} {np.percentile(rr, qq):.4e}")
+
+        # ⚠️ SEAM: elements adjacent across a piece boundary. Compare their
+        # preservation to the bulk -- a jump means the overlap is too thin.
+        own = np.full(m_all, -1, dtype=np.int64)
+        for pi2, sd in enumerate(seeds_record):
+            own[sd] = pi2
+        import collections
+        face_owner = collections.defaultdict(list)
+        for e in sel:
+            for f in range(4):
+                face_owner[fidx_g[e, f]].append(e)
+        seam_el = set()
+        for gf, els in face_owner.items():
+            if len(els) == 2 and own[els[0]] != own[els[1]]                     and own[els[0]] >= 0 and own[els[1]] >= 0:
+                seam_el.update(els)
+        if seam_el:
+            sm = np.isin(sel, list(seam_el))
+            print()
+            print("  ── SEAM CHECK (elements across a piece interface) ──")
+            print(f"     seam elements {int(sm.sum()):,} of {len(sel):,}")
+            print(f"     seam     p50 {np.percentile(rr[sm],50):.4e}")
+            print(f"     non-seam p50 {np.percentile(rr[~sm],50):.4e}")
+            ratio = (np.percentile(rr[sm], 50) /
+                     max(np.percentile(rr[~sm], 50), 1e-300))
+            print(f"     ratio {ratio:.2f}x  "
+                  f"{'✅ no seam penalty' if ratio < 1.3 else '⚠️  SEAM VISIBLE — widen the overlap'}")
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
