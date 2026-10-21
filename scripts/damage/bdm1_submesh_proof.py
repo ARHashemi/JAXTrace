@@ -66,6 +66,12 @@ def main() -> int:
                     help="ILU drop tolerance. Smaller = stronger "
                          "preconditioner, more memory.")
     ap.add_argument("--ilu-fill", type=float, default=20.0)
+    ap.add_argument("--ilu-shift", type=float, default=1e-8,
+                    help="Negative shift on the multiplier block, in the "
+                         "PRECONDITIONER ONLY. ⚠️ Needed because ILU of a "
+                         "saddle point with an exactly-zero (2,2) block "
+                         "fails as 'exactly singular'. A is untouched, so "
+                         "the constraint stays exact.")
     ap.add_argument("--reg", type=float, default=1e-6,
                     help="Tikhonov weight toward the P1 normal trace, as a "
                          "fraction of |N|^2. ⚠️ Needed because N^T N is "
@@ -262,7 +268,19 @@ def main() -> int:
         # of the same mesh.
         n1 = len(free)
         try:
-            ilu = spla.spilu(A.tocsc(), drop_tol=args.ilu_drop,
+            # ⚠️ ILU on the RAW saddle point fails with "Factor is exactly
+            # singular": the (2,2) block is exactly zero, so the first
+            # elimination touching a multiplier row divides by zero. Measured.
+            #
+            # ✅ Factorise a SHIFTED matrix instead -- a small negative shift
+            # on the multiplier block makes it non-singular while leaving it
+            # spectrally close to the original. The shift is ONLY in the
+            # preconditioner; A itself is untouched, so the solution still
+            # satisfies the exact constraint.
+            shift = args.ilu_shift * float(np.abs(A.diagonal()).max())
+            Ap = (A + sp.diags(np.concatenate(
+                [np.zeros(n1), np.full(m, -shift)]), format='csc')).tocsc()
+            ilu = spla.spilu(Ap, drop_tol=args.ilu_drop,
                              fill_factor=args.ilu_fill)
             Pre = spla.LinearOperator(A.shape, matvec=ilu.solve)
             print(f"  ILU preconditioner: drop_tol {args.ilu_drop:g}, "
