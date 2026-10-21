@@ -236,8 +236,23 @@ def main() -> int:
     print(f"     P1 (reference)   median "
           f"{np.median(np.abs(trD)/np.maximum(nD,1e-30)):.4e}")
     print(f"     averaged fluxes  median {np.median(b0):.4e}")
-    print(f"     after LN         median {np.median(b1):.4e}  "
+    # ⚠️ Split INTERIOR from boundary-touching, as the BDM1 proof does. A
+    # boundary face has only ONE contributing element, so qbar there is the
+    # one-sided P1 flux and the patch correction cannot act on it -- those
+    # elements keep their imbalance. On a sub-mesh the artificial cut
+    # boundary is large (measured 39 % of elements at 3,000), so pooling
+    # them reports a tail the full mesh would not have.
+    n_int = (cnt[fidx] == 2).sum(axis=1)
+    full_int = n_int == 4
+    print(f"     fully-interior elements: {int(full_int.sum()):,}/{m:,} "
+          f"({100*full_int.mean():.1f} %)")
+    print(f"     after LN, ALL      median {np.median(b1):.4e}  "
           f"p99 {np.percentile(b1,99):.4e}")
+    if full_int.any():
+        bi = b1[full_int]
+        print(f"     after LN, INTERIOR median {np.median(bi):.4e}  "
+              f"p99 {np.percentile(bi,99):.4e}  max {bi.max():.4e}")
+        b1 = bi
     ok = float(np.median(b1)) < 1e-10
     print(f"     {'✅ PASS' if ok else '⚠️  not yet at round-off'}")
     return 0 if ok else 1
