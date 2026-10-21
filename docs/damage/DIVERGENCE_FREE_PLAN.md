@@ -606,6 +606,78 @@ measured, not assumed.
 
 ---
 
+## 4g. ✅ Is BDM₁ good enough? Two worries, both measured
+
+⚠️ Two concerns were raised: that BDM₁ *"does not provide continuity on the
+element faces"* and is *"not point-wise divergence free"*. ✅ **Both are
+testable, and both are largely unfounded** — though one of them was my own
+sloppy wording.
+
+### ✅ Worry 1 — face continuity: the NORMAL component is exactly continuous
+
+`scripts/damage/test_bdm1_face_continuity.py`, two tets sharing a face, DOFs
+shared with the correct orientation sign:
+
+```
+outward normals on the shared face : tet A (0,0,-1), tet B (0,0,+1)  ✅ opposite
+NORMAL component jump              : 0.000e+00     ✅ CONTINUOUS
+```
+
+✅ **BDM₁ is $H(\mathrm{div})$-conforming by construction** — the normal flux a
+particle sees crossing a face is **single valued**. ⚠️ **The TANGENTIAL
+component does jump**, and that is what $H(\mathrm{div})$ means; it is true of
+RT, BDM and every $H(\mathrm{div})$ space. Only SV, being $H^1$-conforming, is
+fully continuous.
+
+⚠️ **A caveat on the first version of this test:** matching DOFs by *local*
+index gave a spurious jump of 5.97. The two tets order the shared face
+differently and their outward normals are opposite, so the sign must be handled
+— exactly as the real assembly does via sorted global node ids.
+
+### ✅ Worry 2 — pointwise divergence: BDM₁ IS pointwise divergence-free
+
+⚠️ **My earlier "element-wise, not pointwise" wording was misleading, and I
+withdraw it.** For $\mathbf u=\mathbf A\mathbf x+\mathbf b$,
+$\nabla\!\cdot\mathbf u=\operatorname{tr}\mathbf A$ is a **constant over the
+element**. Setting it to zero therefore makes the field **pointwise**
+divergence-free *inside every element*, not merely on average. ✅ The measured
+8.5e-17 is exactly that.
+
+### ✅ So does the tangential jump hurt $\det F$? No — and this is decisive
+
+$$\ln J=\int \nabla\!\cdot\mathbf u\,dt$$
+
+A trajectory spends **100 % of its time inside elements**; faces are a
+**measure-zero** set. With $\nabla\!\cdot\mathbf u=0$ pointwise inside every
+element, the integral is **exactly zero regardless of any face behaviour**.
+✅ **$\det F=1$ to integration error, and the tangential jump cannot affect it.**
+
+⚠️ What the jump *does* affect is the **trajectory**: a particle crossing a
+face sees its tangential velocity change discontinuously, so the path is
+slightly kinked. ⚠️ Bounded by the same ~7 % field change already measured.
+
+✅ **And the comparison that settles it:** the P1 field is $C^0$ — *fully*
+continuous in every component — and its $\det F$ **fails catastrophically**
+(48 % of particles over 1e-2). ❌ **Continuity is not what makes $\det F$ work;
+the divergence is.** BDM₁ fixes the property that matters and degrades one that
+demonstrably does not.
+
+### Verdict
+
+| | continuity | divergence | $\det F$ | cost |
+|---|---|---|---|---|
+| P1 (now) | ✅ full | ❌ 2.8e-03 | ❌ broken | — |
+| **BDM₁** | ✅ normal, ⚠️ tangential jumps | ✅ **8.5e-17 pointwise** | ✅ **exact** | 1× |
+| SV-P₃ | ✅ full | ✅ pointwise | ✅ exact | ⚠️ 5×, unproven roadmap |
+
+✅ **Continue with BDM₁.** ⚠️ SV-P₃'s only remaining advantage is tangential
+continuity, which affects trajectory smoothness and **not** the quantity the
+whole exercise exists to fix. ✅ **The honest test is empirical**: run $\det F$
+and the occupancy check on the BDM₁ field. If they pass, SV-P₃ buys nothing for
+5× the cost and an unproven roadmap.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
