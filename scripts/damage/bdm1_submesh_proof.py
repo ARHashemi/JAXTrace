@@ -62,6 +62,10 @@ def main() -> int:
                          "and CG returns garbage on such a system.")
     ap.add_argument("--rtol", type=float, default=1e-10)
     ap.add_argument("--maxiter", type=int, default=20000)
+    ap.add_argument("--ilu-drop", type=float, default=1e-5,
+                    help="ILU drop tolerance. Smaller = stronger "
+                         "preconditioner, more memory.")
+    ap.add_argument("--ilu-fill", type=float, default=20.0)
     ap.add_argument("--reg", type=float, default=1e-6,
                     help="Tikhonov weight toward the P1 normal trace, as a "
                          "fraction of |N|^2. ⚠️ Needed because N^T N is "
@@ -247,12 +251,31 @@ def main() -> int:
         # by its diagonal and the Schur complement by its own diagonal. ✅ That
         # is the cheapest thing that is spectrally sensible here, and it costs
         # one vector divide per iteration.
-        d1 = np.asarray((Nf.T @ Nf).diagonal()) + eps
-        S = (Mf @ sp.diags(1.0 / np.maximum(d1, 1e-300)) @ Mf.T)
-        d2 = np.asarray(S.diagonal())
-        dinv = np.concatenate([1.0 / np.maximum(d1, 1e-300),
-                               1.0 / np.maximum(np.abs(d2), 1e-300)])
-        Pre = spla.LinearOperator(A.shape, matvec=lambda v: dinv * v)
+        # ⚠️ A DIAGONAL preconditioner is too weak here: measured, MINRES hit
+        # 20,000 iterations with a relative residual of 1.3e-02 and the
+        # divergence degraded from 8.5e-17 to 5.1e-04. The objective block is
+        # not diagonally dominant -- BDM1 DOFs couple through shared faces.
+        #
+        # ✅ Use an INCOMPLETE LU of the whole saddle point instead. spilu
+        # handles indefinite systems with a pivot threshold, and one
+        # factorisation is reused across every iteration and every snapshot
+        # of the same mesh.
+        n1 = len(free)
+        try:
+            ilu = spla.spilu(A.tocsc(), drop_tol=args.ilu_drop,
+                             fill_factor=args.ilu_fill)
+            Pre = spla.LinearOperator(A.shape, matvec=ilu.solve)
+            print(f"  ILU preconditioner: drop_tol {args.ilu_drop:g}, "
+                  f"fill {args.ilu_fill:g}, nnz {ilu.nnz:,} "
+                  f"({ilu.nnz/A.nnz:.1f}x the matrix)")
+        except Exception as _e:        # pragma: no cover
+            print(f"  ⚠️ ILU failed ({_e}); falling back to diagonal")
+            d1 = np.asarray((Nf.T @ Nf).diagonal()) + eps
+            S = (Mf @ sp.diags(1.0/np.maximum(d1, 1e-300)) @ Mf.T)
+            d2 = np.asarray(S.diagonal())
+            dinv = np.concatenate([1.0/np.maximum(d1, 1e-300),
+                                   1.0/np.maximum(np.abs(d2), 1e-300)])
+            Pre = spla.LinearOperator(A.shape, matvec=lambda v: dinv * v)
         it = {"n": 0}
 
         def _cb(_):
