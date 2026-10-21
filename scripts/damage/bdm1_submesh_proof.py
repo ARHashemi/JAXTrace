@@ -219,8 +219,27 @@ def main() -> int:
         np.linalg.norm(u_p1, axis=1), 1e-30)
     print()
     print("  ── PRESERVATION (||u_BDM1 - u_P1|| / ||u_P1||) ──")
+    # ⚠️ Separate INTERIOR from boundary-touching elements. A boundary element
+    # has some of its 12 DOFs PINNED to the P1 normal trace, which over-
+    # constrains it: with fewer free parameters it cannot both satisfy
+    # div = 0 and match the centroid velocity. On a sub-mesh the artificial
+    # cut boundary is large (here ~40 % of faces), so pooling them would
+    # report a tail that the FULL mesh would not have.
+    touches_b = isb_face[fidx].any(axis=1)
+    print(f"     elements touching the (sub-mesh cut) boundary: "
+          f"{int(touches_b.sum()):,}/{m:,} ({100*touches_b.mean():.1f} %)")
+    for lab, mask in (("INTERIOR", ~touches_b), ("boundary", touches_b),
+                      ("all", np.ones(m, bool))):
+        if not mask.any():
+            continue
+        rr = r[mask]
+        print(f"     {lab:9s} n={int(mask.sum()):>7,}  "
+              + "  ".join(f"p{qq}={np.percentile(rr,qq):.3e}"
+                          for qq in (50, 90, 99)))
+    # ✅ The interior figure is the one that predicts full-mesh behaviour.
+    r = r[~touches_b] if (~touches_b).any() else r
     for qq in (50, 75, 90, 95, 99):
-        print(f"     p{qq:<3} {np.percentile(r, qq):.4e}")
+        print(f"     p{qq:<3} {np.percentile(r, qq):.4e}   (interior)")
     good = np.median(r) < 0.1
     print(f"     {'✅' if good else '⚠️ '} median {np.median(r):.4e}"
           + ("" if good else "   -- report this, do not bury it"))
