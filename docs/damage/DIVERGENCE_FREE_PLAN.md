@@ -264,9 +264,12 @@ FSW, and the reason is structural.**
 
 | attempt | basis | scaling | constraint residual | preservation |
 |---|---|---|---:|---:|
-| 1 | with $\lvert Fvert$ | none | **6.8e-16** ✅ | 84 % ❌ |
-| 2 | no $\lvert Fvert$ | none | 9.3e+04 ❌ | huge ❌ |
-| 3 | no $\lvert Fvert$ | row-scaled | 1.3e-08 ⚠️ | 89 % ❌ |
+| 1 | with $\lvert F
+vert$ | none | **6.8e-16** ✅ | 84 % ❌ |
+| 2 | no $\lvert F
+vert$ | none | 9.3e+04 ❌ | huge ❌ |
+| 3 | no $\lvert F
+vert$ | row-scaled | 1.3e-08 ⚠️ | 89 % ❌ |
 
 ⚠️ **Attempt 1 satisfied the constraint at machine precision** — the
 saddle-point assembly, the global mass-balance correction and the boundary
@@ -276,7 +279,8 @@ conditioning.
 
 ⚠️ **Two implementation bugs found and worth recording.** (i) With $q_F$ the
 **flux** rather than the flux density, the basis is
-$oldsymbol\psi_F=(\mathbf x-\mathbf x_{opp})/(3V)$ with **no $\lvert Fvert$
+$oldsymbol\psi_F=(\mathbf x-\mathbf x_{opp})/(3V)$ with **no $\lvert F
+vert$
 factor**; a unit test on a constant field — which RTN₀ contains exactly —
 returned 50 % error with it and 3.5e-17 without, and took seconds to write.
 (ii) **Global mass balance is a consistency condition**: demanding
@@ -329,6 +333,77 @@ The remaining routes, re-ranked:
 topology, orientation convention, mass-balance correction, boundary pinning and
 saddle-point assembly are all basis-independent. ⚠️ Only the basis functions and
 the per-face DOF count change.
+
+---
+
+## 4c. ✅ BDM₁ vs SV-P₃ — tested the cheap way FIRST (2026-10-21)
+
+⚠️ RTN₀ was built, solved, and only *then* found rotation-blind. ✅ **Both
+candidates were therefore tested for representation content before any solver
+was written** (`scripts/damage/test_fe_space_content.py`).
+
+### ✅ BDM₁ recovers every linear field, including rotation
+
+Recovering a field from its P1 normal traces on the four faces:
+
+| field | relative error |
+|---|---:|
+| constant | 4.1e-16 ✅ |
+| **rotation about z** | **7.5e-16** ✅ |
+| **rotation about x** | **2.9e-16** ✅ |
+| shear | 1.3e-15 ✅ |
+| linear divergence-free | 8.4e-16 ✅ |
+| linear with divergence | 1.0e-15 ✅ |
+| quadratic | 1.00 ❌ (expected, and not needed) |
+
+✅ **BDM₁ on a tet has 12 DOF — exactly the 12 coefficients of a P1 vector
+field — so it contains ALL linear fields.** The rank of the trace map is 12,
+i.e. full. ⚠️ Quadratics are absent, which does not matter: the source field is
+itself P1, hence linear per element.
+
+### ✅ And the divergence-free subspace keeps what we need
+
+For $\mathbf u=\mathbf A\mathbf x+\mathbf b$ in BDM₁, $
+abla\!\cdot\mathbf u
+=\operatorname{tr}\mathbf A$ is a **constant per element**, so $
+abla\!\cdot
+\mathbf u=0$ is **one scalar equation per element** — the same constraint
+structure as RTN₀, exactly enforceable by one Lagrange multiplier.
+
+Measured $\operatorname{tr}\mathbf A$ after projection
+(`scripts/damage/test_bdm1_divfree_subspace.py`):
+
+| field | tr A | |
+|---|---:|---|
+| rotation about z | +1.4e-15 | ✅ already divergence-free |
+| shear | −1.2e-15 | ✅ already divergence-free |
+| radial ($\mathbf u=\mathbf x$) | **+3.000** | ⚠️ carries the divergence |
+
+✅ **Imposing $
+abla\!\cdot\mathbf u=0$ removes ONLY the radial mode —
+precisely the spurious part — and leaves rotation and shear untouched.**
+12 DOF − 1 constraint = **11 free parameters**, against RTN₀'s 4 − 1 = 3.
+❌ That one line explains the whole RTN₀ failure: its three surviving DOF were
+the translations, and rotation was never available to begin with.
+
+### Cost
+
+| | BDM₁ | SV-P₃ |
+|---|---:|---:|
+| content | ✅ all linear fields | ✅ all cubics |
+| DOF per face | 3 | — (nodal) |
+| cylA | ~18.3 M | ~91.5 M |
+| **D2** | **~64.8 M** | **~324 M (5.0×)** |
+| constraint | 1 scalar/element | 1 per sub-tet |
+
+✅ **BDM₁ is chosen**: it has everything the FSW field needs at **one fifth**
+the cost, and it reuses the RTN₀ infrastructure unchanged (face topology,
+orientation, mass balance, boundary pinning, saddle-point assembly) — only the
+basis and the per-face DOF count differ.
+
+⚠️ **SV-P₃ is kept as the fallback**, not discarded: it is *pointwise*
+divergence-free where BDM₁ is element-wise, which matters only if the
+element-wise guarantee proves insufficient for $\det F$.
 
 ---
 
