@@ -33,6 +33,24 @@ from pathlib import Path
 import numpy as np
 
 
+def _solve_one(sd):
+    """Worker: grow one seed, solve, return only the seed's coefficients.
+
+    ⚠️ Reads the shared mesh from the module global _G, which fork gives each
+    worker copy-on-write. Passing the arrays through the pickle boundary
+    instead would copy ~1 GB per patch.
+    """
+    from jaxtrace.damage.divfree import grow_patch, solve_patch
+    import numpy as _np
+    g = _G
+    patch = grow_patch(sd, g["fidx_g"], g["elems_sorted"], g["starts"],
+                       g["ends"], layers=g["layers"])
+    co, _, _ = solve_patch(g["nodes"], g["conn"][patch], g["vel"],
+                           reg=g["reg"])
+    pos = {e: j for j, e in enumerate(patch)}
+    return sd, co[_np.array([pos[e] for e in sd])]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -46,7 +64,17 @@ def main() -> int:
     ap.add_argument("--reg", type=float, default=1e-8)
     ap.add_argument("--max-pieces", type=int, default=0,
                     help="0 = all; otherwise process only the first N (testing)")
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=8,
+                    help="threads for the PVTU read")
+    ap.add_argument("--jobs", type=int, default=16,
+                    help="⚠️ PROCESSES for the patch solves. splu is 99.5%% of "
+                         "the cost and single-threaded, so this is the main "
+                         "lever; 1 disables parallelism.")
+    ap.add_argument("--seed-size", type=int, default=5000,
+                    help="split seeds to about this many elements. ⚠️ splu "
+                         "scales as n^3.10, so a 55k FEMUSS piece costs "
+                         "131.8 s while four 14k chunks cost ~4x1.3 s. 0 "
+                         "keeps the pieces whole.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -90,6 +118,15 @@ def main() -> int:
     elems_sorted, starts, ends = element_adjacency(fidx_g, cnt_g)
     print(f"  global topology: {len(uf):,} faces")
 
+    # ⚠️ PARALLELISM. Profiling showed 99.5 % of the cost is a single
+    # scipy splu call, and SuperLU is SINGLE-THREADED -- which is exactly why
+    # htop showed one busy core. The patches are completely independent, so
+    # cross-patch parallelism is free and is the single biggest fix.
+    #
+    # ✅ ProcessPool, not ThreadPool: splu releases the GIL only partially and
+    # the work is pure CPU, so threads would contend. Each worker re-derives
+    # nothing -- the mesh arrays are inherited by fork.
+    from concurrent.futures import ProcessPoolExecutor
     seeds_record = []
     coeffs = np.zeros((m_all, 12), dtype=np.float64)
     filled = np.zeros(m_all, dtype=bool)
@@ -97,39 +134,63 @@ def main() -> int:
     # rebuilt 64 times over 571k nodes -- pure waste.
     nk = {tuple(np.round(nodes[i].astype(np.float64), 9)): i
           for i in range(len(nodes))}
-    t2 = time.time()
+    # ⚠️ Collect ALL seeds first, then solve them in parallel. The original
+    # loop interleaved VTK reading with solving, so nothing could overlap.
+    t_seed = time.time()
+    all_seeds = []
     for pi, src in enumerate(srcs):
         r = vtk.vtkXMLUnstructuredGridReader()
         r.SetFileName(str(Path(args.case) / src)); r.Update()
         d = r.GetOutput()
         P = vtk_to_numpy(d.GetPoints().GetData()).astype(np.float64)
         C = vtk_to_numpy(d.GetCells().GetConnectivityArray()).reshape(-1, 4)
-        # piece-local -> global via coordinates
-        # ⚠️ ROUND TO 9 DECIMALS, NOT 10. The points are float32 (~7
-        # significant digits), so rounding a float32 promoted to float64 at
-        # 10 decimals keeps noise below the representable precision and the
-        # two keys differ. Measured: at 10 decimals ZERO cells matched; at 9,
-        # all 59,275 of piece 0 matched.
-        gl = np.full(len(P), -1, dtype=np.int64)
-        for i, pt in enumerate(P):
-            gl[i] = nk.get(tuple(np.round(pt.astype(np.float64), 9)), -1)
+        gl = np.array([nk.get(tuple(np.round(pt, 9)), -1) for pt in P])
         ok = (gl[C] >= 0).all(axis=1)
-        seed = np.array([key.get(tuple(np.sort(gl[t])), -1) for t in C[ok]])
-        seed = seed[seed >= 0]
-        if len(seed) == 0:
-            print(f"    piece {pi}: ⚠️ no elements mapped, skipped")
-            continue
-        patch = grow_patch(seed, fidx_g, elems_sorted, starts, ends,
-                           layers=args.layers)
-        co, _, _ = solve_patch(nodes, conn[patch], vel, reg=args.reg)
-        # ✅ keep ONLY the seed elements -- the grown ring is discarded
-        pos = {e: j for j, e in enumerate(patch)}
-        idx = np.array([pos[e] for e in seed])
-        coeffs[seed] = co[idx]
-        filled[seed] = True
-        seeds_record.append(seed)
-        print(f"    piece {pi:3d}: seed {len(seed):,} -> patch {len(patch):,}"
-              f"  ({time.time()-t2:.0f}s elapsed)")
+        sd = np.array([key.get(tuple(np.sort(gl[t])), -1) for t in C[ok]])
+        sd = sd[sd >= 0]
+        if len(sd):
+            all_seeds.append(sd)
+    print(f"  mapped {len(all_seeds)} seeds in {time.time()-t_seed:.1f}s")
+
+    # ⚠️ SPLIT oversized seeds. splu scales as n^3.10, so a 55k FEMUSS piece
+    # costs 131.8 s while four 14k chunks of it cost ~4x1.3 s. The piece
+    # boundaries are a partition HINT, not a constraint -- any partition
+    # works, because each patch is grown and trimmed independently.
+    if args.seed_size:
+        split = []
+        for sd in all_seeds:
+            k = max(1, int(np.ceil(len(sd) / args.seed_size)))
+            split.extend(np.array_split(sd, k))
+        all_seeds = split
+        print(f"  split to {len(all_seeds)} seeds of ~{args.seed_size:,} elements")
+
+    t2 = time.time()
+    if args.jobs > 1:
+        # ⚠️ A closure cannot be pickled for a ProcessPool. Publish the
+        # shared arrays as module globals; fork inherits them copy-on-write,
+        # so nothing large is actually copied or re-derived per worker.
+        globals().update(_G=dict(
+            fidx_g=fidx_g, elems_sorted=elems_sorted, starts=starts,
+            ends=ends, nodes=nodes, conn=conn, vel=vel,
+            layers=args.layers, reg=args.reg))
+        with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+            for n_done, (sd, vals) in enumerate(
+                    ex.map(_solve_one, all_seeds), 1):
+                coeffs[sd] = vals; filled[sd] = True; seeds_record.append(sd)
+                if n_done % 20 == 0 or n_done == len(all_seeds):
+                    print(f"    {n_done}/{len(all_seeds)} patches "
+                          f"({time.time()-t2:.0f}s)")
+    else:
+        for n_done, sd in enumerate(all_seeds, 1):
+            patch = grow_patch(sd, fidx_g, elems_sorted, starts, ends,
+                               layers=args.layers)
+            co, _, _ = solve_patch(nodes, conn[patch], vel, reg=args.reg)
+            pos = {e: j for j, e in enumerate(patch)}
+            coeffs[sd] = co[np.array([pos[e] for e in sd])]
+            filled[sd] = True; seeds_record.append(sd)
+            if n_done % 20 == 0 or n_done == len(all_seeds):
+                print(f"    {n_done}/{len(all_seeds)} patches "
+                      f"({time.time()-t2:.0f}s)")
     print(f"  solved in {time.time()-t2:.1f}s; "
           f"filled {filled.sum():,}/{m_all:,} ({100*filled.mean():.1f} %)")
 
