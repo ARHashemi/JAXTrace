@@ -33,6 +33,20 @@ from pathlib import Path
 import numpy as np
 
 
+_G = None
+
+
+def _init_worker(shared):
+    """Publish the shared mesh once per worker process.
+
+    ⚠️ Called by ProcessPoolExecutor's initializer, so it runs ONCE per
+    worker instead of once per task. With the fork context the arrays are
+    copy-on-write, so this costs nothing beyond the fork itself.
+    """
+    global _G
+    _G = shared
+
+
 def _solve_one(sd):
     """Worker: grow one seed, solve, return only the seed's coefficients.
 
@@ -170,14 +184,22 @@ def main() -> int:
 
     t2 = time.time()
     if args.jobs > 1:
-        # ⚠️ A closure cannot be pickled for a ProcessPool. Publish the
-        # shared arrays as module globals; fork inherits them copy-on-write,
-        # so nothing large is actually copied or re-derived per worker.
-        globals().update(_G=dict(
+        # ⚠️ Python 3.14 defaults to SPAWN, not fork, so module globals are
+        # NOT inherited -- the worker raised NameError: _G. And we must not
+        # pickle the mesh per task: ~1 GB per patch.
+        #
+        # ✅ Use an explicit fork context plus an initializer. fork gives the
+        # arrays copy-on-write; the initializer publishes them once per
+        # worker rather than once per task.
+        import multiprocessing as _mp
+        _ctx = _mp.get_context("fork")
+        _shared = dict(
             fidx_g=fidx_g, elems_sorted=elems_sorted, starts=starts,
             ends=ends, nodes=nodes, conn=conn, vel=vel,
-            layers=args.layers, reg=args.reg))
-        with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+            layers=args.layers, reg=args.reg)
+        with ProcessPoolExecutor(max_workers=args.jobs, mp_context=_ctx,
+                                 initializer=_init_worker,
+                                 initargs=(_shared,)) as ex:
             for n_done, (sd, vals) in enumerate(
                     ex.map(_solve_one, all_seeds), 1):
                 coeffs[sd] = vals; filled[sd] = True; seeds_record.append(sd)
