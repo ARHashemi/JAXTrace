@@ -830,6 +830,77 @@ LN can be judged against a known-good reference rather than against hope.
 
 ---
 
+## 4j. ❌ LN DOES NOT APPLY — our defect is not the one it fixes
+
+Implemented and debugged. ❌ **Larson–Niklasson cannot help us, for a reason
+that is structural and that I should have checked before building it.**
+
+### The measurement
+
+Over 3,000 interior faces of cylA, comparing the two one-sided P1 fluxes:
+
+```
+|f_A + f_B| / |f_A| :  median 0.0000e+00   max 0.0000e+00
+```
+
+On an individual face: elem 2266 gives $+1.027232\times10^{-10}$, elem 2283
+gives $-1.027232\times10^{-10}$ — **exactly opposite**, same face-centroid
+velocity from both sides, same area, opposite normals.
+
+✅ **Our P1 velocity is $C^0$, so its value at a face centroid is single
+valued and the face fluxes are ALREADY CONTINUOUS.**
+
+### ❌ Why that kills LN
+
+[Scu16b] state their premise explicitly: *"the element-wise **constant**
+velocity field calculated in (8) yields **discontinuous normal fluxes** across
+element faces."*
+
+⚠️ **Their input is an element-wise constant velocity** — a Darcy flux
+$-\mathbf K\nabla h$, which is piecewise constant when the head is P1.
+⚠️ **Ours is a nodal P1 velocity**, which is continuous. ❌ **So the defect LN
+repairs does not exist in our data**: the averaging step is a no-op, the
+residual it corrects is identically zero, and the patch solve has nothing to
+do.
+
+✅ **The "exactly 0.0" verdict was therefore CORRECT** — it was faithfully
+measuring a quantity that is zero by construction for a $C^0$ field. ⚠️ I was
+right to distrust it, but for the wrong reason.
+
+### ⚠️ The distinction that matters, and that I had blurred
+
+There are **two different defects**, and only one is ours:
+
+| defect | who has it | fix |
+|---|---|---|
+| **face-flux discontinuity** | element-wise constant velocities (Darcy) | ✅ LN |
+| **nonzero divergence INSIDE each element** | ✅ **ours** — $\sum_F \mathbf v\cdot\mathbf n\,A=\nabla\!\cdot\mathbf v\,V\neq0$ | BDM₁ / SV |
+
+✅ **Verified identity on real elements:** net face flux $=\nabla\!\cdot
+\mathbf v\cdot|V|$ to within 0.3 % (ratios 0.997–1.003 over ten elements). So
+the net flux *is* the divergence — our field conserves nothing per element even
+though its faces match perfectly.
+
+⚠️ **Hence Scudeler being "our exact application" was true of the APPLICATION
+(particle tracking on a P1 field) and false of the DEFECT.** The abstract's
+*"this condition is not fulfilled by the standard linear Galerkin FEM"* refers
+to local mass conservation, which they obtain from a *flux* that is piecewise
+constant — not from a continuous nodal velocity.
+
+### ✅ Ranking restored
+
+| rank | route | status |
+|---|---|---|
+| **1** | ✅ **BDM₁ global projection** | ✅ **proven**: divergence 8.5e-17, preservation ~7 %, scaling verified to 50 k elements |
+| 2 | Matrix-free GPU $H(\mathrm{div})$ MINRES [Paz23] | the right full-scale solver for BDM₁ |
+| 3 | SV-P₃ | fallback; §4e showed it cannot preserve better |
+| ❌ | Larson–Niklasson | **does not apply** — wrong defect |
+
+✅ **BDM₁ remains the only method measured to fix our actual defect**, and the
+remaining work is its solver, for which [Paz23] is the literature's answer.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
