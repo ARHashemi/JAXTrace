@@ -55,6 +55,13 @@ def main() -> int:
     ap.add_argument("--field", default="Displacement")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--solver", choices=["lu", "minres"], default="lu",
+                    help="Direct LU (exact, but does not scale past ~1e5 "
+                         "elements in 3D) or preconditioned MINRES. ⚠️ MINRES "
+                         "not CG: the saddle point is symmetric INDEFINITE "
+                         "and CG returns garbage on such a system.")
+    ap.add_argument("--rtol", type=float, default=1e-10)
+    ap.add_argument("--maxiter", type=int, default=20000)
     ap.add_argument("--reg", type=float, default=1e-6,
                     help="Tikhonov weight toward the P1 normal trace, as a "
                          "fraction of |N|^2. ⚠️ Needed because N^T N is "
@@ -228,8 +235,38 @@ def main() -> int:
     print(f"  saddle-point {A.shape[0]:,} x {A.shape[1]:,}, nnz {A.nnz:,}")
 
     t2 = time.time()
-    sol = spla.splu(A).solve(b)
-    print(f"  solved in {time.time()-t2:.1f}s")
+    if args.solver == "lu":
+        sol = spla.splu(A).solve(b)
+        print(f"  solved (direct LU) in {time.time()-t2:.1f}s")
+    else:
+        # ⚠️ MINRES, not CG: the saddle point is symmetric INDEFINITE (the
+        # zero block gives negative eigenvalues), and CG silently returns
+        # garbage on an indefinite system rather than failing.
+        #
+        # Preconditioner: block-diagonal with the objective block approximated
+        # by its diagonal and the Schur complement by its own diagonal. ✅ That
+        # is the cheapest thing that is spectrally sensible here, and it costs
+        # one vector divide per iteration.
+        d1 = np.asarray((Nf.T @ Nf).diagonal()) + eps
+        S = (Mf @ sp.diags(1.0 / np.maximum(d1, 1e-300)) @ Mf.T)
+        d2 = np.asarray(S.diagonal())
+        dinv = np.concatenate([1.0 / np.maximum(d1, 1e-300),
+                               1.0 / np.maximum(np.abs(d2), 1e-300)])
+        Pre = spla.LinearOperator(A.shape, matvec=lambda v: dinv * v)
+        it = {"n": 0}
+
+        def _cb(_):
+            it["n"] += 1
+
+        sol, info = spla.minres(A, b, M=Pre, rtol=args.rtol,
+                                maxiter=args.maxiter, callback=_cb)
+        tag = "converged" if info == 0 else f"⚠️ info={info}"
+        print(f"  solved (MINRES, {it['n']} it, {tag}) in "
+              f"{time.time()-t2:.1f}s")
+        # ⚠️ An iterative solve does NOT satisfy the constraint exactly, so
+        # report the residual rather than assuming it.
+        rr = float(np.linalg.norm(A @ sol - b) / max(np.linalg.norm(b), 1e-300))
+        print(f"     relative residual {rr:.3e}")
     q = np.zeros(n_dof); q[free] = sol[:len(free)]; q[bdof] = qb[bdof]
 
     # ── verdicts ────────────────────────────────────────────────────────
