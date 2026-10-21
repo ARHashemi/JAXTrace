@@ -976,6 +976,70 @@ correct route, not a fallback** — 61 subdomains × 25 s = **1.6 min/snapshot o
 
 ---
 
+## 4l. ✅ FEMUSS already decomposed the domain — and the pieces are the right size
+
+⚠️ The PVTU files are not monolithic. Each snapshot is written as **64 pieces**
+with `GhostLevel="1"`:
+
+```
+<PUnstructuredGrid GhostLevel="1">
+  <Piece Source="cylA_159_0.vtu"/>   13,174 points   59,275 cells
+  <Piece Source="cylA_159_1.vtu"/>   12,937 points   55,916 cells
+  ... 64 pieces
+```
+
+✅ **The piece size is ~50–59 k cells — almost exactly the 50 k subdomain at
+which the direct LU costs 25 s.** The decomposition we were about to build
+already exists.
+
+✅ **And the overlap is real, not just declared.** Measured on 4 pieces: 49,716
+points listed against 45,815 geometrically unique — **7.8 % duplicated across
+pieces**. ⚠️ There is no `vtkGhostType` array, so the ghost layer must be
+detected geometrically (by shared node coordinates after deduplication), but it
+*is* present — which is exactly the overlap an additive-Schwarz decomposition
+needs.
+
+⚠️ **One caution.** The pieces are FEMUSS's **parallel partition**, chosen for
+*its* load balance, not for our projection. They are not guaranteed to be
+connected or well shaped for a saddle-point solve. ✅ But they are conforming,
+overlapping and the right size, so they are the natural starting point and cost
+nothing to try.
+
+---
+
+## 4m. ✅ PREBUILT, not per step — and the margin is large
+
+The projection **must** be prebuilt. Three independent reasons:
+
+1. ⚠️ **It is per-SNAPSHOT, not per-step.** D2 has **166 snapshots** but
+   **8000 RK4 steps** — **48 steps per snapshot**. Projecting per step would
+   redo identical work 48 times.
+2. ❌ **It is a global solve over the mesh.** Nothing inside a `vmap`-ed
+   per-particle kernel can contain one.
+3. ⚠️ **It would reintroduce in-step host work** — a CPU solve inside the time
+   loop, which is precisely what must not happen.
+
+### Storage, and it is modest
+
+| | DOF | per snapshot | all snapshots |
+|---|---:|---:|---:|
+| cylA | 18.8 M | **72 MB** | 72 MB (1 snapshot) |
+| **D2** | 66.0 M | **252 MB** | **41 GB** (166) |
+
+✅ **One snapshot in memory at a time**, streamed exactly as the velocity stack
+already is. ⚠️ 41 GB on disk for D2 is real but unremarkable beside the case's
+existing output.
+
+### ✅ The kernel change is neutral-to-positive
+
+`interpolate_velocity_single` evaluates $\mathbf u=\mathbf A\mathbf x+\mathbf b$
+from a per-element 12-vector instead of P1 barycentric weights. ✅ That is
+**fewer** operations than P1 (no barycentric solve), stays entirely inside the
+`vmap`, and adds **no transfer**. Throughput should be neutral or slightly
+better.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
