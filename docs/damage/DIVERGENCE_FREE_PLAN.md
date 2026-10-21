@@ -253,6 +253,85 @@ the velocity stack.
 
 ---
 
+## 4b. ⚠️ STEP 1 RESULT (2026-10-21) — RTN₀ conserves mass but DISCARDS ROTATION
+
+The sub-mesh proof was built and run
+(`scripts/damage/rtn0_submesh_proof.py`, cylA, 20,000 contiguous elements).
+✅ **The projection works.** ❌ **But the field it returns is not usable for
+FSW, and the reason is structural.**
+
+### What the solver does
+
+| attempt | basis | scaling | constraint residual | preservation |
+|---|---|---|---:|---:|
+| 1 | with $\lvert Fvert$ | none | **6.8e-16** ✅ | 84 % ❌ |
+| 2 | no $\lvert Fvert$ | none | 9.3e+04 ❌ | huge ❌ |
+| 3 | no $\lvert Fvert$ | row-scaled | 1.3e-08 ⚠️ | 89 % ❌ |
+
+⚠️ **Attempt 1 satisfied the constraint at machine precision** — the
+saddle-point assembly, the global mass-balance correction and the boundary
+pinning are all correct. ❌ Its basis was wrong (see below), and attempts 2–3
+use the right basis but suffer $1/(3V)$ with $V\sim10^{-12}$, which wrecks the
+conditioning.
+
+⚠️ **Two implementation bugs found and worth recording.** (i) With $q_F$ the
+**flux** rather than the flux density, the basis is
+$oldsymbol\psi_F=(\mathbf x-\mathbf x_{opp})/(3V)$ with **no $\lvert Fvert$
+factor**; a unit test on a constant field — which RTN₀ contains exactly —
+returned 50 % error with it and 3.5e-17 without, and took seconds to write.
+(ii) **Global mass balance is a consistency condition**: demanding
+$
+abla\!\cdot\mathbf u=0$ in every element forces the net boundary flux to
+vanish, and the P1 field's does not, so the constrained system is insoluble
+until the imbalance is distributed over the boundary.
+
+### ❌ The decisive finding: RTN₀ cannot represent rotation
+
+Tested with **no solver at all** — exact face fluxes of a known field, then
+reconstruct:
+
+| field | relative error |
+|---|---:|
+| constant | **3.5e-17** ✅ |
+| linear with divergence ($\mathbf u=\mathbf x$) | **1.1e-16** ✅ |
+| **rotation** ($\mathbf u=(-y,x,0)$) | **3.3e-01** ❌ |
+| shear ($\mathbf u=(z,0,0)$) | 3.3e-01 ❌ |
+| linear divergence-free ($\mathbf u=(x,-y,0)$) | **1.00** ❌ |
+
+✅ **On one tetrahedron, RTN₀ spans only $\{	ext{constants}\}\oplus\{\mathbf x\}$**
+— four degrees of freedom, three translations plus one radial (divergence)
+mode. ❌ **Rotation is not in the space.**
+
+⚠️ **FSW flow near the tool is dominated by rotation.** So the ~85 %
+"preservation" loss, nearly identical across three very different numerical
+setups, is **a property of the space, not of the implementation**. ❌ RTN₀
+conserves mass by throwing away exactly the motion that defines the process.
+
+⚠️ **This does not contradict [Sel20].** Their application is groundwater,
+where flow is gradient-driven and nearly irrotational, so lowest-order RTN₀
+loses little. ✅ Our flow is the opposite case, and the method does not
+transfer for that specific reason.
+
+### ✅ What this changes
+
+❌ **Lowest-order RTN₀ is rejected** — on a measurement, not a guess.
+The remaining routes, re-ranked:
+
+1. ✅ **Next-order Raviart–Thomas (RT₁) or BDM₁.** BDM₁ contains **all linear
+   fields**, including rotation, and is still $H(\mathrm{div})$-conforming with
+   element-wise exact mass conservation. ⚠️ 3 DOF per face instead of 1 — about
+   65 M unknowns on D2, so the solve grows but the structure is unchanged.
+2. ⚠️ **Scott–Vogelius $P_3$ on the Alfeld split**, as originally ranked — more
+   expensive but pointwise divergence-free and rotation-complete.
+3. ❌ Lowest-order RTN₀ — **rejected, rotation-blind.**
+
+✅ **The infrastructure built here transfers directly to option 1**: the face
+topology, orientation convention, mass-balance correction, boundary pinning and
+saddle-point assembly are all basis-independent. ⚠️ Only the basis functions and
+the per-face DOF count change.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
