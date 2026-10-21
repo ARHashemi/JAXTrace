@@ -1463,6 +1463,70 @@ error normalised by a global velocity scale**, not a per-element ratio.
 
 ---
 
+## 4t. ✅ D2 RESULTS — and the preservation gap localised to |A|, cause still open
+
+### ✅ D2 timestep 34, full mesh
+
+```
+solved in 1530.8 s; filled 10,807,677 / 10,807,677 (100.0 %)
+divergence   median 1.09e-16   p99 2.66e-15
+preservation p50  4.73e-04     p90 1.58e-01
+seam         6.24e-04 vs 4.18e-04 = 1.49x
+wrote D2_34.npz (459.6 MB)
+```
+
+✅ **100 % coverage on 10.8 M elements in 25.5 min on 12 workers**, divergence
+at machine precision. ✅ **Preservation p50 4.7e-04 — essentially perfect**,
+and 400× better than cylA's 0.186.
+
+⚠️ Seam 1.49× here against cylA's 1.05×, with 128 pieces instead of 64. At
+6.2e-04 absolute it is immaterial, but it should be watched.
+
+### ✅ The gap is REAL and tracks |A|, not the case
+
+Identical pipeline, same seed size, same layers, 3 positions each:
+
+| case | patch | \|A\| | preservation |
+|---|---:|---:|---:|
+| D2 | 24,879 | **8.01e+04** | **2.30e-07** |
+| D2 | 24,204 | 2.22e+05 | 2.22e-07 |
+| D2 | 21,259 | 9.37e+05 | 6.79e-02 |
+| cylA | 15,075 | 6.22e+06 | 3.53e-02 |
+| cylA | 17,363 | 3.13e+08 | 1.73e-01 |
+| cylA | 23,377 | 3.79e+08 | 3.02e-01 |
+
+✅ **corr(log\|A\|, log preservation) = +0.82, and the ordering is exact**:
+every patch with $\lvert A\rvert<10^6$ preserves well, every patch above it
+does not. ⚠️ **So it is a per-patch property, not a per-case one** — cylA
+simply has more bad patches.
+
+⚠️ $\lvert A\rvert\sim10^8$ is **not physical**: $\lvert\nabla\mathbf u\rvert$
+is ~150 s⁻¹, so the BDM₁ coefficients are being amplified by ~10⁶.
+
+### ❌ Three hypotheses tested, all refuted
+
+| hypothesis | test | verdict |
+|---|---|---|
+| slow material inflates the ratio | velocity distributions | ❌ nearly identical (p50 0.213 vs 0.211) |
+| cylA has more divergence to remove | $\lvert\nabla\!\cdot u\rvert/\lvert D\rvert$ | ❌ **inverted** — D2 is *larger* (4.87e-02 vs 2.49e-02) |
+| `inv(T)` ill-conditioned by geometry | cond(T), and vs distance from origin | ❌ similar (1.1e5 vs 1.7e5), corr −0.18 |
+
+⚠️ **The cause of the \|A\| blow-up is not yet identified.** What is
+established: it is per-patch, correlates with preservation at +0.82, and is
+*not* explained by the velocity field, the divergence magnitude, or the
+elementwise conditioning of **T**.
+
+⚠️ Remaining candidates, untested: the **Tikhonov weight** `reg` is scaled by
+$\lVert N\rVert^2$, which varies per patch — a patch where the objective block
+is weak would let the solution drift to large coefficients while still
+satisfying the constraint exactly (which it does: divergence is 1e-16 on
+*every* patch, good or bad).
+
+✅ **What is NOT in doubt:** divergence is machine precision on both cases and
+every patch; D2 — the production case — preserves the field to 4.7e-04.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
