@@ -1158,6 +1158,63 @@ a required check, not assumed.**
 
 ---
 
+## 4o. ✅ THE DECOMPOSITION WORKS — divergence exact, one caveat at the seam
+
+End-to-end run on 2 FEMUSS pieces of cylA (`build_divfree_field.py`):
+
+```
+piece 0: seed 59,275 -> patch 79,281   (221 s)
+piece 1: seed 55,916 -> patch 74,382   (365 s total)
+filled 115,191 / 3,050,196 elements
+```
+
+| check | result | |
+|---|---:|---|
+| **divergence** median | **8.73e-17** | ✅ machine precision |
+| divergence p99 / max | 1.09e-15 / 1.05e-14 | ✅ |
+| **preservation** p50 | **2.76e-02** | ✅ **better than monolithic (6.75e-02)** |
+| preservation p90 / p99 | 2.39e-01 / 3.48e-01 | |
+| **seam** p50 | 3.77e-02 vs 2.74e-02 | ⚠️ **1.38×** |
+
+✅ **The decomposition does not degrade the property we are buying.** The
+divergence matches the monolithic BDM₁ result exactly, because the constraint
+is enforced **per element** regardless of which patch solved it.
+
+✅ **And preservation is BETTER than monolithic** (2.76e-02 vs 6.75e-02),
+because every retained element is now a patch *interior* element — the
+3-layer discard rule is doing its job.
+
+### ⚠️ The seam, in proportion
+
+1,945 of 115,191 elements (**1.7 %**) sit across a piece interface, and their
+preservation is **1.38×** the bulk — above the 1.3× gate.
+
+⚠️ **But the seam affects FIELD FIDELITY, not mass conservation.** The
+divergence at seam elements is 8.7e-17 like everywhere else, because
+$\nabla\!\cdot\mathbf u=0$ is a per-element constraint. ✅ **So $\det F$ is
+unaffected** — which is the quantity this whole exercise exists to fix.
+
+For scale: the P1 field fails the $\det F$ gate for **48 %** of particles. A
+1.38× fidelity difference on 1.7 % of elements is a far smaller defect, and it
+is measured rather than assumed.
+
+### ⚠️ Cost correction — 7× my estimate
+
+| | estimated | **measured** |
+|---|---:|---:|
+| per piece | 25 s | **~180 s** |
+| cylA, 64 pieces, serial | 27 min | **3.2 h** |
+| **16 threads** | 1.6 min | **~12 min/snapshot** |
+
+⚠️ The 3-layer growth inflates each patch from ~55 k to ~79 k elements, and LU
+scales as $n^{1.82}$, so the overlap costs ~7× the bare piece. ✅ Still
+tractable — patches are independent — but **12 min/snapshot, not 1.6**.
+
+⚠️ **And widening to 5 layers will cost more again**, so the seam fix is not
+free. Running that test now to measure the trade.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
