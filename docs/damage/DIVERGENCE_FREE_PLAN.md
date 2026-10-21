@@ -1403,6 +1403,66 @@ one more measurement before the field is used for production tracking.**
 
 ---
 
+## 4s. ✅ THE PRESERVATION PUZZLE — float32 storage was destroying the field
+
+⚠️ The full run reported preservation p50 **0.186**, but recomputing from the
+saved `.npz` gave **0.4285**. ✅ **That discrepancy was the clue.**
+
+### ❌ The cause: `u = A x + b` is a catastrophic cancellation
+
+| quantity | magnitude |
+|---|---:|
+| $\lvert\mathbf A\mathbf x\rvert$ | **1.4e+06** |
+| $\lvert\mathbf b\rvert$ | **6.4e+05** |
+| $\lvert\mathbf u\rvert$ | **2.1e-01** |
+
+⚠️ The two terms are each ~1e6 and cancel to ~1e-1 — **6.8 decimal digits of
+cancellation**. float32 carries ~7.2, so **only 0.4 digits survive**.
+
+✅ **Measured directly:** fresh float64 coefficients give preservation p50
+**0.140**; the same coefficients after a float32 round trip give **0.240** — a
+**1.7× degradation from storage alone**.
+
+✅ **Fixed:** the field is now stored in **float64**. 12 doubles/element =
+1.0 GB for D2 against 0.5 GB — cheap insurance for the quantity the whole
+method rests on.
+
+⚠️ **A better fix exists and is recorded as future work:** store
+$\mathbf u_c$ and $\mathbf A$ about the **element-local** origin,
+$\mathbf u(\mathbf x)=\mathbf u_c+\mathbf A(\mathbf x-\mathbf x_c)$, which
+removes the cancellation entirely rather than paying for it in precision.
+
+### ⚠️ But that is not the whole story — two issues, not one
+
+float64 preservation is **0.140**, still above the **0.106** the position sweep
+measured at the same seed size. ⚠️ **So float32 explains the 0.186 → 0.4285
+discrepancy and part of the gap, but not all of it.**
+
+### ✅ And the error is strongly concentrated — by velocity magnitude
+
+| $\lvert\mathbf u\rvert$ | n | preservation p50 |
+|---|---:|---:|
+| 1e-4 … 1e-3 | 1,062 | **20.6** |
+| 1e-3 … 5e-3 | 50,300 | **3.68** |
+| 5e-3 … 1e-2 | 206,903 | 1.21 |
+| **1e-2 … 1** | **2,791,930** | **0.403** |
+
+✅ **The error is a RATIO, and it blows up where $\lvert\mathbf u\rvert$ is
+small** — stagnant material far from the tool, where a small absolute change
+is a large relative one. ⚠️ **91.5 % of elements are in the well-resolved
+band**, and the tail is dominated by nearly-motionless material where the
+relative measure is not meaningful.
+
+By radius, the worst band is $r = 9\!-\!15$ mm (p50 **4.71**) — ⚠️ **outside
+the 9 mm shoulder**, i.e. again the slow-moving far field, not the stir zone.
+✅ Inside the tool radius ($r<4$ mm) it is **0.351**.
+
+⚠️ **So the headline p50 overstates the damage**: it is dominated by elements
+whose velocity is near zero. ✅ **A future report should use an ABSOLUTE
+error normalised by a global velocity scale**, not a per-element ratio.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$

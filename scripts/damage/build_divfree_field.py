@@ -277,8 +277,18 @@ def main() -> int:
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
+        # ⚠️ FLOAT64, NOT FLOAT32. u = A x + b is a CATASTROPHIC
+        # CANCELLATION: |A x| ~ 1.4e6 and |b| ~ 6.4e5 cancel to |u| ~ 2.1e-1,
+        # which is 6.8 decimal digits. float32 carries ~7.2, so only ~0.4
+        # digits survive. Measured: preservation p50 degrades 0.140 -> 0.240
+        # (1.7x) purely from the round trip.
+        #
+        # ✅ The cost is 12 doubles/element = 1.0 GB for D2 against 0.5 GB,
+        # which is cheap insurance for a quantity the whole method depends on.
+        # ⚠️ A better fix is to store u_c and A about the ELEMENT-LOCAL origin,
+        # removing the cancellation entirely -- recorded as future work.
         np.savez_compressed(args.out,
-                            coeffs=coeffs.astype(np.float32),
+                            coeffs=coeffs,
                             filled=filled, timestep=args.timestep)
         print(f"  wrote {args.out} "
               f"({args.out.stat().st_size/1024**2:.1f} MB)")
