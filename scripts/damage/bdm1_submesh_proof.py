@@ -482,6 +482,42 @@ def main() -> int:
     # div = 0 and match the centroid velocity. On a sub-mesh the artificial
     # cut boundary is large (here ~40 % of faces), so pooling them would
     # report a tail that the FULL mesh would not have.
+    # ⚠️ Preservation BY LAYER DEPTH from the boundary. This is what decides
+    # how much overlap an additive-Schwarz decomposition needs: the answer is
+    # "however many layers it takes for preservation to reach the interior
+    # value", which is a MEASUREMENT, not a guess. Element-count rules are
+    # suspect because a refined region packs many small elements into a short
+    # physical distance -- measured: 56-86 % of seam elements on the FEMUSS
+    # pieces are in the fine region, where 2 layers buys only 0.157 mm.
+    depth = np.full(m, -1, dtype=np.int32)
+    depth[isb_face[fidx].any(axis=1)] = 0
+    # face adjacency: grow the front one layer at a time
+    _nb = [[] for _ in range(m)]
+    _owner2 = {}
+    for f in range(4):
+        for e, gf in enumerate(fidx[:, f]):
+            _owner2.setdefault(gf, []).append(e)
+    for gf, els in _owner2.items():
+        if len(els) == 2:
+            _nb[els[0]].append(els[1]); _nb[els[1]].append(els[0])
+    for lay in range(1, 8):
+        front = np.where(depth == lay - 1)[0]
+        for e in front:
+            for e2 in _nb[e]:
+                if depth[e2] < 0:
+                    depth[e2] = lay
+    print("     preservation by LAYER DEPTH from the cut boundary:")
+    for lay in range(0, 7):
+        sel_l = depth == lay
+        if sel_l.sum() > 20:
+            print(f"        layer {lay}: n={int(sel_l.sum()):>6,}  "
+                  f"p50={np.percentile(r[sel_l],50):.3e}  "
+                  f"p90={np.percentile(r[sel_l],90):.3e}")
+    deep = depth >= 5
+    if deep.sum() > 20:
+        print(f"        layer>=5: n={int(deep.sum()):>6,}  "
+              f"p50={np.percentile(r[deep],50):.3e}")
+
     touches_b = isb_face[fidx].any(axis=1)
     print(f"     elements touching the (sub-mesh cut) boundary: "
           f"{int(touches_b.sum()):,}/{m:,} ({100*touches_b.mean():.1f} %)")
