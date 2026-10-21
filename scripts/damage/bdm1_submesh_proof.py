@@ -66,14 +66,19 @@ def main() -> int:
                     help="ILU drop tolerance. Smaller = stronger "
                          "preconditioner, more memory.")
     ap.add_argument("--ilu-fill", type=float, default=20.0)
-    ap.add_argument("--objective", choices=["faces", "centroid"],
-                    default="faces",
-                    help="'faces' (default): match the P1 field at the 4 FACE "
-                         "centroids -- 12 equations for the element's 12 DOF, "
-                         "so N^T N is full rank. 'centroid': the original "
-                         "3-equation objective, which leaves a 9-dimensional "
-                         "null space per element and defeated every "
-                         "preconditioner.")
+    ap.add_argument("--objective", choices=["centroid", "faces"],
+                    default="centroid",
+                    help="'centroid' (default, and MEASURED BEST): match "
+                         "the P1 field at the element centroid -- 3 equations "
+                         "on 12 DOF, leaving 8 directions for the Tikhonov "
+                         "term to choose as close to P1 as possible. 'faces' "
+                         "matches all 4 face centroids, making N^T N full "
+                         "rank, but 12 equations + 1 constraint OVER-"
+                         "determines the element: measured divergence 5.5e-09 "
+                         "and preservation 9.6e+03, against 8.5e-17 and 0.097 "
+                         "for 'centroid'. ⚠️ The under-determinacy is a "
+                         "FEATURE closed by Tikhonov, not a defect -- it is "
+                         "what lets the field stay near P1.")
     ap.add_argument("--precond", choices=["pazner", "ilu"], default="pazner",
                     help="'pazner' (default): block-diagonal with the "
                          "M-matrix graph-Laplacian Schur complement of "
