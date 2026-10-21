@@ -277,7 +277,19 @@ def main() -> int:
             # spectrally close to the original. The shift is ONLY in the
             # preconditioner; A itself is untouched, so the solution still
             # satisfies the exact constraint.
-            shift = args.ilu_shift * float(np.abs(A.diagonal()).max())
+            # ⚠️ Scale the shift by the OBJECTIVE block's magnitude, not by
+            # max|diag(A)| -- the multiplier rows have a ZERO diagonal, so a
+            # shift relative to the max diagonal can still be far below the
+            # entries in M that surround it, leaving the pivot effectively
+            # zero. Measured: three different --reg values gave byte-identical
+            # output and the ILU never succeeded, which is the signature of a
+            # shift too small to matter.
+            _mscale = float(np.abs(Mf.data).max()) if Mf.nnz else 1.0
+            shift = max(args.ilu_shift * float(np.abs(A.diagonal()).max()),
+                        args.ilu_shift * _mscale)
+            print(f"  ILU shift {shift:.3e} "
+                  f"(diag max {float(np.abs(A.diagonal()).max()):.3e}, "
+                  f"|M| max {_mscale:.3e})")
             Ap = (A + sp.diags(np.concatenate(
                 [np.zeros(n1), np.full(m, -shift)]), format='csc')).tocsc()
             ilu = spla.spilu(Ap, drop_tol=args.ilu_drop,
