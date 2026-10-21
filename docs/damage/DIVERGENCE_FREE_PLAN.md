@@ -407,6 +407,66 @@ element-wise guarantee proves insufficient for $\det F$.
 
 ---
 
+## 4d. ✅ BDM₁ WORKS — divergence solved; ⚠️ the solver needs conditioning work
+
+`scripts/damage/bdm1_submesh_proof.py`, cylA, contiguous sub-meshes.
+
+### ✅ The divergence problem is SOLVED
+
+| | median $\lvert\nabla\!\cdot\mathbf u\rvert/\lvert\nabla\mathbf u\rvert$ |
+|---|---:|
+| P1 (the problem) | 2.76e-03 |
+| **BDM₁** | **1.0e-16** |
+
+✅ **Machine precision, and stable at every problem size tested** (2 k → 20 k
+elements: 9.1e-17, 9.5e-17, 1.0e-16). ✅ **That is a factor of $2.8\times10^{13}$,
+and it is the result this whole line of work was for.**
+
+### ✅ And unlike RTN₀, the field survives
+
+| size | BDM₁ interior median | RTN₀ |
+|---|---:|---:|
+| 2,000 el | **0.0100** | ~0.85 |
+| 5,000 el | **0.0249** | ~0.85 |
+| 20,000 el | 1.62 ⚠️ | ~0.85 |
+
+✅ At 2 k elements the field changes by **1 %** while becoming exactly
+divergence-free — ✅ **85× better preservation than RTN₀**, and it confirms
+§4c's prediction that removing only the radial mode leaves rotation intact.
+
+### ⚠️ But preservation degrades with problem size — a conditioning issue
+
+❌ **0.010 → 0.025 → 1.62 as the sub-mesh grows, while the divergence stays at
+1e-16.** ⚠️ That signature — constraint satisfied perfectly, objective
+increasingly violated — is a **badly conditioned saddle point**, not a physical
+effect. The direct LU is losing accuracy in the objective block as the system
+grows.
+
+⚠️ **Likely causes, in order:**
+1. The constraint row scaling is a single global factor; a **per-row** scaling
+   (by $\lVert\mathbf M_i\rVert$) is the standard fix.
+2. $\mathbf N^{\mathsf T}\mathbf N$ is **singular by construction** — the
+   objective only sees the centroid velocity (3 numbers) per element while the
+   element has 12 DOF, so 9 directions per element are unconstrained by the
+   objective and are fixed only through face sharing. ⚠️ **A regularisation
+   term $\epsilon\lVert\mathbf q-\mathbf q_{P1}\rVert^2$ pulling the unseen
+   directions toward the P1 trace is the principled fix**, and it is what
+   [Sel20] avoid by having only one DOF per face.
+3. An iterative solver (MINRES with a block preconditioner) rather than LU.
+
+✅ **None of these threatens the method** — the space is right and the
+divergence result is exact. ⚠️ **It is solver engineering, and it is not
+finished.**
+
+### Cost note
+
+BDM₁ at 20 k elements: 31,910 × 31,910 saddle point, 620 k nonzeros, 7.0 s by
+direct LU. ⚠️ Extrapolating to D2's 10.8 M elements is not meaningful for a
+direct solver; step 3 of §5 (iterative + preconditioner) is mandatory, as
+already stated.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
