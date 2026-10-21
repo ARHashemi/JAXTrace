@@ -442,7 +442,48 @@ increasingly violated — is a **badly conditioned saddle point**, not a physica
 effect. The direct LU is losing accuracy in the objective block as the system
 grows.
 
-⚠️ **Likely causes, in order:**
+### ✅ FIXED (2026-10-21): Tikhonov toward the P1 trace
+
+⚠️ **$\mathbf N^{\mathsf T}\mathbf N$ is singular by construction.** The
+objective sees only the 3-component centroid velocity per element while the
+element carries 12 DOF, so **9 directions per element are invisible to it** and
+are pinned only through face sharing. The constraint was satisfied and the
+objective was free to wander in that null space — exactly the observed
+signature.
+
+✅ **Fix: a Tikhonov term pulling every DOF toward its P1 normal trace**, i.e.
+*"stay as close to the input field as the divergence constraint allows"*. That
+makes the objective block positive definite and the saddle point well posed.
+⚠️ [Sel20] never meet this because RTN₀ has **one** DOF per face (4 per
+element), so their objective is not rank deficient.
+
+**Weight sweep at 20,000 elements (interior):**
+
+| `--reg` | divergence | preservation p50 | p99 |
+|---|---:|---:|---:|
+| 0 | 1.0e-16 | 1.624 ❌ | 1.97e+12 ❌ |
+| **1e-8** | **8.5e-17** ✅ | **0.097** ✅ | **1.86** ✅ |
+| 1e-6 | 4.2e-16 ✅ | 0.101 ✅ | 1.97 |
+| 1e-4 | 5.7e-14 | 2.004 ❌ | 2.87e+01 |
+| 1e-2 | 5.9e-12 | 197.7 ❌ | 2.76e+03 |
+
+⚠️ **Too much regularisation is worse, not better** — above ~1e-6 it fights the
+objective instead of only fixing its null space. ✅ **The usable window is
+1e-8 … 1e-6.**
+
+**✅ And it now SCALES**, which was the whole problem:
+
+| elements | divergence | preservation p50 | solve (direct LU) |
+|---|---:|---:|---:|
+| 5,000 | 8.2e-17 | 0.1005 | 0.4 s |
+| 20,000 | 8.5e-17 | 0.0974 | 7.1 s |
+| 50,000 | 8.7e-17 | **0.0675** | 25.1 s |
+
+✅ **Preservation improves with size** (0.100 → 0.068) instead of blowing up,
+and divergence is pinned at 8.5e-17 throughout. ✅ **BDM₁ with `--reg 1e-8` is
+a working divergence-free projection that preserves the field to ~7 %.**
+
+#### ⚠️ Remaining (superseded causes, kept for the record)
 1. The constraint row scaling is a single global factor; a **per-row** scaling
    (by $\lVert\mathbf M_i\rVert$) is the standard fix.
 2. $\mathbf N^{\mathsf T}\mathbf N$ is **singular by construction** — the
