@@ -1040,6 +1040,82 @@ better.
 
 ---
 
+## 4n. ⚠️ THE SEAM — the concern was right, and it changes the design
+
+⚠️ **Question raised: after merging and deduplication, would a per-piece
+projection be discontinuous at the subdomain boundary?** ✅ **Tested before
+implementing, and the answer reshapes the plan.**
+
+### ❌ `GhostLevel="1"` does not mean overlapping cells
+
+`scripts/damage/test_piece_seam.py`, pieces 0 and 1 of cylA snapshot 159:
+
+```
+shared POINTS : 1,271
+shared CELLS  : 0
+```
+
+⚠️ **The pieces TILE the domain and meet at a surface.** The declared ghost
+level is not backed by duplicated cells, and there is no `vtkGhostType` array.
+❌ So the earlier reading of "7.8 % duplicated points = usable overlap" was
+wrong: the duplication is a shared *interface surface*, not a ghost layer.
+
+### ✅ Continuity itself is safe — but accuracy is not
+
+An interface face belongs to exactly one piece, and in **both** neighbouring
+pieces it is a *boundary* face pinned to the **same** P1 normal trace. ✅ **So
+the normal component agrees across the seam and H(div) conformity survives
+merging.** The literal concern — a double-valued normal flux — does not occur.
+
+❌ **But §4d measured what pinning costs:**
+
+| | preservation p50 |
+|---|---:|
+| interior elements | **0.097** |
+| boundary-touching | **40.9** (420× worse) |
+
+Measured across 8 FEMUSS pieces:
+
+| | |
+|---|---:|
+| boundary faces per piece | **10.3 %** |
+| **elements touching a seam** | **21.5 %** |
+| true domain boundary, whole mesh | **5.7 %** |
+
+⚠️ **A per-piece solve over-constrains 3.8× more elements than a whole-mesh
+solve**, and each of those lands in the 420×-worse regime. ⚠️ **Worse, the
+seams are a parallel partition — they cut THROUGH the stir zone**, which is
+exactly where the void physics lives.
+
+### ✅ The fix: overlapping Schwarz with a discarded ring
+
+Grow each piece by **one or two element layers** taken from its neighbours,
+solve on the enlarged patch, and **keep only the interior of the original
+piece**. ✅ The over-constrained ring then falls entirely inside the discarded
+overlap, so every retained element is solved as an interior element.
+
+⚠️ **The overlap must be BUILT, not reused.** FEMUSS's pieces share points but
+no cells, so there is no ghost layer to exploit. ✅ But the global mesh is
+already loaded and deduplicated for tracking, so growing a patch is a cheap
+neighbour query on data we already hold.
+
+⚠️ **And the pieces are then only a PARTITION HINT**, not the decomposition
+itself — we use their element lists as seeds and build our own overlap. That
+is still a saving: it removes the need to partition 10.8 M elements ourselves.
+
+### Revised step 1
+
+1. Load and deduplicate the global mesh (already done for tracking).
+2. Read the 64 piece element lists as **seeds**.
+3. Grow each seed by 2 element layers via face adjacency → **overlapping patch**.
+4. Solve BDM₁ on each patch independently (direct LU, ~25 s at 50 k).
+5. Keep only the **seed** elements' DOFs; discard the overlap ring.
+6. ⚠️ **Verify at the seam**: measure the normal-flux jump across
+   piece interfaces on the assembled field. It should be ~0 by construction;
+   anything else means the discard rule is wrong.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
