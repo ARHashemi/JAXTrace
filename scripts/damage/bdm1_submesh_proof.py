@@ -193,9 +193,29 @@ def main() -> int:
     free = np.setdiff1d(np.arange(n_dof), bdof)
     print(f"  unknowns: {len(free):,} free + {len(bdof):,} pinned boundary")
 
+    # ⚠️ DROP EMPTY CONSTRAINT ROWS -- the exact cure for the rank deficiency.
+    # An element whose four faces all lie on the (sub-mesh cut) boundary has
+    # EVERY DOF pinned, so its div = 0 row acts on no free unknown and is
+    # identically zero. Measured on a 1,500-element block: rank(M) = 1,498 of
+    # 1,500, deficiency exactly 2, and exactly 2 such elements -- a perfect
+    # match. The two left null vectors were NOT the constant vector, which
+    # ruled out the classic enclosed-domain pressure mode.
+    #
+    # ✅ Dropping them is exact, not a regularisation: the rows carry no
+    # information. And on the FULL mesh they cannot occur at all -- an element
+    # with four true-boundary faces would be a detached tetrahedron -- so this
+    # is a sub-mesh artefact that was blocking every preconditioner.
     Nf, Mf = N[:, free], M[:, free]
     rhs_g = g - N[:, bdof] @ qb[bdof]
     rhs_f = -(M[:, bdof] @ qb[bdof])
+    _rownnz = np.diff(Mf.tocsr().indptr)
+    _keep = _rownnz > 0
+    if not _keep.all():
+        print(f"  ⚠️ dropping {int((~_keep).sum())} empty constraint rows "
+              f"(elements with all 4 faces pinned) -- these were the exact "
+              f"rank deficiency")
+        Mf = Mf[_keep]
+        rhs_f = rhs_f[_keep]
 
     # ⚠️ Row-scale the constraint block: the objective entries carry the
     # geometry while tr(A) carries 1/length, so the two blocks differ by
@@ -291,7 +311,8 @@ def main() -> int:
                   f"(diag max {float(np.abs(A.diagonal()).max()):.3e}, "
                   f"|M| max {_mscale:.3e})")
             Ap = (A + sp.diags(np.concatenate(
-                [np.zeros(n1), np.full(m, -shift)]), format='csc')).tocsc()
+                [np.zeros(n1), np.full(Mf.shape[0], -shift)]),
+                format='csc')).tocsc()
             ilu = spla.spilu(Ap, drop_tol=args.ilu_drop,
                              fill_factor=args.ilu_fill)
             Pre = spla.LinearOperator(A.shape, matvec=ilu.solve)
