@@ -554,6 +554,58 @@ cost.
 
 ---
 
+## 4f. ⚠️ The full-mesh solver — where it stands (2026-10-21)
+
+### ✅ The method is proven; the SOLVER is the open item
+
+| elements | divergence | preservation p50 | direct LU |
+|---|---:|---:|---:|
+| 5,000 | 8.2e-17 | 0.1005 | 0.4 s |
+| 20,000 | 8.5e-17 | 0.0974 | 7.1 s |
+| 50,000 | 8.7e-17 | **0.0675** | 25.1 s |
+
+### ❌ The iterative path does not yet work — four attempts, recorded
+
+| attempt | outcome |
+|---|---|
+| MINRES + diagonal preconditioner | ⚠️ 20,000 iterations, relative residual **1.3e-02**, divergence degraded to 5.1e-04 |
+| ILU of the raw saddle point | ❌ *"Factor is exactly singular"* — the (2,2) block is exactly zero |
+| ILU + shift scaled by max\|diag A\| | ❌ still singular; three `--reg` values gave **byte-identical** output, i.e. the shift was never large enough to matter |
+| ILU + shift scaled by \|M\| (5.1e-05) | ❌ **still singular** |
+
+⚠️ **A generic saddle point of the same block structure factorises fine** —
+tested. ⚠️ **So our matrix is genuinely near-singular, and the cause is a null
+space I have not characterised.** ❌ Further preconditioner tuning is the wrong
+move; the structure needs diagnosing first.
+
+### ✅ The pragmatic route: domain decomposition
+
+Measured LU scaling is $t\sim n^{1.82}$, so a monolithic cylA solve
+extrapolates to **~14 hours** and would likely exhaust RAM. ✅ But subdomains of
+~50 k elements cost 25 s each, and cylA needs 61 of them:
+
+| | serial | 16 threads |
+|---|---:|---:|
+| cylA, one snapshot | 25.4 min | **1.6 min** |
+
+✅ **This reuses only the solver already proven**, and is embarrassingly
+parallel across both subdomains and snapshots. ⚠️ **The cost is overlap**:
+subdomain boundaries must be pinned to the P1 trace, so a particle crossing one
+sees a small flux mismatch — the same over-constraint measured on the sub-mesh
+cut boundary (§4d). ⚠️ With 61 subdomains the affected fraction is far smaller
+than the 29 % seen on a single 20 k block, but it is not zero and must be
+measured, not assumed.
+
+### Decision point
+
+| route | effort | risk |
+|---|---|---|
+| **A** — domain decomposition with the proven LU | ~½ day | ⚠️ overlap error, measurable |
+| **B** — characterise the null space, then precondition properly | ~½–1 day | ⚠️ may not resolve quickly; four attempts already failed |
+| **C** — external solver (PETSc/MUMPS fieldsplit) | ~1 day + dependency | ✅ the standard answer, ❌ new dependency on LUMI |
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
