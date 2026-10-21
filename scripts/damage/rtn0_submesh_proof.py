@@ -184,6 +184,32 @@ def main() -> int:
     rhs_g = g - N[:, bfac] @ qb[bfac]
     rhs_f = -(M[:, bfac] @ qb[bfac])
 
+    # ⚠️ GLOBAL MASS BALANCE -- the consistency condition, checked BEFORE
+    # the solve. Summing the constraint rows telescopes: every interior face
+    # appears twice with opposite signs, so sum_i (M q)_i equals the NET
+    # FLUX THROUGH THE BOUNDARY. Demanding div = 0 in every element therefore
+    # REQUIRES that net flux to vanish. The P1 field is not divergence-free
+    # (that is the entire problem), so its boundary fluxes do NOT balance and
+    # the constrained system is INCONSISTENT as posed.
+    imbalance = float(rhs_f.sum())
+    scale = float(np.abs(M[:, bfac] @ qb[bfac]).sum())
+    print(f"  global mass imbalance of the pinned boundary: {imbalance:.4e}"
+          f"   (|flux| scale {scale:.4e}, relative {abs(imbalance)/max(scale,1e-30):.3e})")
+    if abs(imbalance) > 1e-12 * max(scale, 1e-30):
+        # ✅ Distribute the imbalance over the boundary faces in proportion to
+        # their area. That is the minimal correction making the problem
+        # solvable, and it is physically the statement "whatever net mass the
+        # P1 field invents has to leave somewhere".
+        Ab = area.ravel()[np.isin(idx.ravel(), bfac)]
+        tot = float(np.abs(qb[bfac]).sum())
+        corr = imbalance / max(len(bfac), 1)
+        qb[bfac] -= corr
+        rhs_g = g - N[:, bfac] @ qb[bfac]
+        rhs_f = -(M[:, bfac] @ qb[bfac])
+        print(f"     ⚠️ corrected: spread {imbalance:.3e} over {len(bfac):,} "
+              f"boundary faces ({abs(corr)/max(tot/len(bfac),1e-30):.2%} of the "
+              f"mean |flux|); residual now {float(rhs_f.sum()):.3e}")
+
     A = sp.bmat([[Nf.T @ Nf, Mf.T], [Mf, None]], format='csc')
     b = np.concatenate([Nf.T @ rhs_g, rhs_f])
     print(f"  saddle-point system {A.shape[0]:,} x {A.shape[1]:,}, "
@@ -191,10 +217,9 @@ def main() -> int:
 
     t1 = time.time()
     # ⚠️ The block is symmetric INDEFINITE, so a Cholesky-style solver is
-    # wrong; splu handles it. A tiny regularisation on the multiplier block
-    # guards the constant-pressure null space of a closed domain.
-    A = A + sp.diags(np.concatenate([
-        np.zeros(len(free)), np.full(m, -1e-12)]), format='csc')
+    # wrong; splu handles it. NO regularisation on the multiplier block: a
+    # -eps there RELAXES the constraint rows, which is exactly what must not
+    # happen when the whole point is to satisfy them exactly.
     sol = spla.splu(A).solve(b)
     print(f"  solved in {time.time()-t1:.1f}s")
 
@@ -208,6 +233,11 @@ def main() -> int:
     nD = np.sqrt(np.sum(D * D, axis=(1, 2)))
     rel0 = np.abs(trD) / np.maximum(nD, 1e-30)
     rel1 = np.abs(div) / np.maximum(nD, 1e-30)
+    # ✅ The constraint residual is the DIRECT check that the solve did what
+    # it was asked; the divergence figures below are a consequence of it.
+    res = M @ q
+    print(f"  constraint residual ||M q||_inf = {np.abs(res).max():.4e}"
+          f"   (rhs scale {np.abs(b).max():.3e})")
     print()
     print("  ── DIVERGENCE ──")
     print(f"     BEFORE (P1)   median {np.median(rel0):.4e}  "
