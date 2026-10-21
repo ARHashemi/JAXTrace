@@ -1215,6 +1215,87 @@ free. Running that test now to measure the trade.
 
 ---
 
+## 4p. ✅ PROFILED — the cost is 99.5 % sparse LU, and patch size matters enormously
+
+⚠️ Concern raised: *"it should not take so long, and htop shows only one
+core."* ✅ Both observations were right, and profiling found a large win.
+
+### Where the 180 s per piece actually goes
+
+| stage | time |
+|---|---:|
+| face topology (3.05 M elements) | 0.1 s |
+| geometry | 0.0 s |
+| trace maps **T** | 0.0 s |
+| `inv(T)`, 88,922 × 12 × 12 | 0.2 s |
+| assemble **N**, **M** | 0.0 s |
+| build saddle point (591,185², nnz 11.9 M) | 0.2 s |
+| **`splu` factorisation** | **131.8 s** |
+| **total** | **132.4 s** |
+
+❌ **99.5 % is one call to `scipy.sparse.linalg.splu`.** ⚠️ `grow_patch`, which
+I suspected because of its Python loop over faces, takes **0.1 s** — the
+suspicion was wrong. ✅ **And `splu` is single-threaded**, which is exactly the
+one-core observation: SuperLU has no shared-memory parallelism.
+
+### ✅ `splu` scales as $n^{3.10}$ — so patch size dominates everything
+
+| seed | patch | ratio | solve | cylA serial | 16 threads |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 1,305 | 2.61× | 0.1 s | 816 s | 51 s |
+| 1,000 | 4,014 | 4.01× | 0.2 s | 681 s | 43 s |
+| 2,000 | 6,634 | 3.32× | 0.3 s | 516 s | 32 s |
+| **5,000** | **12,686** | 2.54× | **0.6 s** | **374 s** | **23 s** |
+| 10,000 | 23,410 | 2.34× | 1.8 s | 552 s | 34 s |
+| 20,000 | 39,431 | 1.97× | 12.8 s | 1,962 s | 123 s |
+| 40,000 | 61,329 | 1.53× | 75.8 s | 5,840 s | 365 s |
+| 55,000 (FEMUSS piece) | 88,922 | 1.62× | **131.8 s** | — | — |
+
+✅ **The optimum is ~5,000 elements per seed: 23 s/snapshot on 16 threads for
+cylA, against the ~720 s the FEMUSS-piece size costs — a 31× speedup.**
+
+⚠️ **Why small wins despite more waste.** At exponent 3.1, halving the patch
+cuts per-patch cost **8×** while only doubling the count — a 4× net win. The
+3-layer ring is a fixed *absolute* thickness, so small seeds waste a larger
+*fraction* (61 % at 5 k vs 38 % at 55 k), but that is far outweighed. ⚠️ Below
+~2,000 the overlap fraction finally dominates and the cost rises again, which
+is why the curve has a minimum rather than decreasing forever.
+
+### ⚠️ BUT quality degrades with small patches, and not monotonically
+
+| seed | divergence | preservation p50 | p90 |
+|---:|---:|---:|---:|
+| 5,000 | 1.30e-16 | **0.202** | 0.487 |
+| 10,000 | 1.15e-16 | 0.140 | 0.373 |
+| 20,000 | 1.00e-16 | 0.180 | 0.509 |
+| 40,000 | 9.54e-17 | **0.019** | 0.186 |
+| 55,000 | 9.45e-17 | 0.034 | 0.603 |
+
+✅ **Divergence is machine precision at every size** — the property we are
+buying is unaffected.
+
+❌ **Preservation is 6× worse at 5 k than at 55 k** (0.202 vs 0.034). ⚠️ **And
+it is NOT monotone** (0.202, 0.140, 0.180, 0.019), so it depends on *where*
+the patch sits, not only on its size — these seeds are contiguous index ranges,
+which carve different shapes through the mesh.
+
+⚠️ **So the 31× speedup is not free, and the trade is not yet characterised.**
+The honest next step is to measure preservation at several *positions* per
+size, not one, before choosing. ✅ The 3-layer rule was validated the same way
+and that is what made it trustworthy.
+
+### Recommendation
+
+⚠️ **Do not adopt 5,000 on this evidence alone.** ✅ What is solid:
+
+1. ✅ `splu` is 99.5 % of the cost and single-threaded — **parallelism across
+   patches is free and essential**, and was never implemented.
+2. ✅ Patch size is the dominant lever, with a measured $n^{3.10}$.
+3. ⚠️ Quality vs size needs a position-averaged measurement before the size is
+   fixed.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
