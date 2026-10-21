@@ -758,6 +758,78 @@ neither was in the earlier searches.
 
 ---
 
+## 4i. ✅✅ RE-RANKED AFTER READING — Larson–Niklasson wins, and it is not close
+
+Full texts read: [Scu16b], [Led16], [Coc07], [Dob18], [Paz23], [Cor92].
+
+### ✅ [Scu16b] is our exact problem, solved locally
+
+Their abstract: *"a local **Larson–Niklasson** post-processing procedure for
+reconstructing mass-conservative velocities from a linear (**P1**) Galerkin
+finite element solution … modifies the standard finite element velocities by
+**imposing local conservation on element patches**. The resulting reconstructed
+flow field is characterized by **continuous fluxes on element edges**."*
+
+✅ Same input (P1 Galerkin), same defect, same requirement (continuous normal
+flux for transport), **and no global solve**.
+
+**The method.** For each node $i$, the elements sharing it form the **element
+patch** $E_i$. A small system is assembled on that patch and solved; the
+conservative face flux is then the average of the per-node contributions,
+$q_F=\tfrac13\sum_i q_F^{(i)}$. ⚠️ Each patch system has **rank $N_{E_i}-1$** —
+Eq. (14) still holds multiplied by a constant — fixed by setting one unknown to
+zero. ✅ **That is the same rank-1 deficiency we diagnosed, with a known cure.**
+
+**The cost, and it is decisive:**
+
+| | cylA | D2 |
+|---|---:|---:|
+| local solves | 571,533 | 1,921,303 |
+| dimension each | ≤ 18 | ≤ 18 |
+| work | $O(m^3)$ dense LU | same |
+| **estimated, 16 threads** | **~0.2 s/snapshot** | **~0.7 s/snapshot** |
+| **BDM₁ global saddle point** | **~14 h/snapshot** | worse |
+
+✅ Their own comparison: P1+LN costs **55,000 AXPY** against **175,000** for
+mixed hybrid FE — *"a strong computational advantage"*. ✅ **"Intrinsically
+parallelizable"**, no global matrix, no preconditioner, **no conditioning
+problem** — the thing that has blocked us for a day disappears entirely.
+
+⚠️ **Known weakness, and why it does not apply to us:** element patches at
+strong **permeability contrasts** trap mass; Schiavazzi (2011) adds a second
+correction step. ✅ **A single-material FSW workpiece has no such contrast.**
+
+### The others, in one line each
+
+- ✅ **[Paz23]** — matrix-free GPU saddle-point solvers for $H(\mathrm{div})$,
+  with *"block-preconditioned MINRES converging in a number of iterations
+  independent of mesh size and polynomial degree"* and an approximate Schur
+  complement that is an **M-matrix graph Laplacian**, so AMG-friendly.
+  ⚠️ **This is the right answer if a global solve is ever needed** — and it is
+  GPU-native, matching our stack. ❌ But it solves a problem LN avoids.
+- ⚠️ **[Dob18]** hybridisation + AMG, **[Led16]** patchwise divergence-free
+  reconstruction, **[Coc07]** locally conservative fluxes for CG — all sound,
+  all more machinery than [Scu16b] for the same end.
+- ✅ **[Cor92]** (186 citations) — continuous velocity fields and path lines in
+  finite elements, i.e. our application two decades earlier.
+
+### ✅ Final ranking
+
+| rank | route | cost/snapshot | status |
+|---|---|---:|---|
+| **1** | ✅ **Larson–Niklasson patch reconstruction** [Scu16b] | **~0.2–0.7 s** | ✅ **proceed** |
+| 2 | Matrix-free GPU $H(\mathrm{div})$ MINRES [Paz23] | — | fallback if LN's accuracy disappoints |
+| 3 | BDM₁ global saddle point | ~14 h | ❌ **superseded** |
+| 4 | Domain decomposition / ILU tuning | — | ❌ **abandoned** |
+
+⚠️ **The BDM₁ work is not wasted**: the face topology, orientation convention,
+mass-balance consistency check, boundary pinning and the two verdict tests
+(divergence + preservation) all transfer directly. ✅ And it established the
+*target*: machine-precision divergence with ~7 % field change is achievable, so
+LN can be judged against a known-good reference rather than against hope.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
