@@ -66,6 +66,14 @@ def main() -> int:
                     help="ILU drop tolerance. Smaller = stronger "
                          "preconditioner, more memory.")
     ap.add_argument("--ilu-fill", type=float, default=20.0)
+    ap.add_argument("--precond", choices=["pazner", "ilu"], default="pazner",
+                    help="'pazner' (default): block-diagonal with the "
+                         "M-matrix graph-Laplacian Schur complement of "
+                         "Pazner et al. 2023, Props. 4-5. 'ilu': the earlier "
+                         "attempt, which fails 'exactly singular'.")
+    ap.add_argument("--schur-shift", type=float, default=1e-10,
+                    help="Pin for the graph-Laplacian constant null vector "
+                         "in the PRECONDITIONER only.")
     ap.add_argument("--ilu-shift", type=float, default=1e-8,
                     help="Negative shift on the multiplier block, in the "
                          "PRECONDITIONER ONLY. ⚠️ Needed because ILU of a "
@@ -287,7 +295,63 @@ def main() -> int:
         # factorisation is reused across every iteration and every snapshot
         # of the same mesh.
         n1 = len(free)
+        # ── PAZNER BLOCK PRECONDITIONER (Paz23, Props. 4-5) ──────────────
+        # ⚠️ My earlier diagonal preconditioner built the right Schur matrix
+        # and then kept only its DIAGONAL -- which is why MINRES stalled at
+        # 20,000 iterations. Pazner's result is that
+        #     S~ = M diag(A)^-1 M^T
+        # is an M-MATRIX GRAPH LAPLACIAN on the face-neighbour connectivity
+        # of the elements, so it is well preconditioned by AMG *uniformly in
+        # problem size*. Keeping S~ as a SPARSE MATRIX rather than a diagonal
+        # is the whole fix.
+        #
+        # ✅ With <= 5 nonzeros per row (diagonal + at most 4 face
+        # neighbours) S~ has 3D-Poisson sparsity and is ~7x smaller than the
+        # full saddle point, so a direct factorisation of S~ alone is cheap
+        # even where one of the full system is not. pyamg would be better at
+        # full scale but does not build in this venv.
+        if args.precond == "pazner":
+            d1 = np.asarray((Nf.T @ Nf).diagonal()) + eps
+            Dinv = sp.diags(1.0 / np.maximum(d1, 1e-300))
+            St = (Mf @ Dinv @ Mf.T).tocsc()
+            # ⚠️ S~ inherits the constant null vector of a graph Laplacian on
+            # a connected patch, so pin one row to make it invertible. This
+            # is a PRECONDITIONER, so the pin cannot bias the solution.
+            St = St + sp.eye(St.shape[0], format='csc') * (
+                args.schur_shift * float(np.abs(St.diagonal()).max()))
+            t_s = time.time()
+            lu_S = spla.splu(St)
+            print(f"  Pazner preconditioner: S~ {St.shape[0]:,}^2, "
+                  f"nnz {St.nnz:,} ({St.nnz/St.shape[0]:.1f}/row), "
+                  f"factorised in {time.time()-t_s:.1f}s")
+
+            def _apply(v):
+                # block-diagonal: A-block by its diagonal, Schur by its LU
+                return np.concatenate([v[:n1] / np.maximum(d1, 1e-300),
+                                       lu_S.solve(v[n1:])])
+
+            Pre = spla.LinearOperator(A.shape, matvec=_apply)
+            it = {"n": 0}
+
+            def _cb2(_):
+                it["n"] += 1
+
+            sol, info = spla.minres(A, b, M=Pre, rtol=args.rtol,
+                                    maxiter=args.maxiter, callback=_cb2)
+            tag = "converged" if info == 0 else f"⚠️ info={info}"
+            print(f"  solved (MINRES+Pazner, {it['n']} it, {tag}) in "
+                  f"{time.time()-t2:.1f}s")
+            rr = float(np.linalg.norm(A @ sol - b) /
+                       max(np.linalg.norm(b), 1e-300))
+            print(f"     relative residual {rr:.3e}")
+            # ⚠️ q is assembled once, after the branch -- do NOT set it
+            # here as well, or the two paths can silently diverge.
+            _skip_rest = True
+        else:
+            _skip_rest = False
         try:
+            if _skip_rest:
+                raise StopIteration
             # ⚠️ ILU on the RAW saddle point fails with "Factor is exactly
             # singular": the (2,2) block is exactly zero, so the first
             # elimination touching a multiplier row divides by zero. Measured.
@@ -319,6 +383,8 @@ def main() -> int:
             print(f"  ILU preconditioner: drop_tol {args.ilu_drop:g}, "
                   f"fill {args.ilu_fill:g}, nnz {ilu.nnz:,} "
                   f"({ilu.nnz/A.nnz:.1f}x the matrix)")
+        except StopIteration:
+            pass
         except Exception as _e:        # pragma: no cover
             print(f"  ⚠️ ILU failed ({_e}); falling back to diagonal")
             d1 = np.asarray((Nf.T @ Nf).diagonal()) + eps
