@@ -508,6 +508,52 @@ already stated.
 
 ---
 
+## 4e. ✅ Would SV-P₃ preserve the field better than BDM₁? NO — proved
+
+⚠️ **The ~7 % change is not a BDM₁ limitation.** BDM₁ contains *all* linear
+fields and our source is P1 — linear per element — so BDM₁ could reproduce it
+**exactly**. The change is the price of the **constraint**, not of the space.
+
+### The per-element lower bound, and why it is not attainable
+
+For $\mathbf u=\mathbf A\mathbf x+\mathbf b$ the nearest divergence-free linear
+field removes the isotropic part, $\mathbf A'=\mathbf A-\tfrac13(\operatorname{tr}\mathbf A)\mathbf I$,
+giving a change of $\tfrac13\lvert\operatorname{tr}\mathbf A\rvert\,\lVert\mathbf x-\mathbf x_c\rVert$.
+At our measured divergence that is **4.2e-06** — four orders below BDM₁'s
+6.8e-02.
+
+❌ **But that bound is unattainable by ANY conforming method**, and the reason
+is a one-line proof (`scripts/damage/test_conforming_obstruction.py`): P1 is
+only $C^0$, so $\mathbf A$ **jumps across faces**. Projecting each element
+independently then gives a normal component that is **double-valued on the
+shared face**:
+
+```
+normal component on a shared face, per-element ideal projection
+   vertex 0 : side A +0.546713   side B +0.546713   jump 0.0
+   vertex 1 : side A +0.009760   side B -0.224813   jump 2.35e-01
+   vertex 2 : side A +1.127831   side B +1.050673   jump 7.72e-02
+```
+
+⚠️ **A field with a jump in the normal component is not in $H(\mathrm{div})$**,
+so it is in neither BDM₁ **nor Scott–Vogelius** — SV is $H^1$-conforming, which
+is *stronger*. ✅ **Both methods face the same obstruction**, and the extra
+change above 4.2e-06 is the cost of reconciling neighbouring elements'
+incompatible gradients into one conforming field.
+
+### ✅ Verdict
+
+❌ **SV-P₃ cannot be expected to preserve the field better in the median.** It
+removes the same divergence and satisfies a *stricter* continuity requirement.
+
+⚠️ **Where it could still differ:** it is **pointwise** divergence-free where
+BDM₁ is element-wise, so if residual within-element divergence proves to matter
+for $\det F$, SV-P₃ would help. ✅ **But that is a measurable question** —
+run $\det F$ on the BDM₁ field first; only if it fails does SV-P₃ earn its 5×
+cost.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
