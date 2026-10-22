@@ -1077,11 +1077,17 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
    case-specific.
 5a. **Usability, not correctness:** the damage-stack build loops over all
    timesteps (`run_tracking.py:2495`) with **no progress print inside the
-   loop**, so a 166-frame run goes silent for 15–30 minutes between
-   `mesh geometry ... hoisted` and the next line. It is easy to mistake for a
-   hang — I checked three times before confirming CPU time was advancing
-   normally. A `print` every 20 timesteps, matching the mesh loader's own
-   `Loaded N/166` style, would remove the ambiguity.
+   loop**, so a 166-frame run goes silent between `mesh geometry ... hoisted`
+   and the next line. ⚠️ Worse, the `hoisted` line is printed *before* the
+   octree GPU upload completes, so it is not a reliable marker for when the
+   loop started — I mis-estimated the elapsed loop time by 3x from it. Two
+   signals do work, from outside the process: CPU time advancing 1:1 with wall
+   clock, and RSS sawtoothing (53.9 → 55.5 → 54.2 GB) as per-iteration
+   temporaries are allocated and freed. A `print` every 20 timesteps, matching
+   the mesh loader's `Loaded N/166` style, would make all of that unnecessary.
+   ⚠️ Per-timestep cost for this stage remains **unmeasured** — the smoke
+   test's 31.2 s covered one timestep *including* one-off setup, which is not
+   a usable basis for scaling to 166.
 5b. **Minor:** the centroid upload computes
    `node_positions[connectivity].mean(axis=1)`, which materialises a
    `(n_el, 4, 3)` temporary — **1.04 GB in float64** on D2, on top of ~57 GB
