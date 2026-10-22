@@ -660,6 +660,27 @@ def parse_args():
                              "particle re-attaching on every stress "
                              "fluctuation gives a void map that is really a "
                              "map of threshold crossings.")
+    parser.add_argument("--velocity-model", type=str, default=None,
+                        choices=["raw", "dtp", "hct", "dtp+hct"],
+                        help="ONE key selecting the velocity reconstruction, "
+                             "instead of combining --gradient-recovery / "
+                             "--recovery-method / --divergence-free by hand. "
+                             "'raw' = P1 barycentric, the FOM field as-is. "
+                             "'dtp' = raw + the deviatoric trace projection, "
+                             "A' = A - (tr A/3) I, which makes div u = 0 per "
+                             "element at no memory cost and fixes det F. "
+                             "'hct' = HCT cubic reconstruction (gradient "
+                             "recovery + Alfeld-split Bernstein cubic), which "
+                             "attacks the INTERPOLATION error. "
+                             "'dtp+hct' = both: the DTP is applied to the "
+                             "element gradient BEFORE the SPR fit, and "
+                             "trace-free survives it (measured 1.06e-08 "
+                             "nodal). ⚠️ hct and dtp+hct cost ~10.4 GB PER "
+                             "FRAME on a D2-sized mesh, so they are usable "
+                             "on steady (single-frame) cases only; 'dtp' is "
+                             "0.13 GB total at any frame count. Overrides "
+                             "the three individual flags when given. See "
+                             "docs/damage/DIVERGENCE_FREE_METHOD.md §15.")
     parser.add_argument("--divergence-free", action="store_true",
                         default=False,
                         help="March the TRACE-FREE part of the velocity "
@@ -849,6 +870,23 @@ def parse_args():
     # the projection at all (measured identical to 5 s.f. with and without
     # HCT, B.6k). Without this the velocity would be corrected while ln J
     # still integrated the uncorrected divergence -- a silently wrong det F.
+    # ── --velocity-model expands into the three underlying flags ──────────
+    # ⚠️ Done at parse time so everything downstream sees a single, already
+    # consistent configuration and no code has to know about the key.
+    if args.velocity_model is not None:
+        _vm = {
+            # key        gradient_recovery, recovery_method, divergence_free
+            "raw":      (0, "centroid_taylor", False),
+            "dtp":      (0, "centroid_taylor", True),
+            "hct":      (1, "hct_cubic",       False),
+            "dtp+hct":  (1, "hct_cubic",       True),
+        }[args.velocity_model]
+        args.gradient_recovery, args.recovery_method, args.divergence_free = _vm
+        print(f"[velocity-model] '{args.velocity_model}' -> "
+              f"--gradient-recovery {args.gradient_recovery} "
+              f"--recovery-method {args.recovery_method}"
+              f"{' --divergence-free' if args.divergence_free else ''}")
+
     if args.divergence_free and args.damage_divergence != "analytic":
         parser.error(
             f"--divergence-free requires --damage-divergence analytic (got "
@@ -868,17 +906,34 @@ def parse_args():
     # Blocked rather than silently approximate: the whole point of this flag is
     # an EXACTLY divergence-free field, and a run that quietly delivers 98.8 %
     # of one would be reported as a pass.
+    # ⚠️ TWO DIFFERENT PLACES THE DTP CAN ACT, with different validity:
+    #
+    #   (a) IN-KERNEL, u'(x) = u(x) - (tr A/3)(x - xc), used for raw P1 and
+    #       centroid_taylor. Exact only when the gradient is CONSTANT per
+    #       element: the leftover divergence is -(grad s . (x - xc)), which
+    #       vanishes iff grad s = 0. On a varying-gradient reconstruction it
+    #       leaves ~1.2 % of the original divergence (§7.6).
+    #
+    #   (b) PRE-SPR, projecting element_gradient before the SPR fit that
+    #       feeds HCT. Valid for hct_* BECAUSE the projection happens on the
+    #       constant per-element gradient, and trace-free then SURVIVES the
+    #       fit (measured 1.06e-08 nodal, §15).
+    #
+    # So hct_* is allowed, and takes route (b); everything else takes (a).
     if args.divergence_free and args.gradient_recovery == 1:
-        _exact = ("centroid_taylor", "taylor")
-        if args.recovery_method not in _exact:
+        _hct = args.recovery_method.startswith("hct_")
+        _exact_inkernel = ("centroid_taylor", "taylor")
+        if not _hct and args.recovery_method not in _exact_inkernel:
             parser.error(
                 f"--divergence-free is exact only for a reconstruction whose "
                 f"gradient is CONSTANT per element, and "
                 f"'{args.recovery_method}' varies within the element. The "
                 f"leftover divergence would be -(grad s . (x - xc)), measured "
                 f"at ~1.2 % of the original. Use --recovery-method "
-                f"centroid_taylor, or --gradient-recovery 0 for raw P1. See "
-                f"docs/damage/DIVERGENCE_FREE_METHOD.md 7.6.")
+                f"centroid_taylor, an hct_* variant (where the projection is "
+                f"applied before the SPR fit instead), or "
+                f"--gradient-recovery 0 for raw P1. See "
+                f"docs/damage/DIVERGENCE_FREE_METHOD.md 7.6 and 15.")
     return args
 
 
@@ -2589,6 +2644,10 @@ def main():
     element_gradient_gpu = None
     node_gradient_gpu = None
     hct_bernstein_gpu = None
+    # ⚠️ Which of the two DTP routes the kernel should take. Set True here and
+    # cleared only if the pre-SPR route runs, so --gradient-recovery 0 (raw P1
+    # + DTP) keeps the in-kernel route.
+    _dtp_in_kernel = bool(args.divergence_free)
     if args.gradient_recovery == 1:
         n_frames = velocity_sequence.shape[0]
         if n_frames == 1:
@@ -2608,12 +2667,21 @@ def main():
             underlying_method = (
                 "centroid_taylor" if is_hct else args.recovery_method
             )
+            # ⚠️ ROUTE (b): on an hct_* method the DTP is applied INSIDE
+            # build_recovery, to the element gradient before the SPR fit, so
+            # the Bernstein cubic inherits a trace-free gradient. On every
+            # other method it is applied IN-KERNEL instead (route (a)), and
+            # must NOT also be applied here or it would be double-counted.
+            _dtp_pre_spr = bool(args.divergence_free and is_hct)
+            if _dtp_pre_spr:
+                _dtp_in_kernel = False
             recovery = build_recovery(
                 node_positions=node_positions,
                 connectivity=connectivity,
                 node_velocities=velocity_sequence[0],
                 method=underlying_method,
                 verbose=True,
+                divergence_free=_dtp_pre_spr,
             )
             for k, v in recovery.stage_times.items():
                 stage_times[f'gr_{k}'] = v
@@ -2897,7 +2965,11 @@ def main():
         residence_edot_threshold=args.residence_edot_threshold,
         damage_detachment=args.damage_detachment,
         damage_divergence=args.damage_divergence,
-        divergence_free=args.divergence_free,
+        # ⚠️ ROUTE (a) ONLY. On an hct_* method the DTP was already applied
+        # pre-SPR inside build_recovery, and the Bernstein cubic carries it;
+        # passing it here as well would subtract the trace TWICE. _dtp_in_kernel
+        # is therefore False exactly when _dtp_pre_spr was True.
+        divergence_free=_dtp_in_kernel,
         detachment_policy=detach_policy,
     )
     # create_rk4_comparison returns just rk4_step by default; when

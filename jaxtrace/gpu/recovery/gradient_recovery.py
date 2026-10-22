@@ -365,6 +365,7 @@ def build_recovery(
     node_velocities: np.ndarray,
     method: str = "centroid_taylor",
     verbose: bool = True,
+    divergence_free: bool = False,
 ) -> GradientRecoveryData:
     """Run the full Steps 1-5 pipeline for a single steady velocity field.
 
@@ -407,6 +408,37 @@ def build_recovery(
         node_positions, connectivity, node_velocities,
     )
     stage_times["1_element_gradient"] = time.time() - t0
+
+    # ── DTP: trace-free projection of the ELEMENT gradient ──────────────────
+    # ⚠️ Applied HERE, between step 1 and the SPR fit of step 3, because SPR
+    # consumes element_gradient and everything downstream (nodal_gradient,
+    # and the HCT Bernstein coefficients built from it) inherits whatever we
+    # put in. Projecting afterwards would leave the element gradients
+    # divergent and only patch the nodal ones.
+    #
+    # ✅ Trace-free SURVIVES the SPR least-squares fit, which is not obvious:
+    # SPR fits each of the 9 components with a linear polynomial, and the
+    # trace is a linear functional, so it commutes with the fit. Measured on
+    # the rot_cyl 4lvl mesh (428,496 elements):
+    #     element gradients   raw 1.81e-02  ->  DTP 1.36e-08
+    #     nodal after SPR     raw 5.91e-06  ->  DTP 1.06e-08
+    # See docs/damage/DIVERGENCE_FREE_METHOD.md §15.
+    if divergence_free:
+        from jaxtrace.damage.divfree_projection import (
+            project_element_gradient_divfree)
+        t_dtp = time.time()
+        _tr_before = np.abs(np.trace(element_gradient, axis1=1, axis2=2))
+        _n_before = np.sqrt(np.sum(element_gradient ** 2, axis=(1, 2)))
+        element_gradient = project_element_gradient_divfree(
+            element_gradient, copy=False)
+        stage_times["1b_dtp"] = time.time() - t_dtp
+        if verbose:
+            _tr_after = np.abs(np.trace(element_gradient, axis1=1, axis2=2))
+            _rel_b = np.median(_tr_before / np.maximum(_n_before, 1e-30))
+            _rel_a = np.median(_tr_after / np.maximum(_n_before, 1e-30))
+            print(f"[gradient-recovery] DTP trace-free projection: "
+                  f"|div u|/|grad u| median {_rel_b:.3e} -> {_rel_a:.3e} "
+                  f"[{stage_times['1b_dtp']:.1f}s]")
     if verbose:
         eg_norm = np.linalg.norm(element_gradient.reshape(n_elements, 9), axis=1)
         print(f"  Step 1 (element gradient): "
