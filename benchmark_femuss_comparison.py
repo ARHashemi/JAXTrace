@@ -756,8 +756,13 @@ def create_rk4_comparison(
     # 166 frames against a 32.6 GB card, which is why the host-side path of
     # §4aa is steady-only and this one is not.
     #
-    # ⚠️ Costs 3 extra forward-mode tangents on the velocity call. That is
-    # COMPUTE, not an in-step host transfer, so the vmap is untouched.
+    # ⚠️ Costs 3 extra forward-mode tangents on EVERY velocity call, i.e. on
+    # all four RK4 stages. The 'analytic' divergence path builds a Jacobian on
+    # the k1 stage ONLY, so this is three MORE Jacobians per step per
+    # particle, not a free ride. It is COMPUTE, not an in-step host transfer,
+    # so the vmap is untouched; XLA should fuse each Jacobian with the
+    # velocity evaluation it differentiates. Measured by comparing Stage 7
+    # between the two arms of scripts/damage/test_divfree_detf.sh.
     divergence_free: bool = False,
     # ── Detachment kinematics (Part B, step 2) ───────────────────────────────
     # A resolved jaxtrace.damage.detachment.DetachmentPolicy, or None.

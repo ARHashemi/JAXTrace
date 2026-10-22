@@ -165,7 +165,19 @@ run_arm () {
     grep -E "gradient-recovery|divergence-free" "$log" | head -12
     echo " ---- det F gate ----"
     grep -iE "det F|detF|ln_J|ln J|GATE|occupanc" "$log" | tail -16
-    echo "$tag,$rc,$out" >> "${OUT_ROOT}/arms.csv"
+    # ⚠️ Stage 7 is TRACKING ONLY, which is the comparable number: total wall
+    # time includes the mesh load and octree build, which are identical
+    # between the arms and dominate. The two arms differ ONLY in
+    # --divergence-free, so the ratio of these is the projection's throughput
+    # cost -- 3 extra Jacobians per step per particle, measured not assumed.
+    local s7; s7=$(grep -oE "Stage 7 time: [0-9.]+" "$log" | tail -1 | sed 's/.*: //')
+    if [ -n "$s7" ]; then
+        echo " arm $tag STAGE7 (tracking only): ${s7}s -> $(python3 -c '
+import sys
+n, t = float(sys.argv[1]), float(sys.argv[2])
+print(f"{n/t:.2f}" if t > 0 else "n/a")' "$N_STEPS" "$s7") step/s"
+    fi
+    echo "$tag,$rc,${s7:-NA},$out" >> "${OUT_ROOT}/arms.csv"
 }
 
 ARM="${ARM:-both}"

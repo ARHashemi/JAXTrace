@@ -2247,8 +2247,17 @@ test's oracle.
 
 3 extra forward-mode tangents per velocity call. ✅ That is **compute, not an
 in-step host transfer**, so the vmap is untouched and the standing constraint
-holds. The `analytic` divergence path already paid for one such Jacobian, so
-on that path the marginal cost is near zero.
+holds.
+
+⚠️ **Do not understate this.** The `analytic` divergence path builds a Jacobian
+on the **k1 stage only** (`benchmark_femuss_comparison.py:1916`), whereas the
+wrapper puts one on **all four RK4 stages**. So the marginal cost is three
+additional Jacobians per step per particle, not "near zero" — an earlier draft
+of this section claimed the latter and was wrong. XLA should fuse the Jacobian
+with the velocity evaluation it differentiates (same gathers, same registers),
+so the real figure is expected well below 4×, but **it is measured, not
+assumed**: the two gate arms differ only in this flag, so their `Stage 7`
+times give the throughput cost directly.
 
 ### The one guard that matters now
 
