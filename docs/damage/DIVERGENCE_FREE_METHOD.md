@@ -699,26 +699,26 @@ INPUT  pos, elem, dmg      (per-particle state)
 ```
 ALGORITHM 5 — Full tracking run with --divergence-free
 ───────────────────────────────────────────────────────────────────────────
- [parse]   if divergence_free and damage_divergence != "analytic": ERROR
+ [parse]   if divergence_free and damage_divergence != "analytic": ERROR  # :852
            # 'field' uses a precomputed nodal div_u from the RAW gradient and
            # would silently ignore the projection
 
- [1/7]     nodes, conn, vel_seq <- load_pvtu(case, 166 frames)
-           nodes, conn, vel_seq <- deduplicate_nodes(...)     # piece seams
+ [1/7]     nodes, conn, vel_seq <- load_pvtu(case, 166 frames)        # :2118
+           nodes, conn, vel_seq <- deduplicate_nodes(...)             # :2178
 
- [2/7]     M_inv, p0, volumes, aabb <- precompute_geometry(nodes, conn)
+ [2/7]     M_inv, p0, volumes, aabb <- precompute_geometry(nodes, conn) # :2259
 
  [3/7]     octree <- build_or_load_cache(nodes, conn)
            upload: vel_seq, M_inv, p0, conn, levelset, temperature, octree
            if divergence_free and centroids not already uploaded:
                centroids <- mean(nodes[conn], axis=1)          # (n_el, 3)
-               upload centroids                                # 0.13 GB, once
+               upload centroids                     # 0.13 GB once     # :2736
 
- [4/7]     particles <- seed(mode, bounds, n)
+ [4/7]     particles <- seed(mode, bounds, n)                         # :2749
 
- [5/7]     elem[p] <- locate(particles[p])  for all p
+ [5/7]     elem[p] <- locate(particles[p])  for all p                 # :2772
 
- [6/7]     rk4_step <- build_kernel(..., divergence_free=True)   # ALGORITHM 3
+ [6/7]     rk4_step <- build_kernel(..., divergence_free=True) # ALG3  # :2858
 
  [7/7]     for step in 1..N_STEPS:
                frame <- step * dt / frame_dt        mod 166     # cyclic
