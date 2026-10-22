@@ -159,6 +159,12 @@ run_arm () {
       --damage-indicators --residence-edot-threshold "$RESIDENCE_THR"
       --damage-detachment --damage-tau-ref-edot "$TAU_REF_EDOT"
       --damage-out "${out}/damage_models.npz"
+      # ⚠️ EXPORT_FREQ defaults to 1 in run_tracking.py, which wrote 26 GB of
+      # trajectories for the 2026-10-19 baseline. For a trajectory COMPARISON
+      # we only need matched sample points, so 20 gives ~134 snapshots per
+      # particle at ~1.3 GB. Override with EXPORT_FREQ=1 to reproduce the
+      # baseline's density exactly.
+      --export-freq "${EXPORT_FREQ:-20}"
     )
     # shellcheck disable=SC2086
     [ -n "$extra_args" ] && args+=( $extra_args )
@@ -208,13 +214,21 @@ case "$ARM" in
   p1)   run_arm p1  "--gradient-recovery 0 --damage-divergence field" ;;
   hct)  run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence field" ;;
   p1a)  run_arm p1_analytic  "--gradient-recovery 0 --damage-divergence analytic" ;;
+  # ⚠️ df: the SAME arm as p1a plus --divergence-free, so the ONLY difference
+  # from the 2026-10-19 baseline (cylA_p1_analytic_20261019_233100) is the
+  # projection. That baseline measured |det F - 1| median 9.506e-03, p99
+  # 9.457e-01, max inf over 2684 steps -- the number this arm must beat.
+  # Exports trajectories so the pathlines can be compared, not just det F.
+  df)   run_arm df "--gradient-recovery 0 --damage-divergence analytic --divergence-free" ;;
+  dfab) run_arm p1_analytic "--gradient-recovery 0 --damage-divergence analytic"
+        run_arm df "--gradient-recovery 0 --damage-divergence analytic --divergence-free" ;;
   hcta) run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
   both) run_arm p1  "--gradient-recovery 0 --damage-divergence field"
         run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence field" ;;
   all)  run_arm p1           "--gradient-recovery 0 --damage-divergence field"
         run_arm p1_analytic  "--gradient-recovery 0 --damage-divergence analytic"
         run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
-  *) echo "ARM must be p1 | hct | p1a | hcta | both | all" >&2; exit 2 ;;
+  *) echo "ARM must be p1 | hct | p1a | hcta | df | dfab | both | all" >&2; exit 2 ;;
 esac
 
 echo
