@@ -50,7 +50,14 @@ def affine_maps(nodes, conn, vel):
 
 
 def corrected(A, b, nodes, conn):
-    """§4y closed form: minimum-norm divergence-free correction."""
+    """§4y closed form: minimum-norm divergence-free correction.
+
+    ⚠️ This is the SAME field the kernel builds in-kernel as
+        u'(x) = u(x) - (tr A/3)(x - xc)
+    (§4ab) -- verified identical to 5.4e-15 by
+    scripts/damage/test_divfree_kernel_equiv.py. Expressed here as (A', b')
+    because this integrator stores per-element affine maps.
+    """
     xc = nodes[conn].mean(axis=1)
     tr = np.trace(A, axis1=1, axis2=2)
     Ap = A - (tr / 3.0)[:, None, None] * np.eye(3)
