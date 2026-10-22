@@ -1025,7 +1025,36 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 
 1. **The full-length `det F` gate** — LUMI job 23062898, three arms (df/float64,
    raw/float64, raw/float32), 8,000 steps over 166 frames with production seed
-   density. ⚠️ This is the number the method is finally judged on, because
+   density.
+
+   ⚠️ **GPU memory is tight in the float64 arms, and that is a consequence of
+   the precision choice, not of the method.** Inventory for D2 at 166 frames,
+   float64 (observed values marked):
+
+   | array | size |
+   |---|---|
+   | damage stack `(5, 166, n_nod)` | 12.76 GB |
+   | velocity stack `(166, n_nod, 3)` | 7.65 GB |
+   | temperature `(166, 2802871)` ✅observed | 3.55 GB |
+   | element geometry (`M_inv`, `p0`, vertices, volumes) | 2.16 GB |
+   | octree CSR ✅observed | 0.99 GB |
+   | **centroids — our only addition** | **0.26 GB** |
+   | connectivity (int32) | 0.17 GB |
+   | **total** | **27.55 GB vs 32.6 GB HBM** |
+
+   ~5 GB headroom before particle state and XLA working buffers, so an OOM is
+   possible. ⚠️ The 200-step smoke test used a **36.6 MB** damage stack (one
+   frame, float32) and therefore did not exercise this at all.
+
+   **If it OOMs, the contingency is to trim `VEL_END`** (e.g. 34–100), which
+   cuts both large stacks proportionally and **keeps float64** — preserving the
+   precision that makes the number meaningful, at the cost of some path
+   variety. Dropping to float32 instead would put `det F` back on the dtype
+   floor, which is what the 200-step gate already reported; it would still
+   show the contrast (the raw arm reads 4.39e-04, four orders above the floor)
+   but would not give a *value*. Note that per-array precision would be the
+   real fix — the damage stack holds **input** fields that never needed
+   float64; only the `ln_J` accumulator does — but `--precision` is global. ⚠️ This is the number the method is finally judged on, because
    `ln J` is a path integral and shorter marches understate it (1.43e-05 at 50
    steps vs 3.17e-03 at 8,000 on the same configuration). Running at time of
    writing.
