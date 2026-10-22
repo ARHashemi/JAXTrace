@@ -2272,6 +2272,81 @@ needs neither `--gradient-recovery 1` nor `centroid_taylor`, and keeping them
 would block the production case this section exists to enable. Centroids are
 uploaded independently when recovery does not supply them.
 
+## 4ac. ✅ det F GATE PASSES IN THE PRODUCTION KERNEL
+
+Job 23061561 on LUMI, D2, two arms differing **only** in `--divergence-free`.
+Both: 4,000 particles, 200 steps, `--vel-range 34 34`, raw P1 (no gradient
+recovery), `--damage-divergence analytic`, **3,200/4,000 alive (80.0 %) in
+each** — so they are strictly comparable.
+
+| | `ln_J` median | `ln_J` p01 / p99 | `|det F − 1|` median | p99 | max | Stage 7 |
+|---|---|---|---|---|---|---|
+| raw P1 | +3.3e-05 | −1.6e-03 / +1.7e-03 | **4.39e-04** | 1.91e-03 | 5.84e-03 | 268.5 s |
+| **divergence-free** | 0.00000 | 0.0 / 0.0 | **0.000e+00** | 0.000e+00 | 0.000e+00 | 255.4 s |
+
+✅ The in-kernel projection **compiles and runs under `vmap`** (exit 0), and
+the centroid upload behaved as designed: `(10807677, 3) float32 (0.13 GB)`,
+logged as "time-independent geometry, so this works at any frame count".
+
+✅ The production kernel reproduces the numpy pathline prediction of §4z.
+
+### ⚠️ The zero is a dtype FLOOR, not exactness
+
+`ln_J` accumulates in the run's working precision, and in **float32**
+`exp(x)` rounds to exactly 1.0 for `|x| < ~6e-8`. So the `df` arm's
+`0.000e+00` means **`|ln_J| < 6e-8`** — a real pass, but a floor.
+
+What makes it meaningful is that the raw arm's **4.39e-04 is four orders
+ABOVE** that floor, so the metric demonstrably resolves the quantity it is
+being asked about; the projection pushes it below detection. The float64
+pathline measurement (1.7e-18, §4z) sits ten orders below the floor and is the
+actual value.
+
+`run_tracking.py` now prints this floor and its dtype-derived value whenever
+`max|det F − 1|` is identically zero (6.0e-08 for float32, 1.1e-16 for
+float64) and points at `--precision float64`. ⚠️ The gate is the number this
+whole method is judged on; it must not report a precision the storage cannot
+support.
+
+### ⚠️ Throughput: do NOT read a speedup from this
+
+Stage 7 was **255.4 s (df) vs 268.5 s (raw)** — the projection measured **5 %
+FASTER**, against my prediction of a cost from three extra Jacobians per step.
+
+**That is not evidence of a speedup.** At 4,000 particles and 0.74–0.78
+step/s, the run is kernel-launch-latency dominated, not compute-bound: 200
+steps in ~260 s is ~1.3 s per step for 4,000 particles, which is nowhere near
+arithmetic throughput. The 5 % is within run-to-run noise on a shared node.
+What this *does* establish is that the projection is **not catastrophically
+slower** — no 4× blowup from the extra Jacobians, consistent with XLA fusing
+each one with the velocity evaluation it differentiates. ⚠️ The real
+throughput number needs the full-length run (8,000 steps, 288k particles),
+where the kernel is compute-bound.
+
+### ⚠️ Two caveats on this run, both pre-existing
+
+- **800 of 4,000 particles (20 %) not found** — outside mesh or octree
+  coverage. Identical in both arms, and a consequence of the coarse
+  `20 20 10` smoke-test seed grid over the fractional box, not of the
+  projection.
+- **100 % recorded `t_res = 0`** (`edot` never exceeded 1 s⁻¹). The 200-step
+  march never reaches the shear layer, which is exactly §B.6g's warning that a
+  short run does not exercise the physics. ⚠️ So this gate validates the
+  **plumbing and the divergence**, not the damage indicators.
+
+### Next: the full-length run is the number that decides
+
+A 200-step march **understates** `ln_J` because it is a path integral: §B.6g
+measured the gate at 1.43e-05 on a 50-step smoke test and **3.17e-03** on the
+full D2 run, because a short march never leaves the undeformed far field. The
+raw arm here reads 4.39e-04 at 200 steps, between those two, consistent with
+that scaling.
+
+So the full-length arms (8,000 steps, 166 velocity frames, production seed
+density) remain **the** test, and the staged job is held until this result is
+recorded. ⚠️ It should also run `--precision float64` for at least the `df`
+arm, or the gate will again report a floor instead of a value.
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$

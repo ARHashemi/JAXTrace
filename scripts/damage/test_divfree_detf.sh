@@ -56,7 +56,12 @@ echo "[paths] post dir  : $POST_DIR"
 echo "[paths] mesh patt : $MESH_PATTERN"
 
 # ── Physics: D2's run_jaxtrace_D2.sh, with the two forced divergences above ──
-PRECISION=float32
+# ⚠️ float32 makes the gate report a FLOOR: exp(x) rounds to exactly 1.0 for
+# |x| < ~6e-8, so a divergence-free arm prints |det F - 1| = 0.000e+00 and the
+# true value (1.7e-18 per 4z) is unmeasurable. Override to float64 to resolve
+# it. Kept at float32 by default because that is what production runs use and
+# the arms must match them.
+PRECISION="${PRECISION:-float32}"
 VEL_START="${VEL_START:-34}"
 VEL_END="${VEL_END:-199}"         # D2 production range (166 frames)
 VELOCITY_FIELD=Displacement
@@ -65,7 +70,15 @@ TEMPERATURE_FIELD=Temperature
 N_STEPS="${N_STEPS:-2000}"
 DT=0.0003629
 LOG_INTERVAL=200
-SEED_SOURCE=grid
+# ⚠️ grid-frac, NOT grid. 'grid' requires an ABSOLUTE --seed-box and ignores
+# --seed-fraction; 'grid-frac' is the mode that takes fractions of the mesh
+# bbox. Passing fractions with 'grid' fails at Stage 4 -- AFTER the 1171 s
+# octree build, which is how the first full attempt at this gate burned 25
+# minutes of GPU time.
+# ⚠️ The x-fraction is capped at 0.2 deliberately: D2's bbox z extends ABOVE
+# the workpiece (the D-family seed-box bug), so seeding the full box strands
+# ~17.5k particles. These are D2's own production fractions.
+SEED_SOURCE=grid-frac
 SEED_FRACTION="0.0 0.2 0.0 1.0 0.0 1.0"
 SEED_GRID="${SEED_GRID:-40 40 20}"
 SEED=42
