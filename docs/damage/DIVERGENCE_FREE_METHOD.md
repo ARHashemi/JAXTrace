@@ -785,6 +785,18 @@ Both arms 4,000 particles, 3,200 alive (80.0 %) — strictly comparable.
 |---|---|---|---|
 | velocity stack float32 | 23 MB | 3.83 GB | already uploaded |
 | velocity stack float64 | 46 MB | 7.65 GB | the float64 gate arm |
+
+⚠️ **What `--precision float64` actually costs, measured on arm 1 of the
+full-length gate** (D2, 166 frames), against the float32 200-step run:
+
+| stage | float32 | float64 | precision-bound? |
+|---|---|---|---|
+| [1/7] load 166 frames | ~78 s (1 frame) | **2098 s** | ✅ yes — 12.9 s/frame, host arrays double |
+| [2/7] precompute geometry | 197.7 s | **202.7 s** | ❌ no — within noise |
+
+So the cost of float64 is concentrated almost entirely in the **PVTU load**,
+not the geometry work. An earlier estimate here assumed the precompute would
+scale too; it does not.
 | **centroids (our only addition)** | — | **0.13 GB** | time-independent |
 | stored corrected gradients (rejected) | 389 MB | 64.6 GB | ❌ > 32.6 GB HBM |
 | HCT Bernstein (for scale) | 10.4 GB | 1.72 TB | ❌ |
@@ -1006,6 +1018,8 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 6. ⚠️ **The octree cache key includes the node-position dtype**, so a
    `--precision float64` run MISSES a cache built at float32 and rebuilds
    (~20 min) and then stores a second ~570 MB entry for *the same geometry*.
+   (Cost is modest — even with the miss, a three-arm gate is ~11.8 h against a
+   24 h limit — so this is a storage point, not a scheduling one.)
    `compute_cache_key()` hashes `node_positions` content **and dtype**
    (`jaxtrace/gpu/search/octree_cache.py:144`), and the loader casts positions
    to the run's precision (`mesh_loader_timedep.py:327`). The octree is a
