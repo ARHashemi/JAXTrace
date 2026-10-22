@@ -1593,6 +1593,203 @@ be resolved before cylA results are quoted — not before D2 tracking proceeds.
 
 ---
 
+## 4v. ✅ MODEL ORDER REFUTED — and the non-uniformity quantified
+
+Two questions were put to the method, both about whether the *algebra* is the
+wrong shape for the data rather than the solver being wrong:
+
+1. Are we fitting a **low-order model to naturally higher-order data**?
+2. Are we **stretching/squeezing uniformly** where some regions have more
+   structure and need finer local adjustment?
+
+`scripts/damage/test_local_order.py` answers both from the data alone — no
+solver, no regularisation, nothing to tune — on D2 and A2 at ts = 34
+(10.8 M and 10.3 M elements, 200 k-element random samples).
+
+### (1) Model order: refuted, and by construction
+
+| quantity | D2 | A2 |
+|---|---|---|
+| affine fit residual per tet, `/‖u‖∞` (median) | **1.37e-16** | **1.05e-16** |
+| worst over the sample | 5.07e-14 | 5.18e-14 |
+
+The FOM velocity is **P1**, so on a tetrahedron its four nodal values define an
+*exactly affine* field, and BDM₁'s 12 DOF contain every affine vector field
+(§4e). The residual is machine epsilon because the fit is an identity, not an
+approximation. **`u = A x + b` is not too low order for this data**, and no
+higher-order local model (SV-P3 included) can improve the representation of
+what the FOM actually provides. This closes the question structurally rather
+than empirically: it is a statement about P1 ⊂ BDM₁, not a measurement that
+might come out differently on another case.
+
+⚠️ The corollary matters for interpreting §4t–4u. Per element, divergence-free
+*and* exact centroid velocity is **always** simultaneously reachable — 11 free
+DOF against 4 equations (1 trace + 3 value), and the closed form is explicit:
+`A' = A − (tr A/3) I`, `b' = b + (A − A') x_c`, which is div-free and leaves
+`u(x_c)` untouched. Check [3] confirms the construction to 3.9e-08.
+**Therefore every preservation error we measure comes from inter-element
+coupling — face continuity and the pinned patch boundary — and none of it from
+the element model.** The five refuted hypotheses of §4t–4u were all looking
+inside the element; the cause cannot be there.
+
+### (2) Non-uniformity: confirmed, and large
+
+The minimum-norm divergence-free correction to an affine map has a closed form,
+so the *irreducible* relative change in the gradient is computable per element:
+
+$$\min_{\operatorname{tr}A'=0}\frac{\|A'-A\|_F}{\|A\|_F}
+  =\frac{|\operatorname{div}u|}{\sqrt{3}\,\|A\|_F}$$
+
+| percentile | D2 | A2 |
+|---|---|---|
+| p50 | 6.57e-03 | 4.08e-03 |
+| p90 | 5.33e-02 | 3.51e-02 |
+| p99 | 2.82e-01 | 2.14e-01 |
+| max | 6.17e-01 | 6.43e-01 |
+| **p99/p50** | **42.9×** | **52.6×** |
+| max/p50 | 94× | 158× |
+| fraction needing > 1 % | 39.2 % | 30.3 % |
+| fraction needing > 10 % | 4.9 % | 3.2 % |
+
+The two cases agree closely, so **this is a property of the FOM, not of one
+pin geometry** — consistent with §4-common-cause (P1/P1 is not inf-sup stable,
+so its velocity carries real divergence everywhere).
+
+The repair the constraint demands spans **~2 orders of magnitude across the
+mesh**, and `solve_patch` currently meets it with **three global scalars**:
+one `nscale` (RMS of all of `N`), one constraint scaling `cs`, and one Tikhonov
+floor `eps = reg·nscale²`. That is a uniform knob on a non-uniform problem —
+exactly the second hypothesis, and it is confirmed as *stated*.
+
+### ⚠️ What this does and does not explain
+
+It does **not** yet explain the cylA/D2 gap. §4u established that failure is
+per-patch and all-or-nothing, whereas this non-uniformity is smooth and nearly
+identical in D2 and A2. A smoothly varying quantity does not produce a binary
+per-patch outcome on its own.
+
+What it does do is **relocate the search**. Combined with the §4-(1) corollary,
+the cause is now confined to the coupling terms — the pinned boundary trace
+`qb` and the face-continuity DOF sharing — and *cannot* be the element model,
+its order, or anything measured per element. Note that the Tikhonov term pulls
+the free DOFs toward `qp1`, the **averaged P1 normal trace**, with weight `eps`
+that is uniform while the required repair varies 43×; in a patch where many
+elements sit in the high-repair tail, that uniform pull fights the constraint
+instead of merely closing the null space.
+
+**Next test (do the premise first — §4-standing-rule):** before building any
+adaptive weighting, measure whether per-element scaling of the data rows (by
+`‖A‖_F`, or by the local repair cost above) changes the outcome on one known-bad
+cylA patch and one known-good D2 patch. If a weighting that differs 43× between
+elements leaves preservation unchanged, uniformity is not the cause either and
+the remaining suspect is the pinned trace alone.
+
+## 4w. ✅ CAUSE LOCALISED — `N` is numerically rank-deficient in the failing patches
+
+§4v closed off the element model. This section finds where the failure actually
+lives, using a 12-patch probe on **D2 ts = 34** (3,000-element seeds, 3-layer
+rings, ~5,000 elements per patch) that **reproduces the cylA failure on D2** —
+so the bug is no longer tied to one case and is now cheap to iterate on.
+
+`scripts/damage/test_adaptive_weighting.py`, `scripts/damage/test_bad_patch.py`.
+
+### The failure reproduces, and it is a continuum
+
+4 of 12 patches fail. Preservation p50 on the seed:
+
+| patch | preservation | `smin(N)` |
+|---|---|---|
+| 1, 2, 3, 5, 6, 7, 8, 10 | 1.6e-07 … 7.1e-07 | **6.1e-02 … 7.2e-02** (tight) |
+| 11 | 3.8e-02 | 2.8e-02 |
+| 9 | 4.4e-01 | 1.8e-02 |
+| 4 | 9.8e-01 | **1.0e-06** |
+| 0 | 1.2e+00 | **1.9e-06** |
+
+⚠️ Earlier sections called this "all-or-nothing". With `smin(N)` in hand it is
+a **continuum**: patches 9 and 11 sit between the clusters and fail
+proportionally less. That is stronger evidence than a threshold would be — it
+is what a near-null space predicts, and a binary switch would not.
+
+### What `N` is, and why a small `smin` is fatal
+
+`N` maps the patch's face DOFs to the **element-centroid velocities** — the
+only thing the objective matches (3 equations per element on 12 DOF, the
+deliberate choice documented in `solve_patch`). A near-null vector of `N` is
+therefore a BDM₁ field that is **invisible to the objective**: adding any
+multiple of it changes no centroid velocity, so the solve may add it for free,
+and only `eps·I` resists. With `reg = 1e-8` and `smin(N) ~ 1e-6`, nothing does.
+
+Across a patch the count makes the exposure plain: ~27,000 free DOF against
+`3m ≈ 15,000` objective equations and `m ≈ 5,000` constraints — a **rank
+deficiency of ~7,600**. The system is massively under-determined *by design*,
+and the divergence constraint plus the pinned boundary are all that close it.
+When they do not close it completely, the leak is patch-global.
+
+### ⚠️ Hypotheses refuted in this section
+
+Each was measured, not reasoned about (§4-standing-rule):
+
+| hypothesis | prediction | measurement | verdict |
+|---|---|---|---|
+| **non-uniform weighting needed** (§4v's own next step) | adaptive row weights help | `by_normA` matches uniform to 3 s.f. (1.577e-07 vs 1.558e-07); `by_repair` is 10–200× **worse** | ❌ a weighting varying 1000× changes nothing — uniformity is not the cause |
+| **S1 boundary dominance** | bad patches have less free interior | free-DOF fraction 86.2 % bad vs 87.1 % good | ❌ flat |
+| **S2 net-flux inconsistency** | error ∝ relative flux imbalance | corr +0.467, but **patch 5 has the worst imbalance (8.5e-03) and preserves at 3.0e-07** | ❌ hard counterexample |
+| **cancellation in `u = A x + b`** | bad patches cancel worse | `|b|/|Ax|` = **1.000** in all 12 | ❌ universal, not a discriminator |
+| **`|u|` magnitude / slow material** | failures in the slow field | `|u|` p50 1.1e-01…5.2e-01, no separation | ❌ |
+| **boundary data propagating inward** | error decays from the pin | see depth scan below | ❌ decisive |
+| **Tikhonov damps the mode** (the causal test) | raising `reg` fixes bad patches only | patch 0: 1.21 → **1.99e+04** at `reg = 1e-1`; good patches degrade monotonically too | ❌ see below |
+
+### The depth scan — why the ring is not the problem
+
+Preservation p50 by face-distance from the pinned patch boundary:
+
+| patch | L0 (bdry) | L1 | L2 | L3 | deep ≥4 |
+|---|---|---|---|---|---|
+| 1 (good) | 2.10e-01 | 2.86e-02 | **1.09e-06** | 4.46e-07 | 1.14e-07 |
+| 2 (good) | 1.55e-01 | 4.28e-02 | 9.24e-07 | 3.84e-07 | 8.73e-08 |
+| 0 (bad) | 1.23e+00 | 1.23e+00 | 1.23e+00 | 1.18e+00 | **1.17e+00** |
+| 4 (bad) | 8.76e-01 | 9.36e-01 | 9.61e-01 | 9.70e-01 | **9.68e-01** (grows inward) |
+
+✅ In the good patches the error falls **five orders in two layers** — the
+3-layer ring of §4-overlap does exactly its job, and the seam result (1.05×)
+is explained. ❌ In the bad patches it is **flat**, and in patch 4 it *grows*
+inward. The error is **patch-global**, so no amount of extra overlap will fix
+it and the pinned trace is not the carrier.
+
+### ⚠️ The causal test failed — the mode is real, the obvious fix is wrong
+
+If the invisible direction were merely under-damped, raising `eps` would fix
+the bad patches and leave the good ones alone. It does the opposite:
+
+| reg | 1e-8 | 1e-6 | 1e-4 | 1e-2 | 1e-1 |
+|---|---|---|---|---|---|
+| patch 0 (bad) | 1.21e+00 | 1.26e+00 | 2.33e+01 | 2.28e+03 | 1.99e+04 |
+| patch 1 (good) | 1.56e-07 | 6.97e-07 | 5.94e-05 | 5.50e-03 | 4.82e-02 |
+
+Monotonically worse everywhere. The reason is that `eps` does not damp toward
+*nothing* — it pulls the free DOFs toward `qp1`, the **vertex-averaged P1
+normal trace**, which is not itself an admissible target (averaging across a
+face's two elements is not a BDM₁ function). So Tikhonov trades an invisible
+mode for a wrong bias. This also retrospectively confirms §4u's finding that
+`|A|` was invariant across six orders of `reg`: `reg` is not the knob.
+
+**Conclusion: the freedom must be REMOVED, not penalised.** The objective is
+too thin — 3 centroid equations cannot see a ~7,600-dimensional complement.
+
+### Next step (premise first)
+
+The fix must add *consistent* information rather than bias. The candidate with
+a theoretical guarantee is to match the velocity in an **L²-projection sense
+over each element** instead of at its centroid alone — i.e. replace the 3
+centroid rows with the 12 moments `∫_K u·φ_i`, which for BDM₁ is exactly the
+unisolvent set and makes `N` square and non-singular by construction. ⚠️ The
+`faces` variant tried earlier (§4-objective, divergence 5.5e-09 and
+preservation 9.6e+03) is *not* this: it matched normal traces at face points,
+which over-determines once the constraint is added. **Measure `smin(N)` under
+the moment objective on patches 0 and 4 before building anything** — if it
+does not rise into the 1e-02 cluster, the premise is wrong and this is not the
+fix either.
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$

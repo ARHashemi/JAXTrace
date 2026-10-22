@@ -17,7 +17,7 @@ PIPELINE
   6. Verify: divergence, preservation, and the SEAM jump across piece
      interfaces.
 
-OUTPUT: (n_elements, 12) float32 -- the 9 entries of A then b, so the tracking
+OUTPUT: (n_elements, 12) float64 -- the 9 entries of A then b, so the tracking
 kernel evaluates u(x) = A x + b. ⚠️ Per element, so it is a PREBUILT field:
 252 MB per snapshot on D2, streamed exactly like the velocity stack. It cannot
 be computed in-step -- it is a global solve, and 48 RK4 steps share each
