@@ -2727,7 +2727,8 @@ def main():
     #
     # Cost: (n_elements, 3) float32 = 0.13 GB on D2, ONCE. The stored-gradient
     # alternative is (n_frames, n_elements, 3, 3) = 64.6 GB at 166 frames
-    # against a 32.6 GB card. That gap is why the projection is done in-kernel
+    # (86.1 GB with v_centroid, 103.2 GB for the whole run) against the
+    # 68.7 GB of a LUMI MI250X GCD. That gap is why the projection is in-kernel
     # from tr A rather than from a precomputed gradient (4ab).
     if args.divergence_free and element_centroid_gpu is None:
         _xc = node_positions[connectivity].mean(axis=1).astype(

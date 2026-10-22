@@ -360,9 +360,11 @@ pointwise pathline evaluation and nothing else.
 
 **Option A — host-side, before upload.** Correct `A` once per element on the
 CPU, upload the corrected gradients. Clean, zero kernel changes.
-❌ **Rejected.** It needs a stored `(n_frames, n_elements, 3, 3)` array. On D2
-at 166 frames in float32 that is **64.6 GB** against a **32.6 GB** GPU. It
-only works for a single steady snapshot, and production is 166 frames.
+❌ **Rejected.** It needs stored `(n_frames, n_elements, 3, 3)` gradients
+**and** `(n_frames, n_elements, 3)` centroid velocities. On D2 at 166 frames in
+float32 that is **64.6 + 21.5 = 86.1 GB**, and the whole run would need
+**103.2 GB** against the **68.7 GB** of a LUMI MI250X GCD. It also only works
+for a single steady snapshot, and production is 166 frames.
 
 **Option B — in-kernel, on the fly.** ✅ **Chosen.** The kernel can compute
 `s = tr A/3` itself from data it already has in registers, so **nothing is
@@ -395,7 +397,7 @@ independent of velocity, independent of time. One `(n_elements, 3)` array,
 
 | approach | per-frame memory | works at 166 frames? |
 |---|---|---|
-| stored corrected gradients | 0.39 GB/frame → 64.6 GB | ❌ |
+| stored gradients + centroid velocities | 0.52 GB/frame → 86.1 GB | ❌ (run total 103.2 GB vs 68.7 GB) |
 | **in-kernel + centroids** | **0 (+0.13 GB once)** | **✅** |
 | HCT Bernstein (for scale) | 10.4 GB/frame → 1.72 TB | ❌ |
 
@@ -826,7 +828,7 @@ So the cost of float64 is concentrated almost entirely in the **PVTU load**,
 not the geometry work. An earlier estimate here assumed the precompute would
 scale too; it does not.
 | **centroids (our only addition)** | — | **0.13 GB** | time-independent |
-| stored corrected gradients (rejected) | 389 MB | 64.6 GB | ❌ > 32.6 GB HBM |
+| stored corrected gradients (rejected) | 389 MB | 64.6 GB | ❌ 86.1 GB with `v_centroid`; run total 103.2 GB > 68.7 GB VRAM |
 | HCT Bernstein (for scale) | 10.4 GB | 1.72 TB | ❌ |
 
 ---
@@ -1040,21 +1042,22 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
    | octree CSR ✅observed | 0.99 GB |
    | **centroids — our only addition** | **0.26 GB** |
    | connectivity (int32) | 0.17 GB |
-   | **total** | **27.55 GB vs 32.6 GB HBM** |
+   | **total** | **27.55 GB** |
 
-   ~5 GB headroom before particle state and XLA working buffers, so an OOM is
-   possible. ⚠️ The 200-step smoke test used a **36.6 MB** damage stack (one
-   frame, float32) and therefore did not exercise this at all.
+   ✅ **It fits comfortably.** A LUMI MI250X GCD has **68.7 GB** of VRAM
+   (observed via `rocm-smi`: 68,702,699,520 B total, 12.96 GB in use mid-run),
+   leaving ~41 GB of headroom. ⚠️ An earlier version of this section warned of
+   an OOM risk against "32.6 GB HBM" — that card size was an unchecked
+   assumption and was wrong by a factor of two. The 200-step smoke test used a
+   **36.6 MB** damage stack (one frame, float32) and did not exercise the
+   large stacks at all, which is why the budget was computed late.
 
-   **If it OOMs, the contingency is to trim `VEL_END`** (e.g. 34–100), which
-   cuts both large stacks proportionally and **keeps float64** — preserving the
-   precision that makes the number meaningful, at the cost of some path
-   variety. Dropping to float32 instead would put `det F` back on the dtype
-   floor, which is what the 200-step gate already reported; it would still
-   show the contrast (the raw arm reads 4.39e-04, four orders above the floor)
-   but would not give a *value*. Note that per-array precision would be the
-   real fix — the damage stack holds **input** fields that never needed
-   float64; only the `ln_J` accumulator does — but `--precision` is global. ⚠️ This is the number the method is finally judged on, because
+   Kept for reference in case a larger mesh or frame count does run out: the
+   contingency is to trim `VEL_END`, which cuts both large stacks
+   proportionally and **keeps float64**, rather than dropping to float32 and
+   putting `det F` back on the dtype floor. The deeper fix would be per-array
+   precision — the damage stack holds **input** fields that never needed
+   float64, only the `ln_J` accumulator does — but `--precision` is global. ⚠️ This is the number the method is finally judged on, because
    `ln J` is a path integral and shorter marches understate it (1.43e-05 at 50
    steps vs 3.17e-03 at 8,000 on the same configuration). Running at time of
    writing.

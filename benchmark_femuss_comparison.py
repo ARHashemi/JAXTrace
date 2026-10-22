@@ -753,7 +753,8 @@ def create_rk4_comparison(
     # ⚠️ Requires element_centroid_gpu. That is (n_elements, 3) TIME-
     # INDEPENDENT geometry -- 0.13 GB on D2 at ANY frame count. The stored-
     # gradient alternative is (n_frames, n_elements, 3, 3) = 64.6 GB on D2 at
-    # 166 frames against a 32.6 GB card, which is why the host-side path of
+    # 166 frames against the 68.7 GB of a LUMI MI250X GCD -- and 103.2 GB for
+    # the whole run, which does not fit. That is why the host-side path of
     # §4aa is steady-only and this one is not.
     #
     # ⚠️ Costs 3 extra forward-mode tangents on EVERY velocity call, i.e. on

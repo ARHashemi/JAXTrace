@@ -2154,7 +2154,7 @@ Extending it is feasible, and unlike HCT the numbers are comfortable:
 
 | | per frame | all 166 frames | streaming 1 frame |
 |---|---|---|---|
-| `centroid_taylor` (`v_centroid` + `gradient`) | 0.52 GB | 86.1 GB ❌ > 32.6 GB HBM | **0.65 GB ✅** |
+| `centroid_taylor` (`v_centroid` + `gradient`) | 0.52 GB | 86.1 GB ❌ (run total 103.2 GB > 68.7 GB VRAM) | **0.65 GB ✅** |
 | HCT Bernstein (reference) | 10.4 GB | 1.72 TB ❌ | 10.4 GB |
 
 ✅ Streaming one frame at a time — exactly what the velocity stack already does
@@ -2193,7 +2193,7 @@ frame is 0.65 GB resident". **That streaming mechanism does not exist.**
 | `velocity_sequence` (already uploaded) | 3.83 GB |
 | `element_v_centroid` (n_fr, n_el, 3) | 21.5 GB |
 | `element_gradient` (n_fr, n_el, 3, 3) | **64.6 GB** |
-| **total** | **86.1 GB** vs a 32.6 GB card ❌ |
+| **total** | **86.1 GB** (103.2 GB for the whole run) vs 68.7 GB VRAM ❌ |
 
 Even storing just `tr A` as a scalar per element per frame is 7.18 GB. The
 stored-gradient route does not fit at production frame counts, full stop.
