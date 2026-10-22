@@ -35,6 +35,26 @@ INPUT="${INPUT:-/scratch/${PROJECT}/lorenzgl/Cases/PinShapes/D-ConcavityTilt/D2.
 OUT_ROOT="${OUT_ROOT:-/scratch/${PROJECT}/hashemia/divfree_detf}"
 OCTREE_CACHE="${OCTREE_CACHE:-/scratch/${PROJECT}/hashemia/octree_cache}"
 
+# ⚠️ PATHS. D2's PVTUs live DIRECTLY in post/ with an "A2_" stem, not in
+# post/0eule/ with a "D2_" stem -- the D family reuses A/B/C stems (D1->A1,
+# D2->A2, D3->B4, D4->C2). run_tracking.py's defaults assume 0eule/ and the
+# case name, so BOTH must be passed explicitly; omitting them is what made the
+# first attempt at this gate fail with "D2_34.pvtu not found". Detected from
+# disk rather than hard-coded so this script works on any case.
+MESH_SUBDIR="${MESH_SUBDIR-}"
+POST_DIR="$INPUT/post"
+[ -n "$MESH_SUBDIR" ] && POST_DIR="$POST_DIR/$MESH_SUBDIR"
+if [ -z "${MESH_PATTERN:-}" ]; then
+    _stem=$(ls "$POST_DIR"/*_34.pvtu 2>/dev/null | head -1             | xargs -r basename | sed 's/_34\.pvtu$//')
+    if [ -z "$_stem" ]; then
+        echo "ERROR: no *_34.pvtu under $POST_DIR -- cannot infer the stem" >&2
+        exit 2
+    fi
+    MESH_PATTERN="${_stem}_{timestep}.pvtu"
+fi
+echo "[paths] post dir  : $POST_DIR"
+echo "[paths] mesh patt : $MESH_PATTERN"
+
 # ── Physics: D2's run_jaxtrace_D2.sh, with the two forced divergences above ──
 PRECISION=float32
 VEL_START="${VEL_START:-34}"
@@ -98,6 +118,8 @@ run_arm () {
 
     local args=(
       --input "$INPUT" --output "$out"
+      --mesh-subdir "$MESH_SUBDIR"
+      --mesh-pattern "$MESH_PATTERN"
       --precision "$PRECISION"
       --vel-range "$VEL_START" "$VEL_END"
       --velocity-field "$VELOCITY_FIELD"
