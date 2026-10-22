@@ -1989,6 +1989,168 @@ sufficient.
    was right; a sweep of a field that fails the pathline gate is the same
    mistake at 17× the cost.
 
+## 4z. ✅ THE DECISIVE TEST PASSES — `ln J` vanishes along the pathline
+
+§4y left one thing open, and it was the thing that mattered: the corrected
+field is divergence-free *within* each element, but a particle crossing a face
+sees a **jump in `A`**. Per-element divergence of 4e-18 is necessary, not
+sufficient — what tracking integrates is `ln J = ∫ div u dt` **along a
+pathline**, sampled at the particle position each RK4 substep
+(`benchmark_femuss_comparison.py:1855`).
+
+`scripts/damage/test_pathline_lnj.py` marches the same seeds through the raw
+P1 field and the corrected field, accumulating `ln J` with the RK4 weights
+exactly as the kernel does. ✅ Pure numpy, single process, no JAX — it is
+deliberately **independent of the production integrator it validates**.
+
+### Result: 200 seeds × 300 steps, three families
+
+| case | raw `|ln J|` p50 | raw max `|det F−1|` | **corrected `|ln J|` p50** | corrected p99 | improvement |
+|---|---|---|---|---|---|
+| D2 | 7.63e-04 | 0.072 | **1.66e-18** | 2.06e-17 | 4.6e+14× |
+| C1 | 1.30e-02 | 0.587 | **2.98e-18** | 3.77e-17 | 4.4e+15× |
+| B1 | 1.49e-01 | **2.734** | **5.55e-18** | 5.34e-17 | 2.7e+16× |
+
+`|det F − 1|` on the corrected field is **exactly 0.0** in float64 in all
+three cases. ✅ PASS at p99 < 1e-10 by eight orders of margin.
+
+### ⚠️ The face jump was fully exercised, not avoided
+
+Each particle crossed a median of **59 (D2) / 72 (C1) / 78 (B1)** element
+faces, up to 140. The discontinuity in `A` is therefore not a hypothetical
+exposure that the test happened to miss — it was hit dozens of times per
+pathline and did not matter. The reason is simple once stated: every substep
+samples *some* element, and in **every** element `div u = 0` to round-off. The
+jump changes *which* zero-divergence map is sampled, never that it is zero.
+
+### The trajectory barely moves — so the damage map survives
+
+The second failure mode §4y flagged: `det F` could be clean while particles
+visit materially different elements, moving the damage map.
+
+| case | trajectory shift p50 | distance travelled p50 | **relative shift** |
+|---|---|---|---|
+| D2 | 6.39e-09 | 8.95e-04 | **8.19e-06** |
+| C1 | 7.19e-08 | 1.08e-03 | **9.59e-05** |
+| B1 | 2.84e-07 | 1.15e-03 | **2.90e-04** |
+
+Relative shift ≤ 3e-04. ✅ Both fields kept **200/200 particles alive**, so
+neither failure mode occurred.
+
+### ⚠️ How badly the raw field was failing
+
+B1's raw `|det F − 1|` reaches **2.734** — a 273 % volume error on an
+incompressible material. The step-1 gate was not marginally failing on these
+cases, it was **meaningless**: `det F` was measuring the FOM's stabilisation
+error, not material volume change. This retrospectively explains §B.6g (the
+gate failing at 3.17e-03 median on the full D2 run while the 50-step smoke
+test showed 1.43e-05 — the smoke test simply had not accumulated enough path).
+
+### Verdict
+
+The closed-form correction is **validated end to end**: divergence-free per
+element (§4y), gradient preserved to 0.99998 (§4y), and now `ln J` exact along
+the pathline with trajectories unchanged. There is no remaining open question
+about the *method*. What remains is **plumbing**, and §4aa settles it.
+
+## 4aa. ✅ PLUMBING — it rides the existing `centroid_taylor` path, with no kernel change
+
+§4z validated the method. This section is how it reaches the GPU without
+violating the standing constraint: **no in-step CPU–GPU transfer, prebuilt
+where possible.**
+
+### The key observation
+
+The kernel's `centroid_taylor` reconstruction already evaluates
+
+```
+vel = vc + Gc @ (pos - xc)          # benchmark_femuss_comparison.py:1284
+```
+
+which is **algebraically identical** to the corrected affine map
+`u'(x) = A' x + b'` with `Gc = A'` and `vc = u(x_c)`. And the projection leaves
+the centroid velocity *exactly* unchanged (that is what `b' = b + (A−A') x_c`
+buys), so **only `element_gradient` moves**:
+
+| array | changed? |
+|---|---|
+| `element_centroid` (geometry) | no |
+| `element_v_centroid` | **no** — exactly invariant under the projection |
+| `element_gradient` | yes — trace removed |
+
+✅ So the implementation is: project the prebuilt `(n_elem, 3, 3)` gradient on
+the host, once, before `jax.device_put`. **No new GPU array, no new sampler,
+no kernel edit, zero in-step cost.** `--damage-divergence analytic` then
+differentiates that same closure through `jacfwd`, so `div u` picks up
+`tr(A') = 0` automatically — the two can never drift apart.
+
+Implemented as `jaxtrace/damage/divfree_projection.py` (the single source of
+truth, as `detachment.py` is for the detachment rule) plus `--divergence-free`
+in `run_tracking.py`.
+
+### ⚠️ Refuted: folding the correction into the NODAL velocity
+
+The tempting simplification — correct the nodal velocity once and leave every
+downstream path untouched — **cannot work, and was measured rather than
+assumed**. A node is shared by ~20 elements with *different* `tr A`, so no
+nodal field has a P1 gradient equal to `A'` in every element. A global
+least-squares nodal fit on a 1.53 M-element sub-box of D2:
+
+| | `|div u|/‖A‖` p50 |
+|---|---|
+| raw P1 | 1.03e-02 |
+| **nodal least-squares fit** | **1.03e-01** (10× WORSE) |
+| per-element closed form | 4.32e-18 |
+
+and it changed the nodal velocity by **100 %** (p50 0.9999) doing it. ❌ The
+per-element path is **necessary**, not merely convenient.
+
+### ⚠️ Two guards, because a silent no-op is the expensive failure
+
+`--divergence-free` acts on an array only the `centroid_taylor` path uploads.
+On any other reconstruction the flag would do **nothing** while the run
+completed normally and still integrated a divergent field. Both checks are at
+**parse time**, so they fail in a second rather than after a mesh load:
+
+- `--divergence-free` without `--gradient-recovery 1` → error.
+- `--divergence-free` with `vertex_taylor` or any `hct_*` → error naming the
+  reason (those reconstruct from nodal data, where a per-element trace-free
+  gradient has nothing to attach to).
+
+### ⚠️ OPEN AND BLOCKING FOR PRODUCTION: recovery is steady-only
+
+`run_tracking.py:2575` builds gradient recovery only under `if n_frames == 1`,
+printing `SKIPPED ... falling back to raw P1` otherwise. D2's production script
+is `VEL_START=34 VEL_END=199` — **166 frames** — so a production run today
+would silently get no projection. The det F gate
+(`scripts/damage/test_divfree_detf.sh`) therefore forces `--vel-range 34 34`.
+**That makes it a steady-field validation: it proves the plumbing and bounds
+the gain, it does not license the 166-frame runs.**
+
+Extending it is feasible, and unlike HCT the numbers are comfortable:
+
+| | per frame | all 166 frames | streaming 1 frame |
+|---|---|---|---|
+| `centroid_taylor` (`v_centroid` + `gradient`) | 0.52 GB | 86.1 GB ❌ > 32.6 GB HBM | **0.65 GB ✅** |
+| HCT Bernstein (reference) | 10.4 GB | 1.72 TB ❌ | 10.4 GB |
+
+✅ Streaming one frame at a time — exactly what the velocity stack already does
+— is **0.65 GB resident**, including the time-independent geometry. So
+time-dependent `centroid_taylor` + projection is practical where
+time-dependent HCT is not.
+
+**Next, in order:**
+1. The det F gate on the steady arm (running) — does the production kernel
+   reproduce §4z's 1.7e-18?
+2. Extend recovery to time-dependent fields, streaming per frame alongside the
+   velocity stack. ✅ Until then `--divergence-free` is a steady-case flag, and
+   a **third guard** closes the one case the parse-time checks cannot see:
+   `n_frames` is unknown at parse time, so the multi-frame no-op is caught at
+   the `n_frames == 1` branch itself, where the run now **aborts** instead of
+   silently integrating a divergent field. Its message names the workaround
+   (`--vel-range <t> <t>`) and the memory figure that makes the real fix
+   practical.
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
