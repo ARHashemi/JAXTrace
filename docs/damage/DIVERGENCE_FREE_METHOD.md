@@ -1044,7 +1044,24 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
    | connectivity (int32) | 0.17 GB |
    | **total** | **27.55 GB** |
 
-   ✅ **It fits comfortably.** A LUMI MI250X GCD has **68.7 GB** of VRAM
+   ⚠️⚠️ **THE FIRST ATTEMPT WAS OOM-KILLED, AND THIS INVENTORY IS WHY IT
+   STILL HAPPENED.** Job 23062898 died at **stage 6 (JAX compilation)** with
+   `MaxRSS 90.6 GB` and **`MaxVMSize 151.6 GB`** against a 120 G request. The
+   table below covers the **data arrays on the GPU** — which was roughly
+   right — and says nothing about what **XLA allocates on the host while
+   compiling the fused RK4 kernel**. That is a separate, large, unmeasured
+   term, and it is where the job died. The 200-step smoke test compiled the
+   same kernel with a **36.6 MB** damage stack, so it never came close.
+
+   ⚠️ I reversed myself twice before getting this right: first warned of an
+   OOM against an assumed 32.6 GB GPU, then found the GPU is 68.7 GB and
+   declared the risk unfounded, then correctly identified the host as the
+   tighter budget but estimated its peak at ~68 GB of 120 G and called it
+   safe. **The lesson is that sizing the arrays you know about is not sizing
+   the peak.** Resubmitted as 23067072 with `--mem=300G` (nodes have 480 GB)
+   and the float32 arms first, which halve both large stacks.
+
+   ✅ **On the GPU it fits comfortably.** A LUMI MI250X GCD has **68.7 GB** of VRAM
    (observed via `rocm-smi`: 68,702,699,520 B total, 12.96 GB in use mid-run),
    leaving ~41 GB of headroom. ⚠️ An earlier version of this section warned of
    an OOM risk against "32.6 GB HBM" — that card size was an unchecked
