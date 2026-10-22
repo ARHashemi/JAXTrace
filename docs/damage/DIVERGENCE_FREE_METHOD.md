@@ -1015,9 +1015,12 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 5. **Other cases.** The projection is verified on A2, B1, C1, D1, D2. The
    remaining pin-shape cases are untested, though nothing in the method is
    case-specific.
-6. ⚠️ **The octree cache key includes the node-position dtype**, so a
-   `--precision float64` run MISSES a cache built at float32 and rebuilds
-   (~20 min) and then stores a second ~570 MB entry for *the same geometry*.
+6. ⚠️ **The octree cache key includes the node-position dtype** — predicted
+   from the code and then **observed**: arm 1 of the full-length gate
+   (`--precision float64`) MISSED the float32 cache and rebuilt the octree
+   from scratch, confirmed by the build banner appearing instead of a
+   `[octree-cache] HIT` line, with the entry count still at 4. It will write a
+   fifth ~570 MB entry for *the same geometry*.
    (Cost is modest — even with the miss, a three-arm gate is ~11.8 h against a
    24 h limit — so this is a storage point, not a scheduling one.)
    `compute_cache_key()` hashes `node_positions` content **and dtype**
