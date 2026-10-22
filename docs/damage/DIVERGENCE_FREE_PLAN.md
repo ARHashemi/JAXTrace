@@ -1,5 +1,20 @@
 # Making the FSW velocity field divergence-free, while preserving it
 
+> ⚠️ **This is the chronological WORKING LOG, not the explanation.** It records
+> every measurement in the order it was taken, including a long BDM₁ attempt
+> that was abandoned (§4x) — so sections early in this file describe approaches
+> that were later refuted, and several are marked SUPERSEDED.
+>
+> **For the method that works, read `DIVERGENCE_FREE_METHOD.md`**: the problem
+> from scratch, the closed form with its optimality proof, the algorithms and
+> where each acts in the tracking pipeline, and all the measurements in one
+> place. Come here for *why* an approach was rejected or how a number was
+> obtained.
+>
+> Short version of the outcome: the fix is `A' = A − (tr A/3)I` applied
+> in-kernel (§4y, §4ab, §4ac), and it is the provably closest divergence-free
+> field to the FOM gradient.
+
 **Status 2026-10-21.** Self-contained: the problem, the measurements that
 establish it, the mathematics of the chosen method, what must be adapted for
 our data, the cost, and the implementation steps. References are cited in text

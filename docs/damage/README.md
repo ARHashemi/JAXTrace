@@ -21,6 +21,8 @@ against the run output — see `RUN_ON_LUMI.md`.
 | `PRIMER_fsw_physics_for_me.md` | Background physics, written as self-study notes. |
 | `OPEN_QUESTIONS.md` | The running log of open items, numbered (O1, O2, …). Claims retracted after checking are recorded here with their replacements. |
 | `NEXT_STEPS_detachment_criterion.md` | **Forward plan (2026-10-08).** Independent indicators to add alongside the damage laws, and the dimensionless detachment criterion — the route to a void that is a mass-deficit outcome rather than a damage proxy. Design only; no code. |
+| `DIVERGENCE_FREE_METHOD.md` | **The divergence-free method, explained from scratch (2026-10-22).** Why the FOM velocity is not divergence-free, the closed-form fix `A' = A − (tr A/3)I` with its optimality proof, the algorithms and pseudocode showing where it acts in the 7-stage tracking pipeline and how it coexists with `vmap`, every measurement, and every approach that failed first. Start here for divergence. |
+| `DIVERGENCE_FREE_PLAN.md` | The chronological working log behind that method (§4a–§4ac) — every measurement in the order it was taken, including the BDM₁ attempt and why it was abandoned. Read `DIVERGENCE_FREE_METHOD.md` first. |
 
 ## The rest
 
