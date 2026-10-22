@@ -2053,7 +2053,15 @@ element (§4y), gradient preserved to 0.99998 (§4y), and now `ln J` exact along
 the pathline with trajectories unchanged. There is no remaining open question
 about the *method*. What remains is **plumbing**, and §4aa settles it.
 
-## 4aa. ✅ PLUMBING — it rides the existing `centroid_taylor` path, with no kernel change
+## 4aa. ⚠️ SUPERSEDED BY §4ab — host-side plumbing, correct but steady-only
+
+> ⚠️ **Read §4ab.** The host-side projection below works and its refutation of
+> the nodal fold-in stands, but it rides the **steady-only** gradient-recovery
+> path, and production is 166 frames. Its claim that per-frame streaming makes
+> this practical is **wrong** — no such streaming exists; the velocity stack is
+> uploaded whole, and stored gradients would be 64.6 GB. §4ab does the
+> projection in-kernel instead, needing no per-frame array at all.
+> ~~PLUMBING — it rides the existing centroid_taylor path~~
 
 §4z validated the method. This section is how it reaches the GPU without
 violating the standing constraint: **no in-step CPU–GPU transfer, prebuilt
@@ -2150,6 +2158,110 @@ time-dependent HCT is not.
    silently integrating a divergent field. Its message names the workaround
    (`--vel-range <t> <t>`) and the memory figure that makes the real fix
    practical.
+
+## 4ab. ✅ IN-KERNEL — no per-frame array, so it works at production frame counts
+
+§4aa's host-side plumbing was correct but **steady-only**, which is useless for
+production: D2 runs `VEL_START=34 VEL_END=199`, 166 frames. This section
+replaces it.
+
+### ⚠️ What §4aa got wrong
+
+§4aa claimed time-dependent recovery was practical because "streaming one
+frame is 0.65 GB resident". **That streaming mechanism does not exist.**
+`velocity_sequence_gpu = jax.device_put(velocity_sequence)` uploads the stack
+**whole** (`run_tracking.py:2410`) and the kernel indexes
+`velocity_fields_gpu[vel_idx]`. Extending recovery the same way means:
+
+| array, D2 at 166 frames | size |
+|---|---|
+| `velocity_sequence` (already uploaded) | 3.83 GB |
+| `element_v_centroid` (n_fr, n_el, 3) | 21.5 GB |
+| `element_gradient` (n_fr, n_el, 3, 3) | **64.6 GB** |
+| **total** | **86.1 GB** vs a 32.6 GB card ❌ |
+
+Even storing just `tr A` as a scalar per element per frame is 7.18 GB. The
+stored-gradient route does not fit at production frame counts, full stop.
+
+### The resolution: the kernel can compute `tr A` itself
+
+The projection needs only two things, and neither has to be stored per frame:
+
+1. **`tr A`** — recoverable in-kernel from data already in registers. For raw
+   P1, `A = Σ_a u_a ⊗ ∇N_a`, and the kernel already gathers the 4 nodal
+   velocities and holds `M_inv`. ✅ Verified against the exact affine map to
+   **8.9e-16**. More generally `jax.jacfwd` of the active interpolant gives
+   the full Jacobian — which the `analytic` divergence path already computes.
+2. **`x_c`** — the element centroid, **time-independent geometry**:
+   (n_el, 3) float32 = **0.13 GB on D2 at any frame count**.
+
+So the corrected field is, in-kernel,
+
+$$u'(x) = u(x) - \frac{\operatorname{tr}A}{3}\,(x - x_c)$$
+
+⚠️ **The centroid anchor is not a detail — it is what makes this a field.**
+Anchoring at the particle position instead gives `u'(x_pos) = u(x_pos)` for
+every sample point, i.e. no correction at all. (I drafted exactly that first;
+it is wrong and was caught before running.)
+
+✅ Verified equal to the host-side closed form of
+`jaxtrace/damage/divfree_projection.py` to **5.0e-16** over interior points,
+with `tr(jacfwd(corrected)) = -1.1e-16` against `tr(jacfwd(raw)) = 1.608`, and
+the centroid value preserved **exactly** (0.0e+00).
+
+### Implementation
+
+`benchmark_femuss_comparison.py` gains `divergence_free: bool = False`. When
+set, `interpolate_velocity_single` is **wrapped**, not reimplemented:
+
+```python
+def velocity_divfree_single(pos, elem_id, velocity_field,
+                            _raw=interpolate_velocity_single):
+    u   = _raw(pos, elem_id, velocity_field)
+    Jac = jax.jacfwd(_raw, argnums=0)(pos, elem_id, velocity_field)
+    tr3 = jnp.trace(Jac) / 3.0
+    xc  = element_centroid_gpu[elem_id]
+    ok  = (elem_id >= 0) & (elem_id < len(connectivity))
+    return jnp.where(ok, u - tr3 * (pos - xc), u)
+```
+
+Wrapping means it inherits **any** reconstruction (raw P1, centroid_taylor,
+vertex_taylor, HCT) and cannot drift from the field it corrects — the same
+argument that makes the `analytic` divergence path correct. All four RK4 stages
+and the analytic divergence then see the corrected field with no separate code
+path.
+
+⚠️ **`_raw` is a DEFAULT ARGUMENT, not a closed-over name.** Python resolves a
+closed-over name at *call* time, so rebinding `interpolate_velocity_single`
+below while the body referred to that name makes the function call **itself** —
+infinite recursion. Confirmed in isolation (`RecursionError`) before writing
+the real thing.
+
+⚠️ **No host-side projection on the recovery path.** Projecting
+`element_gradient` there *as well* would apply the correction **twice** on
+`centroid_taylor`. §4aa's host-side block is removed, and
+`divfree_projection.py` is kept as the reference implementation and the unit
+test's oracle.
+
+### Cost
+
+3 extra forward-mode tangents per velocity call. ✅ That is **compute, not an
+in-step host transfer**, so the vmap is untouched and the standing constraint
+holds. The `analytic` divergence path already paid for one such Jacobian, so
+on that path the marginal cost is near zero.
+
+### The one guard that matters now
+
+`--divergence-free` requires `--damage-divergence analytic` (**the default**).
+`field` integrates a *precomputed nodal* `div_u` from the raw P1 gradient and
+cannot respond to the projection, so `ln J` would silently ignore it while the
+velocity was corrected — a wrong `det F` with no visible symptom. Checked at
+parse time.
+
+⚠️ §4aa's other two guards are **removed as obsolete**: the in-kernel path
+needs neither `--gradient-recovery 1` nor `centroid_taylor`, and keeping them
+would block the production case this section exists to enable. Centroids are
+uploaded independently when recovery does not supply them.
 
 ## 5. Implementation steps
 

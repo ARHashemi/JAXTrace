@@ -737,6 +737,28 @@ def create_rk4_comparison(
     #              via jacfwd on interpolate_velocity_single. ✅ This is the one
     #              that responds to the reconstruction.
     damage_divergence: str = "field",
+    # ── Divergence-free velocity (docs/damage/DIVERGENCE_FREE_PLAN.md §4ab) ──
+    # True makes the integrator march the TRACE-FREE part of the active
+    # velocity reconstruction:
+    #
+    #     u'(x) = u(x) - (tr A / 3) (x - x_c)
+    #
+    # which is the SAME field as the host-side closed form
+    # (jaxtrace/damage/divfree_projection.py, A' = A - (tr A/3) I with
+    # b' = b + (A - A') x_c) -- verified equal to 1e-16 -- but needs no stored
+    # gradient. It is anchored at the element CENTROID, so it is one
+    # well-defined field per element and not a function of where it is
+    # sampled.
+    #
+    # ⚠️ Requires element_centroid_gpu. That is (n_elements, 3) TIME-
+    # INDEPENDENT geometry -- 0.13 GB on D2 at ANY frame count. The stored-
+    # gradient alternative is (n_frames, n_elements, 3, 3) = 64.6 GB on D2 at
+    # 166 frames against a 32.6 GB card, which is why the host-side path of
+    # §4aa is steady-only and this one is not.
+    #
+    # ⚠️ Costs 3 extra forward-mode tangents on the velocity call. That is
+    # COMPUTE, not an in-step host transfer, so the vmap is untouched.
+    divergence_free: bool = False,
     # ── Detachment kinematics (Part B, step 2) ───────────────────────────────
     # A resolved jaxtrace.damage.detachment.DetachmentPolicy, or None.
     # ⚠️ The kernel does NOT encode the rule: it receives pi1_crit and an
@@ -1394,6 +1416,45 @@ def create_rk4_comparison(
         J = jax.jacfwd(interpolate_velocity_single, argnums=0)(
             pos, elem_id, velocity_field)      # (3, 3) = du_i/dx_j
         return jnp.trace(J)
+
+    # ---- Divergence-free velocity (§4y, §4z, §4ab) ----
+    # ⚠️ WRAPS the active reconstruction rather than reimplementing P1:
+    # jacfwd differentiates the SAME closure that produces the velocity, so
+    # the correction can never drift from the field it corrects. That is the
+    # argument that makes the 'analytic' divergence path correct, reused.
+    #
+    # Anchored at the element CENTROID, which is what makes it a FIELD:
+    #     u'(x) = u(x) - (tr A / 3) (x - x_c),     tr A' = 0 identically.
+    # ⚠️ Anchoring at the particle position instead would make the result
+    # depend on where it is sampled -- u'(x_pos) = u(x_pos) for every x_pos,
+    # i.e. no correction at all. The centroid anchor is not a detail.
+    # ⚠️ The uncorrected interpolant is captured as a DEFAULT ARGUMENT, not
+    # read from the enclosing scope. Python resolves a closed-over name at
+    # CALL time, so rebinding `interpolate_velocity_single` below while this
+    # function referred to that name would make it call ITSELF -- infinite
+    # recursion, confirmed in isolation before writing this.
+    def velocity_divfree_single(pos, elem_id, velocity_field,
+                                _raw=interpolate_velocity_single):
+        u = _raw(pos, elem_id, velocity_field)
+        Jac = jax.jacfwd(_raw, argnums=0)(pos, elem_id, velocity_field)
+        tr3 = jnp.trace(Jac) / 3.0
+        xc = element_centroid_gpu[elem_id]
+        # ⚠️ An exited particle must not pick up a correction from whatever
+        # sits at element 0; _raw already returns 0 there, so match it.
+        ok = (elem_id >= 0) & (elem_id < len(connectivity))
+        return jnp.where(ok, u - tr3 * (pos - xc), u)
+
+    if divergence_free:
+        if element_centroid_gpu is None:
+            raise ValueError(
+                "divergence_free=True requires element_centroid_gpu: the "
+                "projection is anchored at the element centroid (see "
+                "docs/damage/DIVERGENCE_FREE_PLAN.md 4ab).")
+        # ✅ Every downstream velocity call now goes through the corrected
+        # field: all four RK4 stages, and the analytic divergence, which
+        # differentiates whatever this name points at and therefore reports
+        # tr A' = 0 without a separate code path.
+        interpolate_velocity_single = velocity_divfree_single
 
     # ---- Nodal scalar sampler (pathline damage driver) ----
     # Deliberately a separate function rather than a generalisation of

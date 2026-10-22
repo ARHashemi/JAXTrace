@@ -16,16 +16,12 @@
 # the vmapped RK4, the octree search, the level-set masking, the detachment
 # columns and the real accumulators.
 #
-# ⚠️ WHY --vel-range 34 34 (ONE snapshot, forced steady)
-# run_tracking.py builds gradient recovery only under `if n_frames == 1`
-# (run_tracking.py:2575) and otherwise prints "SKIPPED ... falling back to raw
-# P1". --divergence-free acts on the recovery's element_gradient, so a
-# multi-frame run would SILENTLY measure nothing. D2's production script is
-# VEL_START=34 VEL_END=199 (166 frames), so the range is overridden here.
-# ⚠️ That makes this a STEADY-FIELD test. It bounds the achievable det F gain
-# and validates the plumbing; it does not by itself license the 166-frame
-# production runs, which need the recovery path extended to time-dependent
-# fields (tracked as the next item in §4aa).
+# ⚠️ TIME-DEPENDENT BY DEFAULT. §4ab moved the projection IN-KERNEL (it wraps
+# the active interpolant and reads tr A from arrays the kernel already holds),
+# so it no longer rides the steady-only gradient-recovery path and needs no
+# per-frame array. VEL_END therefore defaults to D2's production 199 -- 166
+# frames -- and this is a test of what will actually ship.
+# Set VEL_END=34 to compare against the steady §4z numbers instead.
 #
 # ⚠️ The case folder is READ-ONLY. Output goes to /scratch only.
 # =============================================================================
@@ -42,7 +38,7 @@ OCTREE_CACHE="${OCTREE_CACHE:-/scratch/${PROJECT}/hashemia/octree_cache}"
 # ── Physics: D2's run_jaxtrace_D2.sh, with the two forced divergences above ──
 PRECISION=float32
 VEL_START="${VEL_START:-34}"
-VEL_END="${VEL_END:-34}"          # ⚠️ == VEL_START so recovery builds
+VEL_END="${VEL_END:-199}"         # D2 production range (166 frames)
 VELOCITY_FIELD=Displacement
 LEVELSET_FIELD=LEVEL
 TEMPERATURE_FIELD=Temperature
@@ -152,11 +148,14 @@ run_arm () {
 
 ARM="${ARM:-both}"
 case "$ARM" in
-  raw) run_arm raw "--gradient-recovery 1 --recovery-method centroid_taylor" ;;
-  df)  run_arm df  "--gradient-recovery 1 --recovery-method centroid_taylor --divergence-free" ;;
+  raw) run_arm raw "--gradient-recovery 0" ;;
+  df)  run_arm df  "--gradient-recovery 0 --divergence-free" ;;
   both)
-    run_arm raw "--gradient-recovery 1 --recovery-method centroid_taylor"
-    run_arm df  "--gradient-recovery 1 --recovery-method centroid_taylor --divergence-free" ;;
+    # ⚠️ Raw P1 in BOTH arms, so the ONLY difference is the projection.
+    # Gradient recovery is off: it is steady-only and irrelevant now that the
+    # projection is in-kernel, and leaving it on would confound the arms.
+    run_arm raw "--gradient-recovery 0"
+    run_arm df  "--gradient-recovery 0 --divergence-free" ;;
   *) echo "ARM must be raw | df | both" >&2; exit 2 ;;
 esac
 

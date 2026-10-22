@@ -662,17 +662,20 @@ def parse_args():
                              "map of threshold crossings.")
     parser.add_argument("--divergence-free", action="store_true",
                         default=False,
-                        help="Project the per-element velocity GRADIENT onto "
-                             "its trace-free part before tracking: "
-                             "A' = A - (tr A/3) I, b' = b + (A - A') xc. "
-                             "⚠️ Requires --recovery-method centroid_taylor "
-                             "(the kernel already evaluates "
-                             "v = vc + Gc @ (x - xc), which is exactly this "
-                             "form), so there is NO new GPU array and NO "
-                             "in-step transfer -- it rescales a prebuilt one. "
-                             "Divergence-free by construction, centroid "
-                             "velocity exactly unchanged, and the provably "
-                             "MINIMAL change to the gradient. Measured on "
+                        help="March the TRACE-FREE part of the velocity "
+                             "field: u'(x) = u(x) - (tr A/3)(x - xc), "
+                             "anchored at the element centroid. Divergence-"
+                             "free by construction, centroid velocity exactly "
+                             "unchanged, and the provably MINIMAL change to "
+                             "the gradient. ⚠️ Applied IN-KERNEL by wrapping "
+                             "whatever reconstruction is active, so it needs "
+                             "NO new per-frame array and works at ANY frame "
+                             "count: only the element centroids, which are "
+                             "time-independent geometry (0.13 GB on D2). The "
+                             "stored-gradient alternative would be 64.6 GB at "
+                             "166 frames. Costs 3 forward-mode tangents per "
+                             "velocity call -- compute, not an in-step host "
+                             "transfer, so the vmap is untouched. Measured on "
                              "A2/B1/C1/D1/D2: ln J along the pathline 1.7e-18 "
                              "p50 and |det F - 1| exactly 0, against raw "
                              "|det F - 1| up to 2.73 on B1; trajectories move "
@@ -680,8 +683,9 @@ def parse_args():
                              "DISCONTINUOUS across element faces -- fine for "
                              "a pathline integrator, which never evaluates a "
                              "normal trace, but do not reuse it where "
-                             "continuity matters. See "
-                             "docs/damage/DIVERGENCE_FREE_PLAN.md §4y-§4z.")
+                             "continuity matters. Requires "
+                             "--damage-divergence analytic (the default). See "
+                             "docs/damage/DIVERGENCE_FREE_PLAN.md 4y-4ab.")
     parser.add_argument("--damage-divergence", type=str, default="analytic",
                         choices=["field", "analytic"],
                         help="Which divergence ln_J integrates. 'analytic' "
@@ -839,27 +843,19 @@ def parse_args():
 
     args = parser.parse_args()
 
-    # ⚠️ --divergence-free rescales the PREBUILT element_gradient array that
-    # only the centroid_taylor path uploads. On any other reconstruction the
-    # flag would be a SILENT NO-OP: the run would complete, report nothing
-    # unusual, and still integrate a divergent field. Validated HERE, at parse
-    # time, so it fails in a second rather than after the mesh load -- a
-    # wasted production run is the expensive outcome.
-    if args.divergence_free:
-        if args.gradient_recovery != 1:
-            parser.error(
-                "--divergence-free requires --gradient-recovery 1: the "
-                "projection acts on the per-element gradient that only the "
-                "recovery path builds.")
-        if args.recovery_method not in ("centroid_taylor", "taylor"):
-            parser.error(
-                f"--divergence-free requires --recovery-method "
-                f"centroid_taylor (got '{args.recovery_method}'). The kernel "
-                f"evaluates v = vc + Gc @ (x - xc) on that path, which IS the "
-                f"corrected affine map; vertex_taylor and the hct_* variants "
-                f"reconstruct from nodal data instead, where a per-element "
-                f"trace-free gradient has nothing to attach to. See "
-                f"docs/damage/DIVERGENCE_FREE_PLAN.md 4aa.")
+    # ⚠️ --divergence-free needs the damage accumulators to see the corrected
+    # divergence, which only the 'analytic' path does: 'field' reads a
+    # PRECOMPUTED nodal div_u from the raw P1 gradient and cannot respond to
+    # the projection at all (measured identical to 5 s.f. with and without
+    # HCT, B.6k). Without this the velocity would be corrected while ln J
+    # still integrated the uncorrected divergence -- a silently wrong det F.
+    if args.divergence_free and args.damage_divergence != "analytic":
+        parser.error(
+            f"--divergence-free requires --damage-divergence analytic (got "
+            f"'{args.damage_divergence}'): 'field' integrates a precomputed "
+            f"nodal div_u from the RAW P1 gradient, so ln J would ignore the "
+            f"projection entirely. See docs/damage/DIVERGENCE_FREE_PLAN.md "
+            f"4ab.")
     return args
 
 
@@ -2655,60 +2651,19 @@ def main():
             elif recovery.method == "vertex_taylor":
                 node_gradient_gpu = jax.device_put(recovery.nodal_gradient)
             else:  # centroid_taylor (and legacy 'taylor' alias)
-                _eg = recovery.element_gradient
-                if args.divergence_free:
-                    # ⚠️ Applied to element_gradient ONLY. element_v_centroid
-                    # is the centroid velocity and the projection leaves it
-                    # EXACTLY unchanged (b' = b + (A - A') xc is precisely the
-                    # shift that does so), which is why no other array moves
-                    # and why no new upload is needed.
-                    from jaxtrace.damage.divfree_projection import (
-                        project_element_gradient_divfree, divergence_report)
-                    _eg_new = project_element_gradient_divfree(_eg)
-                    _rep = divergence_report(_eg, _eg_new)
-                    print("\n[divergence-free] trace-free projection "
-                          "A' = A - (tr A/3) I")
-                    print(f"  |div u|/|A|  before p50 "
-                          f"{_rep['div_before_p50']:.3e}  ->  after p50 "
-                          f"{_rep['div_after_p50']:.3e} "
-                          f"(p99 {_rep['div_after_p99']:.3e})")
-                    print(f"  gradient preserved: cos p50 "
-                          f"{_rep['cos_p50']:.5f}, |A'|/|A| p50 "
-                          f"{_rep['ratio_p50']:.5f}, "
-                          f"{100*_rep['cos_frac_above_0_9']:.2f} % aligned")
-                    print(f"  relative change ||A'-A||/||A||: p50 "
-                          f"{_rep['change_p50']:.3e}  p99 "
-                          f"{_rep['change_p99']:.3e}  (provably minimal)")
-                    if _rep['div_after_p50'] > 1e-12:
-                        print("  ⚠️  divergence did NOT reach round-off -- "
-                              "check the gradient dtype (float32 arithmetic "
-                              "destroys this; see §4s)")
-                    _eg = _eg_new
+                # ⚠️ NO host-side projection here. The correction is applied
+                # IN-KERNEL (4ab) by wrapping the active interpolant, which
+                # works at any frame count and for any reconstruction.
+                # Projecting element_gradient here as well would apply it
+                # TWICE on the centroid_taylor path.
                 element_centroid_gpu = jax.device_put(recovery.element_centroid)
                 element_v_centroid_gpu = jax.device_put(recovery.element_v_centroid)
-                element_gradient_gpu = jax.device_put(_eg)
+                element_gradient_gpu = jax.device_put(recovery.element_gradient)
         else:
             print(f"\n[gradient-recovery] SKIPPED: velocity_sequence has "
                   f"{n_frames} frames; only single-frame (steady) fields "
                   f"are supported today. Falling back to raw P1 "
                   f"barycentric interpolation.")
-            if args.divergence_free:
-                # ⚠️ The parse-time guards cannot catch this: n_frames is not
-                # known until the velocity stack is loaded. Without this the
-                # run would complete normally, print nothing unusual, and
-                # integrate a FULLY DIVERGENT field while the user believed
-                # the projection was on. Measured stakes: raw |det F - 1|
-                # reaches 2.73 on B1 (§4z), so the gate is not cosmetic.
-                raise SystemExit(
-                    f"--divergence-free was requested but gradient recovery "
-                    f"SKIPPED ({n_frames} frames): the projection acts on "
-                    f"the per-element gradient that only the steady recovery "
-                    f"path builds, so this run would silently integrate a "
-                    f"divergent field.\n"
-                    f"  Use --vel-range <t> <t> (one snapshot) to validate on "
-                    f"a steady field, or wait for time-dependent recovery "
-                    f"(docs/damage/DIVERGENCE_FREE_PLAN.md 4aa: streaming one "
-                    f"frame is 0.65 GB resident, so it is practical).")
     else:
         print(f"\n[gradient-recovery] disabled by --gradient-recovery=0")
 
@@ -2740,6 +2695,26 @@ def main():
             is_enhanced = (min_abs_ls < ENHANCED_SEARCH_BAND)
             enhanced_elements_gpu = jax.device_put(is_enhanced)
             element_neighbors_node_gpu = jax.device_put(element_neighbors_node)
+    # ⚠️ --divergence-free anchors its projection at the element CENTROID, so
+    # it needs element_centroid_gpu. The gradient-recovery path above uploads
+    # that array, but recovery is STEADY-ONLY (n_frames == 1), and production
+    # runs are 166 frames. Centroids are PURE GEOMETRY -- independent of the
+    # velocity and of time -- so upload them here when recovery did not, and
+    # the flag works at any frame count.
+    #
+    # Cost: (n_elements, 3) float32 = 0.13 GB on D2, ONCE. The stored-gradient
+    # alternative is (n_frames, n_elements, 3, 3) = 64.6 GB at 166 frames
+    # against a 32.6 GB card. That gap is why the projection is done in-kernel
+    # from tr A rather than from a precomputed gradient (4ab).
+    if args.divergence_free and element_centroid_gpu is None:
+        _xc = node_positions[connectivity].mean(axis=1).astype(
+            config.FLOAT_DTYPE_NP)
+        element_centroid_gpu = jax.device_put(_xc)
+        print(f"\n[divergence-free] element centroids uploaded "
+              f"{_xc.shape} {_xc.dtype} ({_xc.nbytes/1e9:.2f} GB) -- "
+              f"time-independent geometry, so this works at any frame count")
+        del _xc
+
     stage_times['3_build_upload'] = time.time() - t_stage
     print(f"  Stage 3 time: {stage_times['3_build_upload']:.1f}s")
 
@@ -2898,6 +2873,7 @@ def main():
         residence_edot_threshold=args.residence_edot_threshold,
         damage_detachment=args.damage_detachment,
         damage_divergence=args.damage_divergence,
+        divergence_free=args.divergence_free,
         detachment_policy=detach_policy,
     )
     # create_rk4_comparison returns just rk4_step by default; when
