@@ -1075,6 +1075,13 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 5. **Other cases.** The projection is verified on A2, B1, C1, D1, D2. The
    remaining pin-shape cases are untested, though nothing in the method is
    case-specific.
+5a. **Usability, not correctness:** the damage-stack build loops over all
+   timesteps (`run_tracking.py:2495`) with **no progress print inside the
+   loop**, so a 166-frame run goes silent for 15–30 minutes between
+   `mesh geometry ... hoisted` and the next line. It is easy to mistake for a
+   hang — I checked three times before confirming CPU time was advancing
+   normally. A `print` every 20 timesteps, matching the mesh loader's own
+   `Loaded N/166` style, would remove the ambiguity.
 5b. **Minor:** the centroid upload computes
    `node_positions[connectivity].mean(axis=1)`, which materialises a
    `(n_el, 4, 3)` temporary — **1.04 GB in float64** on D2, on top of ~57 GB
