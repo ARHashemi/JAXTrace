@@ -381,9 +381,13 @@ where `∇N_a` are the shape-function gradients, which are exactly the rows of
 
 In practice we get it even more cleanly: `jax.jacfwd` differentiates the
 velocity interpolation closure directly, giving the full 3×3 Jacobian. That
-has a decisive advantage — it **wraps whatever reconstruction is active** (raw
-P1, centroid_taylor, vertex_taylor, HCT cubic) rather than hard-coding P1
-algebra, so the correction can never drift from the field it corrects.
+has a real advantage — it **wraps** the active reconstruction rather than
+hard-coding P1 algebra, so the correction can never drift from the field it
+corrects.
+
+⚠️ **But it is only EXACT for a reconstruction whose gradient is constant per
+element** — raw P1 and `centroid_taylor`. See §7.6; `vertex_taylor` and the
+`hct_*` variants are blocked at parse time.
 
 The only other input is `x_c`, the element centroid. That is **pure geometry**:
 independent of velocity, independent of time. One `(n_elements, 3)` array,
@@ -470,6 +474,44 @@ automatically differentiates the **corrected** field and returns
 
 Verified in isolation: `tr(jacfwd(corrected)) = −1.1e-16` versus
 `tr(jacfwd(raw)) = 1.608`.
+
+### 7.6 ⚠️ Which reconstructions it is exact for, and why
+
+The wrapper subtracts `s·(x − x_c)` with `s = tr(∇u)/3` evaluated at the
+sample point. Take the divergence of the result:
+
+$$\nabla\cdot u' = \nabla\cdot u - \nabla\cdot\big[s(x)\,(x-x_c)\big]
+ = \nabla\cdot u - \big[3s(x) + \nabla s\cdot(x-x_c)\big]
+ = -\,\nabla s\cdot(x-x_c)$$
+
+using `3s = ∇·u`. ✅ Verified numerically to 8 significant figures.
+
+So the leftover divergence is **exactly the term from `s` varying in space**,
+and it vanishes **iff `∇s = 0`**, i.e. iff the reconstruction's gradient is
+constant on each element.
+
+| reconstruction | gradient within an element | projection exact? |
+|---|---|---|
+| raw P1 (`--gradient-recovery 0`) | constant | ✅ yes |
+| `centroid_taylor` | constant (`v_c + G_c·(x−x_c)`) | ✅ yes |
+| `vertex_taylor` | **varies** (blended per-vertex Taylor) | ❌ no |
+| `hct_cubic` and variants | **varies** (piecewise cubic) | ❌ no |
+
+On a synthetic `vertex_taylor` field, **~1.2 % of the original divergence
+survived** the projection. That is far better than nothing but it is not zero,
+and this flag exists to deliver exactly zero — a run quietly returning 98.8 %
+of a divergence-free field would be reported as a pass.
+
+**So the two varying-gradient methods are blocked at parse time**, with a
+message naming the reason and the alternative. ⚠️ An earlier draft of this
+document claimed the wrapper "inherits whatever reconstruction is active"; that
+is true of the *value* but false of the *divergence*, and the claim was
+corrected after testing all four rather than only the one that had been run.
+
+If a higher-order reconstruction is ever needed together with this flag, the
+fix is to subtract the isotropic part of the Jacobian **pointwise** in the
+integrator's gradient rather than as an `(x − x_c)` field — which changes what
+`A` means downstream and is a separate design question.
 
 ⚠️ This is also why `--divergence-free` **requires `--damage-divergence
 analytic`** (the default). The alternative, `field`, reads a *precomputed
@@ -889,6 +931,7 @@ python3 run_tracking.py \
 |---|---|
 | `--divergence-free requires --damage-divergence analytic` | `field` mode reads a precomputed nodal `div_u` from the **raw** gradient and would silently ignore the projection. |
 | `divergence_free=True requires element_centroid_gpu` | Internal: the kernel was built without centroids. `run_tracking.py` uploads them automatically. |
+| `--divergence-free is exact only for a reconstruction whose gradient is CONSTANT per element` | You combined it with `vertex_taylor` or an `hct_*` method, where ~1.2 % of the divergence would survive (§7.6). Use `centroid_taylor` or `--gradient-recovery 0`. |
 | `REFUSING TO RUN` from `build_divfree_field.py` | You invoked the **superseded** BDM₁ builder. Use `--divergence-free` instead. |
 
 ### 12.4 Verifying it yourself

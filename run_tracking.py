@@ -856,6 +856,29 @@ def parse_args():
             f"nodal div_u from the RAW P1 gradient, so ln J would ignore the "
             f"projection entirely. See docs/damage/DIVERGENCE_FREE_PLAN.md "
             f"4ab.")
+    # ⚠️ The projection subtracts s*(x - xc) with s = tr(grad u)/3 evaluated at
+    # the sample point. Its leftover divergence is EXACTLY -(grad s . (x - xc))
+    # -- verified to 8 significant figures -- so it vanishes only when s is
+    # CONSTANT per element, i.e. when the reconstruction has a constant
+    # gradient. That holds for raw P1 and centroid_taylor. It does NOT hold for
+    # vertex_taylor or the hct_* variants, whose gradient varies inside the
+    # element: measured ~1.2 % of the original divergence surviving on a
+    # synthetic vertex_taylor field.
+    #
+    # Blocked rather than silently approximate: the whole point of this flag is
+    # an EXACTLY divergence-free field, and a run that quietly delivers 98.8 %
+    # of one would be reported as a pass.
+    if args.divergence_free and args.gradient_recovery == 1:
+        _exact = ("centroid_taylor", "taylor")
+        if args.recovery_method not in _exact:
+            parser.error(
+                f"--divergence-free is exact only for a reconstruction whose "
+                f"gradient is CONSTANT per element, and "
+                f"'{args.recovery_method}' varies within the element. The "
+                f"leftover divergence would be -(grad s . (x - xc)), measured "
+                f"at ~1.2 % of the original. Use --recovery-method "
+                f"centroid_taylor, or --gradient-recovery 0 for raw P1. See "
+                f"docs/damage/DIVERGENCE_FREE_METHOD.md 7.6.")
     return args
 
 
