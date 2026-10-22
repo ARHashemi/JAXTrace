@@ -538,6 +538,33 @@ The reason is structural rather than lucky: `jnp.where` has **zero gradient on
 the masked side**, so `tr(Jac) = 0` exactly where `u = 0`, and the correction
 term vanishes together with the velocity. Nothing is injected.
 
+### 7.8 ✅ Element quality is irrelevant to it
+
+⚠️ Half of a D-family mesh is badly shaped: **5,463,331 of 10,807,677 elements
+(50.5 %) on D2 are non-Kuhn**, so slivers are the common case, not an edge
+case.
+
+It does not matter. The projection is purely algebraic on `A` — a trace, a
+subtraction, a scalar multiply — and **never inverts the element matrix**. The
+residual divergence across four orders of aspect-ratio degradation:
+
+| z-squash | median `|det M|` | max residual `|tr A'|/‖A‖` |
+|---|---|---|
+| 1 | 1.83e+00 | 2.07e-16 |
+| 1e-1 | 1.99e-01 | 2.40e-16 |
+| 1e-2 | 2.36e-02 | 2.28e-16 |
+| 1e-3 | 1.98e-03 | 2.05e-16 |
+| 1e-4 | 1.74e-04 | **1.99e-16** |
+
+Flat at round-off. (The *extraction* of `A` from nodal values does invert the
+element matrix, and that is where a true degeneracy would bite — but it is the
+pre-existing P1 interpolation, not something this feature adds.)
+
+⚠️ **One figure from that test must not be quoted out of context.** The
+relative change `‖A'−A‖/‖A‖` on *random* matrices is large, because a random
+3×3 is **24.4 % isotropic by norm** while the real FOM field is **0.66 %**
+(§10.1). The random-data figure describes the test data, not our field.
+
 ⚠️ This is also why `--divergence-free` **requires `--damage-divergence
 analytic`** (the default). The alternative, `field`, reads a *precomputed
 nodal* `div_u` built from the raw P1 gradient — it cannot respond to the
@@ -716,6 +743,7 @@ ALGORITHM 5 — Full tracking run with --divergence-free
 | `scripts/damage/test_pathline_lnj.py` | The independent validator: pure numpy, no JAX, marches the same seeds through raw and corrected fields and compares `ln J` and trajectories. |
 | `scripts/damage/test_divfree_reconstructions.py` | Pins §7.6: which reconstructions the projection is exact for, and that the leftover divergence equals `−(∇s·(x−x_c))`. Guards against silently unblocking `vertex_taylor` / `hct_*`. |
 | `scripts/damage/test_divfree_levelset.py` | Pins §7.7: nothing is injected into the level-set-masked tool region, including an element straddling the interface. |
+| `scripts/damage/test_divfree_element_quality.py` | Pins §7.8: the residual divergence stays at round-off on sliver elements across four orders of aspect ratio — which matters because the D-family meshes are 50.5 % non-Kuhn. |
 | `scripts/damage/test_closed_form_divfree.py` | Whole-snapshot verification across cases: divergence, preservation, gradient alignment. |
 | `scripts/damage/test_local_order.py` | Proves the P1 data is exactly affine (model order is not the problem) and quantifies the irreducible repair cost. |
 | `scripts/damage/test_divfree_detf.sh` | The two-arm `det F` gate on LUMI. Detects the PVTU stem from disk. |
