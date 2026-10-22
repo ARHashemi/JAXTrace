@@ -1043,6 +1043,12 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 5. **Other cases.** The projection is verified on A2, B1, C1, D1, D2. The
    remaining pin-shape cases are untested, though nothing in the method is
    case-specific.
+5b. **Minor:** the centroid upload computes
+   `node_positions[connectivity].mean(axis=1)`, which materialises a
+   `(n_el, 4, 3)` temporary — **1.04 GB in float64** on D2, on top of ~57 GB
+   already resident. Harmless against the 120 G limit, but avoidable: the mean
+   could be accumulated over the four vertices in-place with no temporary at
+   all. Not worth changing mid-run.
 6. ⚠️ **The octree cache key includes the node-position dtype** — predicted
    from the code and then **observed**: arm 1 of the full-length gate
    (`--precision float64`) MISSED the float32 cache and rebuilt the octree
