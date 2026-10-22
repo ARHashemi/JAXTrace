@@ -249,6 +249,45 @@ def main() -> int:
         for qq in (50, 90, 99):
             print(f"     p{qq:<3} {np.percentile(rr, qq):.4e}")
 
+        # ⚠️⚠️ GRADIENT CHECK -- the gate that preservation CANNOT see.
+        # Preservation compares only u(x_c), and u(x_c) = A x_c + b can be
+        # right while A and b are each enormous and wrong, cancelling. That is
+        # not hypothetical: the C1_34 field passed preservation p50 0.166 and
+        # divergence 9.2e-17 while carrying |A_new|/|A_P1| = 2.8e+06 and
+        # cos(A_new, A_P1) = 0.0016 -- a gradient a million times too large
+        # and ORTHOGONAL to the truth, with |b|/|A x_c| = 1.0000 exactly.
+        #
+        # Tracking integrates the GRADIENT (det F and every damage
+        # accumulator depend on A), so a field that fails this check is
+        # unusable no matter how good the other two numbers look.
+        X4 = np.concatenate([p_, np.ones((len(sel), 4, 1))], axis=2)
+        Cf = np.linalg.solve(X4, vel[conn[sel]])
+        Ap1 = Cf[:, :3, :].transpose(0, 2, 1)
+        nAp = np.sqrt(np.sum(Ap1 * Ap1, axis=(1, 2)))
+        cosA = np.einsum('mij,mij->m', Amat, Ap1) / np.maximum(nA * nAp, 1e-300)
+        ratA = nA / np.maximum(nAp, 1e-300)
+        cancel = (np.linalg.norm(bvec, axis=1) /
+                  np.maximum(np.linalg.norm(
+                      np.einsum('mij,mj->mi', Amat, xc_), axis=1), 1e-300))
+        print()
+        print("  ── GRADIENT (the check preservation is blind to) ──")
+        print(f"     |A_new|/|A_P1|   p50 {np.median(ratA):.4e}"
+              f"  p99 {np.percentile(ratA, 99):.4e}   (want ~1)")
+        print(f"     cos(A_new,A_P1)  p50 {np.median(cosA):.4f}"
+              f"  p99 {np.percentile(cosA, 99):.4f}   (want ~1)")
+        print(f"     |b|/|A xc|       p50 {np.median(cancel):.4e}"
+              f"   (want << 1; 1.0000 means pure cancellation)")
+        aligned = float(np.mean(cosA > 0.9))
+        scaled = float(np.mean((ratA > 0.5) & (ratA < 2.0)))
+        print(f"     aligned (cos>0.9) {100*aligned:.3f} %"
+              f"   correctly scaled (0.5<ratio<2) {100*scaled:.3f} %")
+        if aligned > 0.9 and scaled > 0.9:
+            print("     ✅ PASS -- the reconstructed gradient tracks the FOM")
+        else:
+            print("     ❌ FAIL -- the field is divergence-free but UNRELATED")
+            print("        to the FOM velocity gradient. Do NOT use it for")
+            print("        tracking or damage: det F integrates this A.")
+
         # ⚠️ SEAM: elements adjacent across a piece boundary. Compare their
         # preservation to the bulk -- a jump means the overlap is too thin.
         own = np.full(m_all, -1, dtype=np.int64)

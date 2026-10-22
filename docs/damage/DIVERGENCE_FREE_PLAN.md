@@ -1684,7 +1684,14 @@ cylA patch and one known-good D2 patch. If a weighting that differs 43× between
 elements leaves preservation unchanged, uniformity is not the cause either and
 the remaining suspect is the pinned trace alone.
 
-## 4w. ✅ CAUSE LOCALISED — `N` is numerically rank-deficient in the failing patches
+## 4w. ⚠️ SUPERSEDED BY §4x — `N` is rank-deficient, but that is not the defect
+
+> ⚠️ **Read §4x first.** The measurements below are correct and the refutations
+> stand, but the framing is wrong: the near-null direction of `N` is the SLACK
+> the solve needs, not a defect, and the real defect (the reconstructed
+> gradient is ~10⁶ too large and orthogonal to the FOM's in EVERY patch,
+> including the ones called "good" here) is invisible to the preservation
+> metric this section ranks patches by. ~~CAUSE LOCALISED~~
 
 §4v closed off the element model. This section finds where the failure actually
 lives, using a 12-patch probe on **D2 ts = 34** (3,000-element seeds, 3-layer
@@ -1789,6 +1796,198 @@ which over-determines once the constraint is added. **Measure `smin(N)` under
 the moment objective on patches 0 and 4 before building anything** — if it
 does not rise into the 1e-02 cluster, the premise is wrong and this is not the
 fix either.
+
+## 4x. ❌ STOP — the BDM₁ field is divergence-free but UNRELATED to the FOM gradient
+
+⚠️⚠️ **This invalidates §4r–4w's "successes" and the fields built so far.** It
+was found by testing §4w's own next step, and it inverts the reading of every
+preservation number in this document.
+
+### What happened
+
+§4w's premise test asked whether a richer objective lifts `smin(N)`. It does,
+completely — 12 BDM₁ moments make `N` unisolvent and `smin` becomes a uniform
+**0.48 across every patch**, a 250,000× lift on patch 4. But solving with it
+gave preservation **0.60 … 1.4e+05** and divergence **1.3e-08** — worse
+everywhere. ✅ The premise-first rule earned its keep: the fix was built and
+discarded in one test instead of a week.
+
+That failure is informative. With 12 moment rows the objective demands the
+BDM₁ field match the P1 field *throughout* each element, while `div u = 0` is
+also imposed — and the P1 field has real divergence (§4v, p50 0.66 % of ‖A‖).
+Those demands are **inconsistent**, so the solve sacrifices both. ⚠️ Therefore
+the near-null direction of `N` is **not a defect to remove — it is the slack
+the solve needs** to satisfy the constraint exactly while matching the
+centroid. `solve_patch`'s "3 equations on 12 DOF is deliberate" is right, and
+§4w's diagnosis of a "rank deficiency" was the wrong frame.
+
+### ⚠️ The actual defect: the gradient is garbage in EVERY patch
+
+Asking *how* the solution differs from P1, rather than by how much:
+
+| patch | preservation p50 | `|A_new|/|A_P1|` | `cos(A_new, A_P1)` |
+|---|---|---|---|
+| 1 ("good") | 1.56e-07 | **1.5e+03** | **−0.005** |
+| 2 ("good") | 1.74e-07 | 5.8e+03 | −0.001 |
+| 5 ("good") | 3.04e-07 | 1.3e+03 | −0.006 |
+| 0 (bad) | 1.21e+00 | 2.7e+07 | −0.006 |
+| 4 (bad) | 9.84e-01 | 1.5e+07 | −0.003 |
+
+**The "good" patches are not good.** Their reconstructed gradient is
+10³ times too large and **orthogonal** to the true gradient (cos ≈ 0). They
+match the centroid velocity to seven digits purely by cancellation between two
+enormous wrong terms — which is exactly the `|b|/|A x_c| = 1.0000` that §4w
+measured in all 12 patches and dismissed as "universal, not a discriminator."
+⚠️ It was universal, and it was the disease, not a nuisance.
+
+### Confirmed on the shipped field, not just a probe
+
+`C1_34.npz` from the LUMI pilot — 7,586,466 elements, the file this pipeline
+actually wrote — on a 200 k sample:
+
+| quantity | p50 | p99 | want |
+|---|---|---|---|
+| divergence `|div|/‖A‖` | 9.21e-17 | 1.46e-15 | ~0 ✅ |
+| preservation | 1.66e-01 | 5.65e+00 | small |
+| **`|A_new|/|A_P1|`** | **2.80e+06** | 1.49e+08 | **~1** ❌ |
+| **`cos(A_new, A_P1)`** | **1.61e-03** | 7.63e-01 | **~1** ❌ |
+| `|b|/|A x_c|` | 1.0000 | 1.0002 | ≪ 1 ❌ |
+
+Elements with a roughly correct gradient direction (`cos > 0.9`): **0.115 %**.
+Elements correctly scaled (`0.5 < ratio < 2`): **0.001 %**.
+
+**Why this is fatal rather than cosmetic:** tracking integrates the
+**gradient**. `det F = exp(∫ div u dt)` and every damage accumulator
+(Rice–Tracey, Cockcroft–Latham, Piwnik–Plata) is driven by `A`, not by
+`u(x_c)`. A field whose `A` is 10⁶ too large and pointing the wrong way is
+unusable for the purpose it was built for, however clean its divergence.
+
+### Actions taken
+
+- **LUMI sweep 23059351 cancelled** after the pilot, rather than producing 17
+  cases × 3 snapshots of the same artefact. Allocation preserved.
+- **A gradient gate added to `build_divfree_field.py`'s verdict.** It reports
+  `|A_new|/|A_P1|`, `cos(A_new, A_P1)` and `|b|/|A x_c|`, and prints an
+  explicit ❌ FAIL telling the reader not to use the field for tracking.
+  ⚠️ `preservation` must never again be read as sufficient: it is blind to the
+  gradient by construction, and that blindness is what let §4r–4u call these
+  fields a success.
+
+### ⚠️ What this means for the method
+
+The BDM₁-on-patches formulation is **not salvageable by tuning**. The
+objective is fundamentally too weak: matching one vector per element (3
+equations) cannot pin down a 12-DOF affine map, so the solve is free to pick
+any member of a 9-dimensional family — and with `reg = 1e-8` it picks an
+arbitrary huge one. Strengthening the objective to pin `A` down makes it
+inconsistent with exact `div u = 0` (the moment test above). **The two
+requirements cannot both be met in this discrete space**, which is the same
+obstruction §4-conforming found from the other direction.
+
+The honest conclusion: the FOM velocity is a stabilised **P1/P1** field whose
+divergence is a genuine ~0.66 % of its gradient, and no local projection can
+remove it while preserving the gradient. The remaining options, in order of
+how much they concede:
+
+1. **Report `div u` as a diagnostic and stop projecting.** The §4v closed form
+   `A' = A − (tr A/3) I` is the *minimum-norm* divergence-free correction per
+   element and changes the gradient by a measured p50 0.66 % / p99 28 %. It is
+   discontinuous across faces, so it is not an H(div) field — but for a
+   pathline integrator that samples `A` per element, continuity of the normal
+   trace was never actually required. ⚠️ Test this against the det F gate
+   before believing it; it is the cheapest option by far and was never tried.
+2. **Scott–Vogelius P3** on a barycentrically-refined mesh — pointwise
+   divergence-free *and* H¹-conforming, so the gradient is well-defined. Cost
+   was the objection (§4-sv), never correctness.
+3. **Accept the FOM as-is** and carry `ln J = ∫ div u dt` as an error bar on
+   det F rather than forcing it to zero.
+
+**Recommendation: (1) first**, because it is a closed form, costs nothing, and
+its effect on the gradient is already measured. If the det F gate passes with
+it, the whole patch-solve apparatus is unnecessary.
+
+## 4y. ✅ SOLVED — the closed-form per-element correction, and it beats BDM₁ on everything
+
+§4x's recommendation (1), tested immediately because it costs nothing.
+`scripts/damage/test_closed_form_divfree.py`.
+
+### The correction
+
+For the affine map `u = A x + b` that the P1 data defines exactly on each tet
+(§4v), the **minimum-norm** divergence-free correction is closed-form:
+
+$$A' = A - \frac{\operatorname{tr}A}{3}\,I,
+\qquad b' = b + (A - A')\,x_c$$
+
+- `tr A' = tr A − 3·(tr A/3) = 0` — divergence-free **by construction**, to
+  round-off, with no solve.
+- `u'(x_c) = A' x_c + b' = A x_c + b = u(x_c)` — the centroid velocity is
+  **exactly** unchanged.
+- `‖A′−A‖_F/‖A‖_F = |div u|/(√3‖A‖_F)` is **provably minimal** (§4v) — p50
+  0.66 %, p99 28 % on D2. No divergence-free field is closer to the FOM's
+  gradient.
+
+### Measured, all four families at ts = 34
+
+| case | elements | divergence | preservation | `|A'|/|A_P1|` | `cos` | aligned | time |
+|---|---|---|---|---|---|---|---|
+| D2 | 10,807,677 | 2.98e-18 | 3.88e-08 | 0.99998 | 0.99998 | 99.74 % | **13.4 s** |
+| A2 | 10,335,240 | 2.56e-18 | 3.82e-08 | 0.99999 | 0.99999 | 99.85 % | 14.1 s |
+| B1 | 7,462,783 | 4.45e-18 | 4.34e-08 | 0.99995 | 0.99995 | 97.92 % | 71.2 s |
+| C1 | 7,586,466 | 4.06e-18 | 4.41e-08 | 0.99997 | 0.99997 | 99.87 % | 12.1 s |
+| D1 | 7,922,599 | 4.72e-18 | 4.70e-08 | 0.99993 | 0.99993 | 98.10 % | 9.3 s |
+
+Correctly scaled (`0.5 < ratio < 2`): **100.000 %** in every case. ✅ Gradient
+gate passes everywhere.
+
+### Against the BDM₁ patch solve it replaces
+
+| | BDM₁ (§4r–4w) | closed form | factor |
+|---|---|---|---|
+| divergence | 9.2e-17 | **3.0e-18** | 30× better |
+| preservation | 1.7e-01 | **3.9e-08** | 4.3 million× better |
+| `|A_new|/|A_P1|` | 2.8e+06 | **0.99998** | — |
+| `cos(A_new, A_P1)` | 0.0016 | **0.99998** | — |
+| gradient gate | ❌ 0.115 % aligned | ✅ 99.74 % | — |
+| cost / snapshot | 1511 s on 16 cores, 821 patches | **13.4 s, one pass** | 113× |
+| machinery | face topology, adjacency, patch growth, overlap ring, sparse LU, process pool, seam check | `np.linalg.solve` on 4×4 blocks | — |
+
+⚠️ It is better on **every** axis simultaneously, including the two that
+motivated the whole patch apparatus. The 3-layer overlap, the 10,000-element
+patch tuning, the Schwarz driver and the seam analysis (§4-overlap, §4p–4r)
+are all **unnecessary**, not merely slower.
+
+### ⚠️ What it gives up, and why that is acceptable here
+
+The corrected field is **discontinuous across element faces**: it is not
+H(div)-conforming and not a finite-element function in the usual sense. That
+was the stated reason for pursuing BDM₁ in the first place.
+
+It does not matter for this application, for a concrete reason: **the pathline
+integrator samples `A` and `b` inside whichever element contains the particle
+and never evaluates a normal trace or a flux**. Conformity buys well-posedness
+for a *variational problem*; there is no variational problem here, only a
+pointwise field evaluation per element. §4x reached the same conclusion from
+the other side — the P1/P1 FOM is not inf-sup stable, so there is no weak
+structure to preserve.
+
+⚠️ **Open, and the honest caveat:** the field is divergence-free *within* each
+element but a particle crossing a face sees a jump in `A`. Whether the
+accumulated `ln J = ∫ div u dt` along a pathline is therefore zero to the same
+precision is **not** established by the per-element numbers above — it needs
+the det F gate on a real tracking run. That is the next test, and it is the
+one that decides this. Per-element divergence of 3e-18 is necessary, not
+sufficient.
+
+### Next
+
+1. **Run the det F gate** on D2 with this field (`--damage-divergence field`)
+   and compare against the analytic baseline. This is the decisive test.
+2. If it passes, delete nothing yet but mark §4e–4w as superseded method and
+   keep `divfree.py` only for the record.
+3. ⚠️ Do **not** re-run the LUMI sweep until (1) passes. Cancelling 23059351
+   was right; a sweep of a field that fails the pathline gate is the same
+   mistake at 17× the cost.
 
 ## 5. Implementation steps
 
