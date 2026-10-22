@@ -1527,6 +1527,72 @@ every patch; D2 — the production case — preserves the field to 4.7e-04.
 
 ---
 
+## 4u. ✅ ALL THREE D2 SNAPSHOTS — and the diagnostic, as far as it goes
+
+### ✅ D2 is reproducible to 4 significant figures
+
+| timestep | divergence median | preservation p50 | seam | time |
+|---|---:|---:|---:|---:|
+| 34 | 1.0938e-16 | 4.7252e-04 | 1.49× | 1530.8 s |
+| 100 | 1.0940e-16 | 4.7278e-04 | 1.50× | 1539.0 s |
+| 199 | 1.0941e-16 | 4.7235e-04 | 1.49× | 1532.8 s |
+
+✅ **Three independent velocity fields, 10.8 M elements each, 100 % coverage,
+and the verdicts agree to 4 significant figures.** That reproducibility is
+itself evidence the method is deterministic and the implementation sound.
+
+### ❌ Tikhonov is NOT the cause — the fourth refuted hypothesis
+
+Sweeping `reg` over **six orders** on a bad cylA patch:
+
+| `reg` | \|A\| | preservation |
+|---|---:|---:|
+| 1e-8 | 3.786e+08 | 3.03e-01 |
+| 1e-6 | 3.788e+08 | 3.22e-01 |
+| 1e-4 | 3.787e+08 | 9.78e+00 |
+| 1e-2 | 3.741e+08 | 9.62e+02 |
+
+⚠️ **\|A\| is invariant** — it moves by 1 % while `reg` moves by 10⁶. ✅ But
+preservation degrades badly above 1e-6, confirming **1e-8 is the right
+setting** for a different reason than I assumed.
+
+### ❌ Nor is it element size or basis normalisation
+
+The good and bad patches have **identical element size** (h = 0.0787 mm for
+both, p50 and min) yet \|A\| differs by **62×**. ⚠️ So the large coefficients
+are not a 1/h scaling artefact.
+
+### ⚠️ What the diagnostic DID establish
+
+| | GOOD patch | BAD patch |
+|---|---:|---:|
+| preservation p50 | 3.53e-02 | 3.03e-01 |
+| fraction \|A\| > 1e7 | **25.7 %** | **80.3 %** |
+| fraction \|A\| > 1e9 | 0.00 % | 16.9 % |
+| per-element corr(log\|A\|, log preservation) | +0.240 | +0.263 |
+
+✅ **The difference is the FRACTION of elements with large coefficients**, not
+their magnitude where they occur: preservation among the large-\|A\| elements
+is 5.5e-02 (good) and 3.3e-01 (bad) — i.e. it tracks the patch, not \|A\|.
+
+⚠️ **And the per-element correlation is only +0.24**, against +0.82 across
+patches. ❌ **So \|A\| is a SYMPTOM, not the cause** — something makes a whole
+patch behave badly, and large coefficients come along with it.
+
+### ⚠️ Honest status
+
+Five hypotheses tested and refuted: slow material, divergence magnitude,
+`cond(T)`, Tikhonov weight, element size. ✅ The failure is **per-patch and
+all-or-nothing**, which points at the patch-level linear algebra rather than
+any element property — but I have not isolated it.
+
+✅ **What this does NOT block:** D2, the production case, preserves the field
+to **4.7e-04** with divergence at **1.09e-16**, reproducibly across three
+snapshots. ⚠️ The open question concerns cylA, the small test case, and should
+be resolved before cylA results are quoted — not before D2 tracking proceeds.
+
+---
+
 ## 5. Implementation steps
 
 **Step 1 — sub-mesh proof (½–1 day).** Assemble the $\mathbf K=\mathbf I$
