@@ -304,6 +304,12 @@ finite-element function in the usual sense.
 **This was the stated reason we spent weeks on BDM₁** (§11), which *is*
 conforming. So why is it acceptable now?
 
+> ⚠️ **§14.4 narrows what follows.** The argument below is correct for
+> `ln J` / `det F` and **overstated for trajectories**: the raw P1 field is
+> exactly flux-continuous across faces and the DTP breaks that, creating
+> ~1 % of faces where the normal velocity points in opposite directions from
+> each side — the stagnation mode of [Sel20], measured in §14.3.
+
 ### 6.1 Because our integrator never looks at a face
 
 A pathline integrator does exactly one thing with the velocity field: it
@@ -1128,6 +1134,167 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
    precision is varied. Worth keying on positions cast to a canonical dtype.
 
 ---
+
+---
+
+## 14. Provenance, prior art, and what the literature says we got wrong
+
+⚠️ **Added after the method was built, in response to the question "where did
+this come from?" — which should have been asked first.**
+
+### 14.1 Where the method came from
+
+**Not from a paper.** The closed form and the §5 optimality proof were derived
+in-session and verified numerically. Earlier revisions of this document
+presented the method with citations arranged around it, which gave a
+misleading impression of standing in the literature. It had none.
+
+What *is* standard is the algebra. `A − (tr A/3)I` is the **deviatoric
+projection**, and in Lagrangian turbulence modelling it is the routine way to
+enforce incompressibility on the velocity-gradient tensor: models of the
+velocity gradient along particle paths are built so `A` stays trace-free
+[Joh16]. The operation is textbook. Applying it as a **post-processing repair
+of a FEM velocity field for particle tracking** is the part no source was
+found for — and §14.3 explains why that is probably deliberate.
+
+**Naming.** For recall, call it the **DTP — deviatoric trace projection**.
+
+### 14.2 The prior art solves exactly our problem — differently
+
+Selzer & Cirpka [Sel20] address our situation in groundwater terms:
+
+> "Accurate particle tracking requires element-wise mass-conservative,
+> **conforming** velocity fields. This condition is **not fulfilled by the
+> standard linear Galerkin finite element method**."
+
+That is our P1/P1 FOM, verbatim. Their remedy is to project onto **RTN₀** —
+the element §11.1 tested and rejected as rotation-blind. Note the asymmetry:
+they accept a *less expressive* element to gain conformity; the DTP keeps full
+expressiveness and gives conformity up. Cordes & Kinzelbach [Cor92] take a
+third route, a **patch-based postprocessing using only adjacent-element head
+gradients** to build a continuous flux field with no global solve.
+
+### 14.3 ⚠️ The measured objection: the DTP BREAKS flux continuity
+
+Selzer & Cirpka name a specific failure mode:
+
+> "the non-conforming property of the velocity field leads to severe numerical
+> artifacts, possibly including **particle stagnation** because the
+> approximated normal velocity component **points into opposite directions at
+> the two sites of an element interface**"
+
+`scripts/damage/test_face_stagnation.py` tests that claim on our field.
+cylA ts = 159, 101,612 interior faces, normal velocity compared from both
+sides **at the same face centroid**:
+
+| field | faces with opposite-sign `u·n` | relative jump p99 |
+|---|---|---|
+| **raw P1** | **0 / 101,612 (0.000 %)** | 0.0000 |
+| **DTP** | **1,043 / 101,612 (1.026 %)** | **1.0000** |
+
+✅ The raw P1 field is **exactly flux-continuous across faces** — which
+independently confirms §11.1's finding that Larson–Niklasson's premise failed
+because our fluxes were already continuous. ❌ **The DTP destroys that
+property**, creating sign-flipped faces at the rate the literature predicts
+would cause trouble.
+
+And the rate matches our own trajectory measurements:
+
+| quantity | value |
+|---|---|
+| faces with opposite-sign normal velocity | 1.026 % |
+| cylA particles above the p99 shift | 1.000 % |
+| cylA particles ending in a **different element** | 1.84 % |
+
+### 14.4 ⚠️ This NARROWS the claim of §6.2
+
+§6.2 argued the face jump is harmless because "a pathline integrator never
+evaluates a normal trace". That is **true for `ln J` and false for the
+trajectory**:
+
+- ✅ **`det F` / `ln J`**: every RK4 substage lands inside *some* element, and
+  in every element `div u = 0` to round-off. §4z measured 1.7e-18 across 59–78
+  face crossings per particle. **This conclusion stands.**
+- ❌ **Pathlines**: a particle meeting a sign-flipped face is pushed back from
+  both sides. The trajectory through such a face is not trustworthy, and ~1 %
+  of faces are of that kind.
+
+**So the honest scope is: the DTP is sound for the volumetric gate and
+questionable for individual pathlines through the affected faces.** That is a
+much narrower claim than this document originally made.
+
+### 14.5 ⚠️ A second objection we have NOT tested
+
+[McD08] and the tracer-particle literature report that a face-discontinuous
+reconstruction **degrades Runge–Kutta to first order in time**, because RK4
+assumes a continuous differentiable field. Our pathline validation (§4z) used
+a **fixed `dt`**, so it cannot see an order loss. **A `dt`-refinement study is
+required and has not been run.** Until it is, no claim about the DTP's time
+accuracy is supported.
+
+### 14.6 The route to fixing continuity
+
+The question "can we reuse HCT's machinery to make the DTP conforming?" now
+has a concrete answer, and HCT is probably not the vehicle:
+
+1. **Cordes–Kinzelbach patch postprocessing** [Cor92] is the closest fit: it
+   builds a continuous flux field from **adjacent-element gradients only**, no
+   global solve, which is the same locality that makes the DTP cheap. It is
+   the first thing to try.
+2. **Projecting the DTP result onto RTN₀** [Sel20] would restore conformity,
+   but RTN₀ is rotation-blind (§11.1) and an FSW field is rotation-dominated —
+   likely to trade one defect for a worse one.
+3. **HCT's Alfeld split** gives `C¹` continuity *within* the macro-element but
+   does not by itself make the normal trace continuous across macro-element
+   faces, and its pipeline begins with the gradient recovery the DTP replaces.
+   ⚠️ `run_tracking.py` already refuses `--divergence-free` with `hct_cubic`
+   (§7.6), because HCT's gradient varies inside the element and the trace
+   subtraction is then inexact. So they are **alternatives at the same
+   pipeline stage, not a stack.**
+
+**Recommendation: try (1).** It is local, cheap, published, and targets exactly
+the property measured broken in §14.3.
+
+---
+
+## References
+
+- **[Sel20]** Selzer, P. & Cirpka, O. A. (2020). Postprocessing of standard
+  finite element velocity fields for accurate particle tracking applied to
+  groundwater flow. *Computational Geosciences* (2020).
+  https://doi.org/10.1007/s10596-020-09969-y
+  — States our exact problem (P1 Galerkin FEM is not conforming, so particle
+  tracking on it is inconsistent) and solves it by projecting onto RTN₀.
+  Source of the particle-stagnation failure mode tested in §14.3.
+- **[Cor92]** Cordes, C. & Kinzelbach, W. (1992). Continuous groundwater
+  velocity fields and path lines in linear, bilinear, and trilinear finite
+  elements. *Water Resources Research* **28**(11), 2903–2911.
+  https://doi.org/10.1029/92WR01686
+  — Patch-based postprocessing giving a continuous flux field from
+  adjacent-element gradients only, with no global solve. The recommended route
+  to repairing the DTP's continuity (§14.6).
+- **[McD08]** McDermott, R. & Pope, S. B. (2008). The parabolic edge
+  reconstruction method (PERM) for Lagrangian particle advection. *Journal of
+  Computational Physics* **227**(11), 5447–5491.
+  https://doi.org/10.1016/j.jcp.2008.01.045
+  ⚠️ Fulltext not in the local collection; bibliographic details unverified.
+  — Subgrid velocity reconstruction with controlled divergence for particle
+  advection; source of the untested RK4 order-reduction concern (§14.5).
+- **[Rav16]** Ravu, B., Rudman, M., Metcalfe, G., Lester, D. R. & Khakhar,
+  D. V. (2016). Creating analytically divergence-free velocity fields from
+  grid-based data. *Journal of Computational Physics* **323**, 75–94.
+  https://doi.org/10.1016/j.jcp.2016.07.018
+  ⚠️ Fulltext not in the local collection; bibliographic details unverified.
+  — B-spline vector potential giving an analytically divergence-free field by
+  construction; the structured-grid counterpart to this problem.
+- **[Joh16]** Johnson, P. L. & Meneveau, C. (2016). A closure for Lagrangian
+  velocity gradient evolution in turbulence using recent deformation mapping
+  of initially Gaussian fields. *Journal of Fluid Mechanics* **804**, 387–419.
+  https://doi.org/10.1017/jfm.2016.551
+  ⚠️ Fulltext not in the local collection; bibliographic details unverified.
+  — Representative of the Lagrangian velocity-gradient literature in which
+  the deviatoric (trace-free) projection is the standard device for enforcing
+  incompressibility on `A`.
 
 ## Appendix A — Symbols
 
