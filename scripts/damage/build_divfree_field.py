@@ -1,4 +1,20 @@
-"""Build a divergence-free BDM1 field for one snapshot, by overlapping Schwarz.
+"""⚠️⚠️ SUPERSEDED -- the field this builds is UNUSABLE. See 4x/4y.
+
+The BDM1 patch solve produces a divergence-free field whose GRADIENT is ~1e6
+too large and ORTHOGONAL to the FOM's (cos = 0.0016, measured on the shipped
+C1_34.npz over 7.59M elements). It matches the centroid velocity only by
+cancellation between two huge wrong terms (|b|/|A xc| = 1.0000 exactly).
+Tracking integrates the GRADIENT -- det F and every damage accumulator depend
+on A -- so the output cannot be used however clean its divergence looks.
+
+✅ USE INSTEAD: run_tracking.py --divergence-free, which applies the closed
+form A' = A - (tr A/3) I in-kernel (DIVERGENCE_FREE_PLAN.md 4y, 4ab):
+divergence 3.0e-18 vs 9.2e-17, gradient cos 0.99998 vs 0.0016, and no solve.
+
+Kept because the diagnostics built on it (4t-4x) are the evidence for WHY a
+local patch solve cannot work here. Requires ALLOW_SUPERSEDED=1 to run.
+
+Build a divergence-free BDM1 field for one snapshot, by overlapping Schwarz.
 
     python3 build_divfree_field.py --case <post dir> --pattern 'cylA_{timestep}.pvtu' \
             --timestep 159 --out /scratch/.../divfree_159.npz
@@ -31,6 +47,26 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _refuse_unless_allowed():
+    """⚠️ Refuse to produce a field that cannot be used (4x).
+
+    An opt-out rather than a deletion: the diagnostics need this code path,
+    but nobody should get an unusable .npz by running the obvious script.
+    """
+    import os
+    if os.environ.get("ALLOW_SUPERSEDED") == "1":
+        print("⚠️  ALLOW_SUPERSEDED=1 -- building a field whose gradient is "
+              "~1e6 too large and orthogonal to the FOM's (4x). "
+              "Diagnostic use only.", file=sys.stderr)
+        return
+    sys.exit(
+        "REFUSING TO RUN: this builds a field whose gradient is ~1e6 too "
+        "large and ORTHOGONAL to the FOM's, which is unusable for tracking "
+        "or damage (DIVERGENCE_FREE_PLAN.md 4x).\n"
+        "Use  run_tracking.py --divergence-free  instead (4y).\n"
+        "To build anyway for diagnostics:  ALLOW_SUPERSEDED=1 python3 ...")
 
 
 _G = None
@@ -66,6 +102,7 @@ def _solve_one(sd):
 
 
 def main() -> int:
+    _refuse_unless_allowed()
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)

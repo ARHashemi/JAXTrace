@@ -12,6 +12,36 @@
 #SBATCH --output=/scratch/project_465002752/hashemia/logs/%x_%A_%a.out
 #SBATCH --error=/scratch/project_465002752/hashemia/logs/%x_%A_%a.err
 # =============================================================================
+# ⚠️⚠️ SUPERSEDED AND DISABLED. DO NOT RUN THIS TO PRODUCE A FIELD.
+#
+# The BDM1 patch solve this drives produces a field that is divergence-free
+# but whose GRADIENT is ~1e6 too large and ORTHOGONAL to the FOM's
+# (cos = 0.0016, measured on the shipped C1_34.npz over 7.59M elements). It
+# matches the centroid velocity only by cancellation between two huge wrong
+# terms. Tracking integrates the GRADIENT -- det F and every damage
+# accumulator depend on A -- so the output is UNUSABLE however clean its
+# divergence looks. See docs/damage/DIVERGENCE_FREE_PLAN.md 4x.
+#
+# ✅ THE REPLACEMENT is the closed form A' = A - (tr A/3) I, applied in-kernel
+# by run_tracking.py --divergence-free (4y, 4ab). It is better on every axis
+# at once: divergence 3.0e-18 vs 9.2e-17, gradient cos 0.99998 vs 0.0016, and
+# no solve at all -- 13 s per snapshot against 1511 s on 16 cores, or zero
+# extra cost when done in-kernel.
+#
+# This script is kept because the diagnostics built on it (4t-4x) are the
+# evidence for WHY the patch approach fails, and that reasoning is worth
+# keeping. It refuses to run without ALLOW_SUPERSEDED=1.
+# =============================================================================
+if [ "${ALLOW_SUPERSEDED:-0}" != "1" ]; then
+    cat >&2 <<'MSG'
+REFUSING TO RUN: this sweep produces a field whose gradient is ~1e6 too large
+and orthogonal to the FOM's, which is unusable for tracking or damage.
+Use  run_tracking.py --divergence-free  instead (DIVERGENCE_FREE_PLAN.md 4y).
+To run anyway for diagnostic purposes:  ALLOW_SUPERSEDED=1 sbatch ...
+MSG
+    exit 2
+fi
+# =============================================================================
 # BDM1 divergence-free projection across the pin-shape families.
 #
 #   sbatch sbatch_divfree_sweep.sh                # all 16 cases
