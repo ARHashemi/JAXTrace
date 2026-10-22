@@ -513,6 +513,31 @@ fix is to subtract the isotropic part of the Jacobian **pointwise** in the
 integrator's gradient rather than as an `(x − x_c)` field — which changes what
 `A` means downstream and is a separate design question.
 
+### 7.7 ✅ It does not disturb the masked tool region
+
+The kernel zeroes velocity inside the tool with a level-set mask,
+`val = where(ls_val >= 0, val, 0)` — "no material here, so no flow and no
+damage".
+
+The concern was real enough to test: the wrapper returns
+`u − (tr(Jac)/3)(pos − x_c)`, and inside the tool `u = 0` but `(pos − x_c)` is
+**not** zero. If `tr(Jac)` were non-zero there, the correction would **inject
+velocity into a region that must stay stationary** — and the mask is a step
+function, so an element straddling the interface mixes masked and unmasked
+nodes.
+
+✅ **Measured clean**, including the straddling case:
+
+| case | mean `‖u_raw‖` | mean `‖u_wrapped‖` | injected where `u_raw = 0` |
+|---|---|---|---|
+| all 4 nodes inside the tool | 0.000e+00 | 0.000e+00 | **0.000e+00** |
+| all 4 outside | 7.07e-01 | 7.37e-01 | 0.000e+00 |
+| **straddling the interface** | 3.52e-01 | 3.81e-01 | **0.000e+00** |
+
+The reason is structural rather than lucky: `jnp.where` has **zero gradient on
+the masked side**, so `tr(Jac) = 0` exactly where `u = 0`, and the correction
+term vanishes together with the velocity. Nothing is injected.
+
 ⚠️ This is also why `--divergence-free` **requires `--damage-divergence
 analytic`** (the default). The alternative, `field`, reads a *precomputed
 nodal* `div_u` built from the raw P1 gradient — it cannot respond to the
@@ -689,6 +714,8 @@ ALGORITHM 5 — Full tracking run with --divergence-free
 | `run_tracking.py` | CLI `--divergence-free`; the parse-time guard; the centroid upload at stage [3/7]; the `det F` gate report with the dtype-floor disclosure. |
 | `scripts/damage/test_divfree_kernel_equiv.py` | Pins Algorithm 2 against Algorithm 1 (5.4e-15 over 40 tets), with a sanity check that the test fields actually carry divergence so the test cannot be vacuous. |
 | `scripts/damage/test_pathline_lnj.py` | The independent validator: pure numpy, no JAX, marches the same seeds through raw and corrected fields and compares `ln J` and trajectories. |
+| `scripts/damage/test_divfree_reconstructions.py` | Pins §7.6: which reconstructions the projection is exact for, and that the leftover divergence equals `−(∇s·(x−x_c))`. Guards against silently unblocking `vertex_taylor` / `hct_*`. |
+| `scripts/damage/test_divfree_levelset.py` | Pins §7.7: nothing is injected into the level-set-masked tool region, including an element straddling the interface. |
 | `scripts/damage/test_closed_form_divfree.py` | Whole-snapshot verification across cases: divergence, preservation, gradient alignment. |
 | `scripts/damage/test_local_order.py` | Proves the P1 data is exactly affine (model order is not the problem) and quantifies the irreducible repair cost. |
 | `scripts/damage/test_divfree_detf.sh` | The two-arm `det F` gate on LUMI. Detects the PVTU stem from disk. |
