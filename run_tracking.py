@@ -3933,6 +3933,22 @@ def main():
                       f"{float(np.median(_dev)):.3e}  p99 "
                       f"{float(np.percentile(_dev, 99)):.3e}  max "
                       f"{float(_dev.max()):.3e}")
+                # ⚠️ A ZERO HERE IS A FLOOR, NOT A MEASUREMENT. ln_J is
+                # accumulated in the run's working precision, and in float32
+                # exp(x) rounds to exactly 1.0 for |x| below ~6e-8 (eps/2 at
+                # 1.0 is 6.0e-8). So |det F - 1| == 0 means only
+                # "|ln_J| < ~6e-8" -- it does NOT mean the integral vanished.
+                # Say so, rather than letting a reader quote exactness that
+                # the dtype cannot support. (The divergence-free field
+                # measures 1.7e-18 in float64, ten orders below this floor,
+                # so the floor is the honest report of a real pass.)
+                _resolution = float(np.spacing(np.array(1.0, dtype=ln_J.dtype)))
+                if float(_dev.max()) == 0.0:
+                    print(f"  [damage]   ⚠️  |det F - 1| is identically 0 in "
+                          f"{np.dtype(ln_J.dtype).name}: this is the dtype "
+                          f"FLOOR (|ln_J| < {_resolution/2:.1e}), not an "
+                          f"exact zero. Re-run with --precision float64 to "
+                          f"resolve the true value.")
                 # ⚠️ THE GATE MUST NOT BE READ FROM THE MEDIAN ALONE. A median
                 # of 1.9e-03 with a p99 of 2.8e-01 is NOT a passing field: the
                 # p99 is the population that would be mistaken for a void.
