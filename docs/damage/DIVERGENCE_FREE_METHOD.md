@@ -933,6 +933,16 @@ bash scripts/damage/test_divfree_detf.sh          # both arms
 5. **Other cases.** The projection is verified on A2, B1, C1, D1, D2. The
    remaining pin-shape cases are untested, though nothing in the method is
    case-specific.
+6. ⚠️ **The octree cache key includes the node-position dtype**, so a
+   `--precision float64` run MISSES a cache built at float32 and rebuilds
+   (~20 min) and then stores a second ~570 MB entry for *the same geometry*.
+   `compute_cache_key()` hashes `node_positions` content **and dtype**
+   (`jaxtrace/gpu/search/octree_cache.py:144`), and the loader casts positions
+   to the run's precision (`mesh_loader_timedep.py:327`). The octree is a
+   purely geometric structure, so this is finer-grained than it needs to be.
+   Found while projecting the timeline of the float64 gate arms; not a
+   correctness problem, but it doubles cache storage per case whenever
+   precision is varied. Worth keying on positions cast to a canonical dtype.
 
 ---
 
