@@ -59,9 +59,13 @@ def load_mesh_from_pvtu(
     """
     # Find PVTU file
     if mesh_path.is_dir():
-        pvtu_files = list(mesh_path.glob("*.pvtu"))
+        # ⚠️ .pvtu first, then serial .vtu: a case that has both should use
+        # the partitioned manifest, which carries every piece.
+        pvtu_files = sorted(mesh_path.glob("*.pvtu")) or sorted(
+            mesh_path.glob("*.vtu"))
         if not pvtu_files:
-            raise FileNotFoundError(f"No PVTU files in {mesh_path}")
+            raise FileNotFoundError(
+                f"No .pvtu or .vtu files in {mesh_path}")
         mesh_file = pvtu_files[0]
     else:
         mesh_file = mesh_path
@@ -72,10 +76,19 @@ def load_mesh_from_pvtu(
     # Fail early and clearly if the file is missing rather than letting VTK
     # return a null output that crashes later with 'NoneType has no GetData'.
     if not Path(mesh_file).exists():
-        raise FileNotFoundError(f"PVTU file not found: {mesh_file}")
+        raise FileNotFoundError(f"mesh file not found: {mesh_file}")
 
-    # Load with VTK
-    reader = vtk.vtkXMLPUnstructuredGridReader()
+    # Load with VTK.
+    # ⚠️ PICK THE READER BY EXTENSION. vtkXMLPUnstructuredGridReader handles
+    # the PARTITIONED .pvtu (a manifest pointing at .vtu pieces) and fails on
+    # a SERIAL .vtu with "Cannot find PUnstructuredGrid element in file",
+    # surfacing here as an empty output. Most PinShapes cases ship 167 serial
+    # .vtu snapshots rather than .pvtu, so hard-coding the parallel reader
+    # made them unloadable.
+    if str(mesh_file).lower().endswith(".vtu"):
+        reader = vtk.vtkXMLUnstructuredGridReader()
+    else:
+        reader = vtk.vtkXMLPUnstructuredGridReader()
     reader.SetFileName(str(mesh_file))
     reader.Update()
     output = reader.GetOutput()
