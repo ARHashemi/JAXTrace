@@ -540,7 +540,59 @@ diffusive, and it would smear exactly the sharp deficits we are hunting. The
 flux-normalised particle density gets the same information from machinery that
 already exists and already works.
 
-### 4.5 ⚠️ Recommendation
+### 4.5 ✅ MEASURED ON cylA — and the apparent voids are an artefact
+
+`scripts/damage/flux_normalised_density.py` and
+`plot_flux_normalised_density.py`, run on the cylA DTP arm (293,455
+particles, 2,684 steps) against the FOM snapshot 159.
+
+⚠️ **Two things had to be fixed before the numbers meant anything**, and both
+are the kind of error that produces confident nonsense:
+
+1. **The cloud is a thin slab** (extent ratios 6 : 4.6 : 1). A cubic voxel
+   grid left **0.7 % of voxels occupied** at 2.7 particles each — sampling
+   noise, not a density field. Anisotropic bins (≈cubic *in space*) raised
+   occupancy to **29.1 %**.
+2. **Escaped particles** sit frozen at their last position and pile a false
+   spike at the outlet. Dropped.
+
+**The result, with the boundary control that the first pass lacked:**
+
+| measure | deficit < 30 %, all occupied | **interior only** |
+|---|---|---|
+| raw density `n` | 4.91 % | **0.00 %** |
+| flux-normalised `n/\|u\|` | 5.27 % | **0.00 %** |
+
+✅ **Every apparent deficit is a cloud-BOUNDARY voxel** — partly filled for a
+purely geometric reason. Requiring all six face-neighbours to be occupied
+(51.7 % of occupied voxels qualify) leaves **zero** deficits in either
+measure. The panel-5/panel-6 pair shows it directly: 133 red voxels tracing
+the cloud outline, then an empty panel.
+
+⚠️ **And the normalisation is a NO-OP on this case, for a measurable reason.**
+Over the *occupied* voxels the speed spans only
+
+| | `\|u\|` |
+|---|---|
+| p01 | 6.34e-03 |
+| p50 | 6.59e-03 |
+| p99 | 6.82e-03 |
+| **range** | **1.08×** |
+
+Dividing by a quantity that varies by 8 % cannot change the map, which is
+exactly what the `(n/\|u\|)/n` panel shows — flat grey at 1.0. The mesh-wide
+speed range is far larger, but **the particles sit in a narrow band of it**.
+So this case does not test the discrimination; it only establishes that there
+is nothing to discriminate.
+
+**Conclusion for the original question:** the voids visible in ParaView on
+cylA are **not** material deficits, and they are **not** a `1/\|u\|` artefact
+either. They are the **edge of the particle cloud** — the seeded block has
+simply been deformed, and its boundary looks like a void when rendered as
+points. ✅ This is consistent with §0.2 (the cloud relaxing from a lattice)
+and with `det F` being clean at 6.1e-06.
+
+### 4.6 ⚠️ Recommendation
 
 **Do §4.2 now, in post-processing.** It is a division of two existing fields,
 it directly answers "is this void real or is the flow just fast here", and it
