@@ -74,7 +74,16 @@ def main() -> int:
               f"{v.max():>11.4e}")
 
     # ── final positions, matched by id ──────────────────────────────────────
-    print(f"\n── FINAL POSITION vs '{a.ref}'  (matched by ParticleID, alive in both) ──")
+    # ⚠️ THIS IS A DIFFERENCE FROM THE REFERENCE MODEL, NOT AN ACCURACY.
+    # cylA has no analytic solution, so "same elem" means "ended in the same
+    # element as the reference run" -- i.e. how LITTLE this model moved things.
+    # A high percentage means closest to the reference, which is only a merit
+    # if the reference is right. For accuracy against a KNOWN answer, use
+    # compare_rotcyl_analytic.py on rot_cyl_2026, where the analytic field is
+    # the ground truth and the ranking came out the other way round
+    # (hct more accurate than dtp).
+    print(f"\n── FINAL POSITION vs '{a.ref}'  (DIFFERENCE from the reference "
+          f"model, NOT accuracy; matched by ParticleID, alive in both) ──")
     print(f"   {'model':10s} {'matched':>9s} {'p50':>11s} {'p99':>11s} "
           f"{'max':>11s} {'same elem':>10s}")
     for tag, D in runs.items():
