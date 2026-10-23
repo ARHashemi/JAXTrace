@@ -85,7 +85,7 @@ fi
 OUT="$OUT_ROOT/${CASE}_${VELOCITY_MODEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 echo "=============================================================="
-echo " case $CASE   model $VELOCITY_MODEL   $STEM_*.$EXT  $VEL_START..$VEL_END"
+echo " case $CASE   model $VELOCITY_MODEL   ${STEM}_*.${EXT}  $VEL_START..$VEL_END"
 echo " out  $OUT"
 echo " node $(hostname)  $(date -Is)"
 echo "=============================================================="
