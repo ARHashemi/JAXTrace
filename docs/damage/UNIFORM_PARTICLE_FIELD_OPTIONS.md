@@ -304,8 +304,15 @@ condition is wrong. A rotational closure is needed — see §2.5.
 equations, M = the patch's element count, typically 5–20) gives patch
 velocities `v_i^e` whose **normal component is continuous across every patch
 boundary** and which **conserve mass exactly at every node**. Pathlines can
-then be integrated — and within each patch a streamfunction interpolation even
-gives them in closed form, with no time stepping at all.
+then be integrated normally.
+
+⚠️ **The paper also offers a streamfunction interpolation giving pathlines in
+closed form with no time stepping — and that part does NOT transfer to us.**
+It is 2D-specific, and the related single-step constructions of [Pol88] and
+[Lu94] depend on a block-centred finite-difference cell where each velocity
+component is a function of its own coordinate alone. Our tetrahedral affine
+map `u = Ax + b` has no such separation. **The benefit of this route for us is
+the flux continuity, nothing more.**
 
 ### 2.4 Why this is the right shape of fix for us
 
@@ -430,6 +437,127 @@ visual density of the particle cloud.
 
 ---
 
+---
+
+## 4. Detecting a void WITHOUT relying on markers
+
+⚠️ **The objection that prompted this section:** `det F` and the damage
+indicators are carried *by particles*. If a region empties of particles, there
+is nothing there to carry an indicator — the very place we most want to
+measure is the place we have no data. And a particle-density map cannot
+distinguish a real void from the `1/|u|` advection artefact of §3.1.
+
+Both objections are answerable, and the fix is cheap.
+
+### 4.1 The separation principle
+
+For steady incompressible flow, mass conservation along a stream tube gives
+
+$$\rho\,|u|\,A = \text{const} \;\;\Longrightarrow\;\; |u|\,A = \text{const}$$
+
+so the tube **narrows where the flow is fast**, and a purely advected particle
+cloud has number density
+
+$$n(x) \;\propto\; \frac{1}{A(x)} \;\propto\; |u(x)|$$
+
+⚠️ Therefore **low particle density is ambiguous**: it means *either* the flow
+is slow there (an artefact) *or* material genuinely left (a void).
+
+The resolution is to divide the artefact out. Define the **flux-normalised
+density**
+
+$$\boxed{\;\hat\rho(x) \;=\; \frac{n(x)}{|u(x)|}\;}$$
+
+which is **constant** for a purely advected incompressible cloud. Any
+*deviation from constant* is then a genuine material deficit, independent of
+how fast the flow is.
+
+✅ **Verified on a 1D stream tube** with a known synthetic void (60 % deep, at
+`x = 0.65`) superimposed on a varying speed profile:
+
+| field | minimum value | location of minimum |
+|---|---|---|
+| raw particle density | 0.167 | **x = 0.000** ❌ (merely the slowest point) |
+| **flux-normalised** `n/\|u\|` | **0.400** | **x = 0.649** ✅ |
+
+The raw map points at the wrong place; the normalised map finds the void and
+recovers its depth exactly (`0.40 = 1 − 0.6`).
+
+### 4.2 Why this needs no new machinery
+
+`run_tracking.py` already ships an **online density-field estimator**
+(`--density-enable`) that deposits particles onto a voxel grid with an SPH
+kernel (Wendland C2 by default, with fixed/Scott/Silverman/kNN bandwidths).
+That gives `n(x)` on an Eulerian grid.
+
+And `|u(x)|` is available on the same grid from the FOM velocity field, which
+is already loaded.
+
+⚠️ So the whole diagnostic is **one division of two fields we already have**:
+
+```
+rho_hat = density_voxels / max(|u|_voxels, eps)
+```
+
+normalised so that the far field reads 1. ✅ **No new tracking, no kernel
+change, no extra memory** — it is a post-process on outputs that exist.
+
+### 4.3 ⚠️ The limits of this, stated plainly
+
+1. **An empty cell gives no signal at all.** If a region is *completely*
+   evacuated, `n = 0` and `\hat\rho = 0`, which is a detection — but nothing
+   carries an indicator there, so we learn *that* it is empty, not the damage
+   history of the material that left. That is intrinsic to a Lagrangian
+   method, not a defect of this normalisation.
+2. **It assumes steady flow per snapshot.** The stream-tube argument uses
+   `|u| A = const` along a tube, which holds for a steady field. With 166
+   cycled snapshots it holds per snapshot and approximately in the mean.
+3. **It cannot distinguish "material left" from "material never arrived".**
+   A region downstream of a stagnation point may be sparse because no pathline
+   from the seed plane reaches it. ⚠️ Flow-adapted seeding (§1) helps here by
+   making the seed cover the flux rather than the area, but a coverage check
+   (which seed cells map where) is the honest companion diagnostic.
+4. ⚠️ **It is a KINEMATIC indicator, not a mechanism.** It says where material
+   is missing, not why. Pairing it with the pathline indicators — `det F`
+   along the surviving paths, `ln_phi`, `w_bond` — is what connects a deficit
+   to a cause.
+
+### 4.4 The Eulerian alternative, for completeness
+
+A fully marker-free route exists: solve a scalar **advection equation for a
+material fraction** `φ` on the mesh,
+
+$$\frac{\partial\varphi}{\partial t} + u\cdot\nabla\varphi = 0,
+\qquad \varphi(t=0)=1$$
+
+with `φ = 0` entering at the inlet of any region that should be empty. For a
+divergence-free `u` this conserves `∫φ` exactly, and `φ < 1` marks a deficit
+directly on the mesh with no particles at all.
+
+⚠️ **Why I do not recommend it here.** It needs a stabilised advection solver
+(the FOM's own P1/P1 stabilisation problem all over again), it is numerically
+diffusive, and it would smear exactly the sharp deficits we are hunting. The
+flux-normalised particle density gets the same information from machinery that
+already exists and already works.
+
+### 4.5 ⚠️ Recommendation
+
+**Do §4.2 now, in post-processing.** It is a division of two existing fields,
+it directly answers "is this void real or is the flow just fast here", and it
+costs an afternoon rather than a method.
+
+Concretely:
+1. re-run (or reuse) one cylA/A-family arm with `--density-enable`;
+2. sample `|u|` onto the same voxel grid from the FOM snapshot;
+3. form `\hat\rho = n/|u|`, normalise to the far field;
+4. overlay the surviving particles' `det F` and `ln_phi` to connect deficits
+   to damage history.
+
+If `\hat\rho` is flat everywhere, the apparent voids in ParaView are **pure
+advection artefact** and the search for a velocity-field fix is over. If it
+shows localised deficits, those are the candidate void sites — and they can
+then be compared against the indicators carried by whatever particles remain
+nearby.
 ## References
 
 - **[Cor92]** Cordes, C. & Kinzelbach, W. (1992). Continuous groundwater
@@ -447,23 +575,74 @@ visual density of the particle cloud.
 - **[Ver00]** Verma, V., Kao, D. & Pang, A. (2000). A flow-guided streamline
   seeding strategy. *Proceedings Visualization 2000*, 163–170.
   https://doi.org/10.1109/VISUAL.2000.885690
-  — Seeding placed by flow features rather than uniformly, with a Poisson-disk
-  distribution to avoid clustering. The visualization-side counterpart to §1.
-  ⚠️ Fulltext not in the local collection.
+  — ✅ Fulltext read. Seeds by **flow features**: identify critical points,
+  segment the field into regions containing one each, seed each with a
+  template matched to the critical-point type, then fill the remainder with a
+  **Poisson-disk** distribution *"to minimize closely spaced seed points"*.
+  ⚠️ **Its goal is not ours.** It optimises for *visual* coverage of flow
+  structure with few streamlines — explicitly *"aesthetically pleasing"* — not
+  for each marker carrying equal material. The Poisson-disk step is
+  nevertheless directly reusable as a refinement of §1.3: after inverting the
+  cumulative flux, a Poisson-disk relaxation within the flux-matched
+  distribution would remove residual clustering without disturbing the
+  flux-per-particle invariant.
 - **[Pol88]** Pollock, D. W. (1988). Semianalytical computation of path lines
   for finite-difference models. *Ground Water* **26**(6), 743–750.
   https://doi.org/10.1111/j.1745-6584.1988.tb00425.x
   — The flux-conserving semi-analytical pathline method that [Cor92]
-  generalises from finite differences to finite elements.
-  ⚠️ Fulltext not in the local collection; cited via [Cor92].
+  generalises from finite differences to finite elements. ✅ Fulltext in the
+  local collection as a **scan without text**; read here via `tesseract` OCR
+  of the 300 dpi page images.
+  **Its core assumption:** *"each directional velocity component varies
+  linearly within a grid cell in its own coordinate direction"* — the
+  x-velocity varies linearly in x but is independent of y and z. That makes
+  each component separately integrable in closed form, so *"given the initial
+  position of a particle anywhere in a cell, the coordinates of any other
+  point along its path line within the cell, and the time of travel between
+  them, can be computed directly"*, and for steady flow the exit point is
+  obtained **in a single step** with no time stepping.
+  ⚠️ **It does not transfer to us directly:** the construction is for
+  block-centred finite-difference *cells*, where a component can be made a
+  function of its own coordinate alone. On an unstructured tetrahedral mesh
+  with a full affine map `u = Ax + b` there is no such separation, so the
+  single-step exit point is not available. What *does* transfer is the idea
+  behind §2: use the flux information the flow solution already contains
+  rather than re-deriving velocity by differentiation.
+- **[Lu94]** Lu, N. (1994). A semianalytical method of path line computation
+  for transient finite-difference groundwater flow models. *Water Resources
+  Research* **30**(8), 2449–2459. https://doi.org/10.1029/94WR01219
+  — ✅ Fulltext read. Extends [Pol88] to **transient** flow by interpolating
+  the particle velocity **linearly in both space and time** within each cell
+  and time step, then integrating the total derivative analytically:
+  *"errors are much smaller than in numerical integration schemes."*
+  ⚠️ **Why this one matters for us specifically:** our FOM is unsteady (166
+  cycled snapshots) and §2.5.4 flagged that [Cor92] treats transience only as
+  a sequence of steady steps. [Lu94] is the published answer to exactly that
+  gap. It shares [Pol88]'s finite-difference cell restriction, so it is a
+  guide to the *time* treatment rather than a drop-in method.
 
-### Fulltexts that would help
+### ⚠️ What reading [Pol88], [Lu94] and [Ver00] changed
 
-If you want to go further on either route, these would be worth having:
-1. **[Ver00]** — for the seeding, particularly its Poisson-disk step, which is
-   a more sophisticated answer to clustering than inverse-transform sampling.
-2. **[Pol88]** — the semi-analytical pathline construction, which is what
-   makes [Cor92] attractive beyond the continuity repair: pathlines in closed
-   form per patch, with no time stepping and therefore no RK4 truncation.
-3. Anything on **3D** Cordes-type patch postprocessing — the 1992 paper only
-   sketches the 3D case, and §2.5.1 is the gap.
+All three are now read. The updates above are the substance; the summary:
+
+- **The semi-analytical route is narrower than I implied.** [Pol88] and
+  [Lu94] both depend on a **block-centred finite-difference cell**, where each
+  velocity component can be made a function of its own coordinate alone. Our
+  tetrahedral affine map `u = Ax + b` has no such separation, so "pathlines in
+  closed form, no time stepping" — which I listed as an attraction of
+  [Cor92] — **does not transfer**. [Cor92]'s streamfunction interpolation is
+  2D-specific for the same reason. ⚠️ **The attraction of §2 is the flux
+  continuity alone**, and I should not have advertised the closed-form
+  pathlines.
+- **[Lu94] is the right reference for the unsteady gap** flagged in §2.5.4,
+  even though its method is not directly usable: interpolate velocity linearly
+  in space *and time*, then integrate the total derivative.
+- **[Ver00]'s Poisson-disk step is a genuine refinement of §1**, usable on top
+  of flux-matched seeding.
+
+### Still worth having
+
+1. Anything on **3D** Cordes-type patch postprocessing on **simplices** — the
+   1992 paper only indicates the 3D case, and §2.5.1 remains the gap.
+2. A treatment of flux-continuous reconstruction for **rotational** flow,
+   which is the §2.5.2 closure problem and the one real risk in route 2.
