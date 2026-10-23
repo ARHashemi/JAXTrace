@@ -222,13 +222,24 @@ case "$ARM" in
   df)   run_arm df "--gradient-recovery 0 --damage-divergence analytic --divergence-free" ;;
   dfab) run_arm p1_analytic "--gradient-recovery 0 --damage-divergence analytic"
         run_arm df "--gradient-recovery 0 --damage-divergence analytic --divergence-free" ;;
+  # ⚠️ The four-way comparison via the single --velocity-model key. cylA
+  # already has raw / hct / dtp from 2026-10-19..22; vm_dtphct is the missing
+  # one. Each arm prints what the key resolved to.
+  vmraw)  run_arm vm_raw     "--velocity-model raw     --damage-divergence analytic" ;;
+  vmdtp)  run_arm vm_dtp     "--velocity-model dtp     --damage-divergence analytic" ;;
+  vmhct)  run_arm vm_hct     "--velocity-model hct     --damage-divergence analytic" ;;
+  vmboth) run_arm vm_dtphct  "--velocity-model dtp+hct --damage-divergence analytic" ;;
+  vmall)  run_arm vm_raw     "--velocity-model raw     --damage-divergence analytic"
+          run_arm vm_dtp     "--velocity-model dtp     --damage-divergence analytic"
+          run_arm vm_hct     "--velocity-model hct     --damage-divergence analytic"
+          run_arm vm_dtphct  "--velocity-model dtp+hct --damage-divergence analytic" ;;
   hcta) run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
   both) run_arm p1  "--gradient-recovery 0 --damage-divergence field"
         run_arm hct "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence field" ;;
   all)  run_arm p1           "--gradient-recovery 0 --damage-divergence field"
         run_arm p1_analytic  "--gradient-recovery 0 --damage-divergence analytic"
         run_arm hct_analytic "--gradient-recovery 1 --recovery-method hct_cubic --damage-divergence analytic" ;;
-  *) echo "ARM must be p1 | hct | p1a | hcta | df | dfab | both | all" >&2; exit 2 ;;
+  *) echo "ARM must be p1|hct|p1a|hcta|df|dfab|both|all|vmraw|vmdtp|vmhct|vmboth|vmall" >&2; exit 2 ;;
 esac
 
 echo
